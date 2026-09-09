@@ -7,6 +7,8 @@ type ModelCostBreakdownProps = {
   period: UsagePeriod;
 };
 
+const donutCircumference = 2 * Math.PI * 46;
+
 const currency = new Intl.NumberFormat("zh-CN", {
   style: "currency",
   currency: "CNY",
@@ -39,9 +41,9 @@ export function ModelCostBreakdown({ period }: ModelCostBreakdownProps) {
                 {period.modelCosts.map((model, index) => {
                   const segment = segments[index];
                   const style = {
-                    "--segment-length": segment.length,
-                    "--segment-rest": 100 - segment.length,
-                    "--segment-offset": segment.offset,
+                    "--segment-length": (segment.length / 100) * donutCircumference,
+                    "--segment-rest": ((100 - segment.length) / 100) * donutCircumference,
+                    "--segment-offset": (segment.offset / 100) * donutCircumference,
                     stroke: model.color,
                   } as CSSProperties;
                   return (
@@ -50,7 +52,6 @@ export function ModelCostBreakdown({ period }: ModelCostBreakdownProps) {
                       cx="60"
                       cy="60"
                       r="46"
-                      pathLength="100"
                       style={style}
                       key={model.name}
                     />

@@ -13,6 +13,7 @@ export type ModelCost = {
 };
 
 export type UsagePeriod = {
+  periodKey: PeriodKey;
   heading: string;
   summaryLead: string;
   summaryTail: string;
@@ -44,6 +45,7 @@ export const periodLabels: Record<PeriodKey, string> = {
 
 export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
   day: {
+    periodKey: "day",
     heading: "今日总账",
     summaryLead: "今天用量平稳",
     summaryTail: "，花费比昨天同期少 8%。",
@@ -70,6 +72,7 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
     ],
   },
   week: {
+    periodKey: "week",
     heading: "本周总账",
     summaryLead: "本周调用更频繁",
     summaryTail: "，但单次平均花费下降 11%。",
@@ -96,6 +99,7 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
     ],
   },
   month: {
+    periodKey: "month",
     heading: "九月总账",
     summaryLead: "本月用量持续上升",
     summaryTail: "，花费仍低于八月同期。",
@@ -122,3 +126,5 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
     ],
   },
 };
+
+
