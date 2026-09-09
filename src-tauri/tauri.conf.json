@@ -12,9 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "lumen",
-        "width": 800,
-        "height": 600
+        "title": "Lumen",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 900,
+        "minHeight": 620,
+        "center": true
       }
     ],
     "security": {
