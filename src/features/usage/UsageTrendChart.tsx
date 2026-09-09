@@ -9,9 +9,11 @@ import {
   resampleSeries,
 } from "./trendInteraction";
 import type { UsagePeriod } from "./usageData";
+import { isCurrentPeriod } from "./ledgerQuery";
 
 type UsageTrendChartProps = {
   period: UsagePeriod;
+  anchor?: Date;
 };
 
 type ChartSize = {
@@ -36,12 +38,15 @@ function useCurrentMinute() {
   return now;
 }
 
-export function UsageTrendChart({ period }: UsageTrendChartProps) {
+export function UsageTrendChart({ period, anchor }: UsageTrendChartProps) {
   const plotRef = useRef<HTMLDivElement>(null);
   const [chartSize, setChartSize] = useState<ChartSize>(fallbackChartSize);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [isHovering, setIsHovering] = useState(false);
-  const now = useCurrentMinute();
+  const liveNow = useCurrentMinute();
+  const now = anchor && !isCurrentPeriod("day", anchor, liveNow)
+    ? new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), 23, 59)
+    : liveNow;
   const id = useId().replace(/:/g, "");
   const gradientId = `usage-area-${id}`;
   const clipId = `usage-clip-${id}`;
@@ -259,6 +264,4 @@ export function UsageTrendChart({ period }: UsageTrendChartProps) {
     </article>
   );
 }
-
-
 

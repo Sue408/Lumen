@@ -1120,3 +1120,630 @@ button:focus-visible {
 
 
 
+
+/* History navigation and ledger detail */
+.header-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+}
+
+.quiet-button,
+.today-button {
+  min-height: 2rem;
+  padding: 0.35rem 0.75rem;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+}
+
+.quiet-button:hover,
+.today-button:hover {
+  color: var(--ink);
+  border-color: var(--ochre);
+  background: rgba(238, 234, 227, 0.45);
+}
+
+.period-navigator {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-height: 2rem;
+  color: var(--ink-muted);
+}
+
+.period-navigator > button:first-child,
+.period-navigator > button:nth-child(3) {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.period-navigator > button:hover:not(:disabled) {
+  border-color: var(--ochre);
+  background: #f0ece5;
+}
+
+.period-navigator button:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
+.period-navigator strong {
+  min-width: 12rem;
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.today-button {
+  margin-left: 0.25rem;
+}
+
+.date-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+}
+
+.date-jump input,
+.ledger-toolbar select,
+.ledger-toolbar input {
+  height: 2rem;
+  padding: 0.25rem 0.5rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+.date-jump input:focus,
+.ledger-toolbar select:focus,
+.ledger-toolbar input:focus {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.ledger-page {
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.ledger-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.ledger-header h1 {
+  margin: 0;
+  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.875rem;
+  font-weight: 600;
+}
+
+.ledger-period {
+  margin: 0.45rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.ledger-toolbar label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+}
+
+.ledger-toolbar select {
+  min-width: 8rem;
+}
+
+.ledger-search input {
+  width: 16rem;
+}
+
+.ledger-count {
+  margin-left: auto;
+  padding-bottom: 0.45rem;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-list {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.ledger-list-head,
+.ledger-row {
+  display: grid;
+  grid-template-columns: 7rem minmax(12rem, 1fr) minmax(9rem, auto) 6rem;
+  align-items: center;
+  gap: 1rem;
+}
+
+.ledger-list-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.75rem 0;
+  color: var(--ink-muted);
+  background: var(--paper);
+  font-size: 0.75rem;
+}
+
+.ledger-row {
+  min-height: 4.25rem;
+  border-top: 1px solid rgba(222, 217, 208, 0.7);
+  font-size: 0.8125rem;
+}
+
+.ledger-row time {
+  color: var(--ink-muted);
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-row time strong {
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+.ledger-row div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.ledger-row div strong {
+  font-weight: 600;
+}
+
+.ledger-row div span {
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+}
+
+.ledger-number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-empty {
+  padding: 3rem 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+@media (max-width: 62.5rem) {
+  .header-actions {
+    gap: 0.75rem;
+  }
+
+  .period-navigator strong {
+    min-width: 10rem;
+  }
+}
+
+@media (max-width: 50rem) {
+  .page-header,
+  .ledger-header {
+    flex-direction: column;
+  }
+
+  .header-actions {
+    align-items: center;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .period-navigator {
+    flex-wrap: wrap;
+  }
+
+  .date-jump {
+    margin-left: 0;
+  }
+
+  .ledger-search input {
+    width: 11rem;
+  }
+
+  .ledger-list-head,
+  .ledger-row {
+    grid-template-columns: 5.5rem minmax(10rem, 1fr) 7rem 5rem;
+    gap: 0.625rem;
+  }
+}
+
+.weekly-bars {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  align-items: end;
+  gap: clamp(0.5rem, 2vw, 1.5rem);
+  height: 100%;
+  min-height: 0;
+  padding: 1rem 0 0.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.bar-column {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 1.75rem;
+  align-items: end;
+  gap: 0.35rem;
+  height: 100%;
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.bar-track {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.22rem;
+  width: 100%;
+  height: 100%;
+}
+
+.bar-current,
+.bar-previous {
+  display: block;
+  width: min(1.15rem, 35%);
+  min-height: 0.15rem;
+  border-radius: 2px 2px 0 0;
+  transform-origin: center bottom;
+  animation: bar-rise 350ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.bar-current {
+  background: var(--ochre);
+}
+
+.bar-previous {
+  background: #d2cdc4;
+}
+
+.bar-column.is-empty .bar-track::after {
+  width: 55%;
+  height: 1px;
+  content: "";
+  background: var(--line);
+}
+
+.bar-tooltip,
+.heat-tooltip {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: calc(100% - 0.5rem);
+  display: grid;
+  gap: 0.2rem;
+  min-width: 8rem;
+  padding: 0.55rem 0.65rem;
+  color: var(--ink-muted);
+  background: rgba(251, 250, 248, 0.98);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 0.4rem 1rem rgba(54, 46, 36, 0.08);
+  font-size: 0.75rem;
+  text-align: left;
+  transform: translateX(-50%);
+  animation: tooltip-in 120ms ease-out both;
+  pointer-events: none;
+}
+
+.bar-tooltip strong,
+.heat-tooltip strong {
+  color: var(--ink);
+}
+
+.heatmap-wrap {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  height: 100%;
+  min-height: 0;
+  padding-top: 0.6rem;
+}
+
+.heatmap-weekdays,
+.usage-heatmap {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: clamp(0.35rem, 1vh, 0.7rem);
+}
+
+.heatmap-weekdays {
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+  text-align: center;
+}
+
+.usage-heatmap {
+  grid-auto-rows: minmax(2rem, 1fr);
+  min-height: 0;
+}
+
+.heat-cell {
+  position: relative;
+  display: grid;
+  min-height: 2rem;
+  place-items: center;
+  color: #554c42;
+  background: #f1ede6;
+  border: 1px solid rgba(155, 120, 84, 0.08);
+  border-radius: 3px;
+  cursor: default;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  transition: transform 100ms ease, border-color 100ms ease;
+  animation: heat-cell-in 220ms ease-out both;
+}
+
+.heat-cell:hover:not(.is-blank) {
+  z-index: 2;
+  border-color: var(--ochre);
+  transform: scale(1.04);
+}
+
+.heat-cell.level-1 { background: #e9dfd4; }
+.heat-cell.level-2 { background: #d7c3af; }
+.heat-cell.level-3 { color: #fffaf5; background: #b28d68; }
+.heat-cell.level-4 { color: #fffaf5; background: #806044; }
+.heat-cell.is-future { color: #aaa39a; background: transparent; border-style: dashed; }
+.heat-cell.is-blank { visibility: hidden; }
+
+.heat-tooltip {
+  bottom: calc(100% + 0.35rem);
+}
+
+.heatmap-scale {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+}
+
+.heatmap-scale i {
+  width: 0.8rem;
+  height: 0.8rem;
+  background: #f1ede6;
+  border-radius: 2px;
+}
+
+.heatmap-scale i.level-1 { background: #e9dfd4; }
+.heatmap-scale i.level-2 { background: #d7c3af; }
+.heatmap-scale i.level-3 { background: #b28d68; }
+.heatmap-scale i.level-4 { background: #806044; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes bar-rise {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+@keyframes heat-cell-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes tooltip-in {
+  from { opacity: 0; transform: translate(-50%, 0.3rem) scale(0.98); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar-current,
+  .bar-previous,
+  .heat-cell,
+  .bar-tooltip,
+  .heat-tooltip {
+    animation: none;
+  }
+}
+
+/* Usage page layout correction: keep metric strip compact and reserve the lower track for charts. */
+.usage-page {
+  grid-template-rows: auto auto auto minmax(20rem, 1fr);
+}
+
+.metric-strip {
+  align-self: start;
+}
+
+.header-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.period-control-stack {
+  display: grid;
+  justify-items: end;
+  gap: 0.3rem;
+}
+
+.period-control-stack .period-switcher {
+  width: max-content;
+}
+
+.period-control-stack .period-navigator {
+  min-height: 1.75rem;
+  gap: 0.35rem;
+}
+
+.period-control-stack .period-navigator > button:first-child,
+.period-control-stack .period-navigator > button:nth-child(3) {
+  width: 1.55rem;
+  height: 1.55rem;
+  font-size: 1rem;
+}
+
+.period-control-stack .period-navigator strong {
+  min-width: 9.5rem;
+  font-size: 0.75rem;
+}
+
+.period-control-stack .today-button,
+.today-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+@media (max-width: 50rem) {
+  .header-actions {
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  .period-control-stack {
+    justify-items: start;
+  }
+}
+
+/* Compact usage header controls: icon actions first, period controls second. */
+.header-actions {
+  align-items: flex-end;
+  gap: clamp(0.75rem, 1vw, 1.25rem);
+}
+
+.header-utility-actions {
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  height: clamp(1.55rem, 2vw, 2rem);
+  gap: clamp(0.3rem, 0.5vw, 0.6rem);
+  padding-bottom: 0;
+}
+
+.icon-button {
+  position: relative;
+  display: inline-grid;
+  width: clamp(1.55rem, 2vw, 2rem);
+  height: clamp(1.55rem, 2vw, 2rem);
+  place-items: center;
+  justify-content: center;
+  align-content: center;
+  padding: 0;
+  margin: 0;
+  line-height: 0;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease, opacity 150ms ease;
+}
+
+.icon-button svg {
+  width: clamp(1rem, 1.2vw, 1.25rem);
+  height: clamp(1rem, 1.2vw, 1.25rem);
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.icon-button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ochre);
+  background: rgba(238, 234, 227, 0.45);
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.period-control-stack {
+  gap: clamp(0.25rem, 0.35vw, 0.45rem);
+}
+
+.period-control-stack .period-navigator {
+  min-height: clamp(1.55rem, 2vw, 2rem);
+  column-gap: clamp(0.1rem, 0.18vw, 0.2rem);
+  justify-content: flex-start;
+}
+
+.period-control-stack .period-navigator > button:first-child,
+.period-control-stack .period-navigator > button:nth-child(3) {
+  width: clamp(1.55rem, 2vw, 2rem);
+  height: clamp(1.55rem, 2vw, 2rem);
+  font-size: clamp(0.95rem, 0.9vw, 1.1rem);
+}
+
+.period-control-stack .period-navigator strong {
+  min-width: clamp(8.25rem, 11vw, 12rem);
+  font-size: clamp(0.75rem, 0.85vw, 0.95rem);
+}
+
+@media (max-width: 50rem) {
+  .header-utility-actions {
+    padding-bottom: 0;
+  }
+}
+
+
+.icon-button.today-button {
+  margin-left: 0;
+}
+
+.period-control-stack .period-switcher {
+  gap: clamp(1rem, 1.6vw, 1.75rem);
+}
+
+.period-control-stack .period-switcher button {
+  font-size: clamp(0.875rem, 0.85vw, 1rem);
+}

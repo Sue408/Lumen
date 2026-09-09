@@ -1,12 +1,23 @@
 import { useEffect, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, type Window } from "@tauri-apps/api/window";
+import { isTauriRuntime } from "./tauriRuntime";
 
-const appWindow = getCurrentWindow();
+function resolveAppWindow(): Window | null {
+  if (!isTauriRuntime(window)) return null;
+  try {
+    return getCurrentWindow();
+  } catch {
+    return null;
+  }
+}
 
 export function WindowChrome() {
+  const [appWindow] = useState(resolveAppWindow);
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
+    if (!appWindow) return;
+
     let unlisten: (() => void) | undefined;
 
     void appWindow.isMaximized().then(setIsMaximized);
@@ -17,7 +28,9 @@ export function WindowChrome() {
     });
 
     return () => unlisten?.();
-  }, []);
+  }, [appWindow]);
+
+  if (!appWindow) return null;
 
   return (
     <div className="window-chrome" aria-label="窗口控制">
