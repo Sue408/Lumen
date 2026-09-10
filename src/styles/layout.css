@@ -1,0 +1,15 @@
+/*
+ * Layout tokens — fluid sizing for the app frame and page gutters.
+ *
+ * Everything here uses `clamp()` so the frame grows continuously with the
+ * viewport instead of jumping between breakpoints. Keep raw widths out of
+ * page styles; reference these tokens instead.
+ */
+:root {
+  --sidebar-width: clamp(11.5rem, 13vw, 16rem);
+  --sidebar-gutter-x: clamp(1rem, 1.2vw, 1.5rem);
+  --page-max: clamp(90rem, 82vw, 120rem);
+  --page-gutter-x: clamp(2.25rem, 2.6vw, 3.5rem);
+  --page-gutter-y: clamp(1.5rem, 4vh, 4rem);
+  --page-gap: clamp(1rem, 2.5vh, 2.75rem);
+}

@@ -1,11 +1,10 @@
 /* Motion, shared chart baselines, and large-window layout */
 .usage-page {
   width: 100%;
-  max-width: 90rem;
+  max-width: var(--page-max);
   justify-self: center;
   grid-template-rows: auto auto auto clamp(22rem, 48vh, 44rem);
-  padding-block: clamp(2rem, 4vh, 4rem);
-  gap: clamp(1.5rem, 2.5vh, 2.75rem);
+  gap: var(--page-gap);
   animation: page-enter 150ms ease-out both;
 }
 
@@ -48,11 +47,13 @@
   display: grid;
   min-height: 0;
   place-items: center;
+  container-type: size;
 }
 
 .cost-donut {
   position: relative;
-  width: clamp(8.84rem, 18.72vh, 12.48rem);
+  width: min(100cqw, 100cqh, 12.48rem);
+  aspect-ratio: 1;
   background: none;
 }
 
@@ -348,24 +349,6 @@
   }
 }
 
-@media (max-height: 38.75rem) {
-  .usage-page {
-    grid-template-rows: auto auto auto minmax(17rem, 20rem);
-    align-content: start;
-    padding-block: 1.5rem 1.25rem;
-    gap: 1rem;
-  }
-
-  .cost-donut {
-    width: 7.28rem;
-  }
-
-  .cost-row {
-    padding-block: 0.125rem;
-    font-size: 0.75rem;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .usage-page,
   .runtime-dot,
@@ -379,16 +362,6 @@
 
   .trend-line {
     stroke-dashoffset: 0;
-  }
-}
-
-@media (min-width: 120rem) and (min-height: 60rem) {
-  html {
-    font-size: 112.5%;
-  }
-
-  .usage-page {
-    max-width: 100rem;
   }
 }
 

@@ -1,27 +1,64 @@
-import { useState } from "react";
+import { useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { cumulativeToDistribution, buildMonthHeatmap } from "./usageVisualData";
 import type { UsagePeriod } from "./usageData";
 
 const tokenNumber = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
+
+type BarHover = {
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
   const values = cumulativeToDistribution(period.series.currentValues);
   const previous = cumulativeToDistribution(period.series.previousValues);
   const max = Math.max(...values, ...previous, 1);
   const labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-  const [hovered, setHovered] = useState<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<BarHover | null>(null);
+
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>, index: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const bounds = container.getBoundingClientRect();
+    setHover({
+      index,
+      x: event.clientX - bounds.left,
+      y: event.clientY - bounds.top,
+      width: bounds.width,
+      height: bounds.height,
+    });
+  };
+
+  const hoveredValue = hover ? values[hover.index] ?? 0 : 0;
+  const tooltipStyle = hover
+    ? ({ "--tip-x": `${hover.x}px`, "--tip-y": `${hover.y}px` } as CSSProperties)
+    : undefined;
+
   return <article className="chart-panel trend-panel">
     <header className="chart-heading"><h2>每日用量分布<span className="chart-unit">万 Tokens</span></h2><span className="chart-meta">本周 · 上周同期</span></header>
-    <div className="weekly-bars" role="img" aria-label="本周每日 Token 用量柱状图">
+    <div className="weekly-bars" ref={containerRef} role="img" aria-label="本周每日 Token 用量柱状图" onPointerLeave={() => setHover(null)}>
       {labels.map((label, index) => {
         const value = values[index] ?? 0;
         const prior = previous[index] ?? 0;
-        return <div className={`bar-column${value === 0 ? " is-empty" : ""}`} key={label} onPointerEnter={() => setHovered(index)} onPointerLeave={() => setHovered(null)}>
-          {hovered === index && value > 0 ? <div className="bar-tooltip"><strong>{label}</strong><span>本周 {tokenNumber.format(value)} 万</span><span>上周 {tokenNumber.format(prior)} 万</span></div> : null}
+        return <div className={`bar-column${value === 0 ? " is-empty" : ""}`} key={label} onPointerMove={(event) => handlePointerMove(event, index)}>
           <div className="bar-track"><i className="bar-previous" style={{ height: `${(prior / max) * 100}%` }} /><i className="bar-current" style={{ height: `${(value / max) * 100}%` }} /></div>
           <span>{label}</span>
         </div>;
       })}
+      {hover && hoveredValue > 0 ? (
+        <div
+          className={`bar-tooltip${hover.x > hover.width * 0.7 ? " is-left" : ""}${hover.y < hover.height * 0.4 ? " is-below" : ""}`}
+          style={tooltipStyle}
+        >
+          <strong>{labels[hover.index]}</strong>
+          <span>本周 {tokenNumber.format(hoveredValue)} 万</span>
+          <span>上周 {tokenNumber.format(previous[hover.index] ?? 0)} 万</span>
+        </div>
+      ) : null}
     </div>
   </article>;
 }
@@ -43,4 +80,3 @@ export function MonthlyUsageHeatmap({ anchor }: { anchor: Date }) {
     </div>
   </article>;
 }
-

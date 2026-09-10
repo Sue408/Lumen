@@ -1,6 +1,6 @@
 /* Usage page layout correction: keep metric strip compact and reserve the lower track for charts. */
 .usage-page {
-  grid-template-rows: auto auto auto minmax(20rem, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 
 .metric-strip {

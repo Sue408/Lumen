@@ -1,13 +1,4 @@
 @media (max-width: 62.5rem) {
-  .app-shell {
-    grid-template-columns: 10.5rem minmax(0, 1fr);
-  }
-
-  .usage-page {
-    padding-right: 2rem;
-    padding-left: 2rem;
-  }
-
   .usage-charts {
     grid-template-columns: minmax(0, 1.6fr) minmax(14rem, 0.9fr);
     gap: 1.5rem;
@@ -15,62 +6,9 @@
 }
 
 @media (max-width: 56.25rem) {
-  .app-shell {
-    grid-template-columns: 9.75rem minmax(0, 1fr);
-  }
-
-  .sidebar {
-    padding-right: 0.75rem;
-    padding-left: 0.75rem;
-  }
-
-  .usage-page {
-    padding-right: 1.5rem;
-    padding-left: 1.5rem;
-  }
-
   .usage-charts {
     grid-template-columns: minmax(0, 1.5fr) minmax(13.5rem, 0.9fr);
     gap: 1.25rem;
-  }
-}
-
-@media (max-height: 38.75rem) {
-  .usage-page {
-    grid-template-rows: auto auto auto minmax(17rem, 20rem);
-    padding-top: 1.5rem;
-    padding-bottom: 1.25rem;
-    gap: 1rem;
-  }
-
-  .brand {
-    margin-bottom: 1.25rem;
-  }
-
-  .metric-strip {
-    padding-top: 0.625rem;
-    padding-bottom: 0.625rem;
-  }
-
-  .metric-value {
-    font-size: 1.75rem;
-  }
-
-  .cost-content {
-    grid-template-rows: 8rem auto;
-  }
-
-  .cost-donut {
-    width: 7.28rem;
-  }
-
-  .cost-donut::after {
-    inset: 0.875rem;
-  }
-
-  .cost-row {
-    padding-top: 0.125rem;
-    padding-bottom: 0.125rem;
   }
 }
 

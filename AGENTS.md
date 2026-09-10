@@ -24,6 +24,8 @@ src/
 
 **颜色只有一个来源：`src/styles/theme.css`。** 所有颜色与阴影都必须写成 token 引用（`var(--ink)`、`var(--chart-ochre)`、`var(--shadow-float)`），**禁止**在页面样式或组件里硬编码十六进制 / `rgb()` 色值。`theme.css` 用 CSS `light-dark()` 按 `color-scheme` 一次声明明暗两套值，`App.css` 将其作为第一行 `@import` 引入。
 
+**尺寸只有一个来源：`src/styles/layout.css`。** 侧边栏宽度、页边距、页面间距等框架尺寸用 `clamp()` 连续插值，**禁止**再写死 `rem` 并靠断点阶跃切换。
+
 - 新增一个颜色语义时，先在 `theme.css` 补 token（明 + 暗两个值），再在调用点引用。
 - 非颜色的结构差异（如深色下取消阴影）也通过 token 表达，不要在调用点写主题分支。
 - 图表数据只持语义键（如 `ChartTone`），颜色映射由组件层转成 `var(--chart-*)`，数据不出现色值。

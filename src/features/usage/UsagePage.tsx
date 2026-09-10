@@ -30,6 +30,9 @@ export function UsagePage() {
   return <main className="usage-page">
     <header className="page-header">
       <div><div className="eyebrow">USAGE LEDGER</div><h1>{heading}</h1></div>
+    </header>
+    <div className="page-controls">
+      <p className="usage-summary" aria-live="polite"><strong>{current ? period.summaryLead : cursor}</strong>{current ? period.summaryTail : "的用量记录已整理完毕。"}</p>
       <div className="header-actions">
         <div className="header-utility-actions" aria-label="账本操作">
           <button className="icon-button" type="button" title="查看明细" aria-label="查看明细" onClick={() => setShowLedger(true)}>
@@ -50,7 +53,7 @@ export function UsagePage() {
           </div>
         </div>
       </div>
-    </header>      <p className="usage-summary" aria-live="polite"><strong>{current ? period.summaryLead : cursor}</strong>{current ? period.summaryTail : "的用量记录已整理完毕。"}</p>
+    </div>
     <section className="metric-strip" aria-label="核心用量指标">{period.metrics.map((metric) => <article className="metric" key={metric.label}><div className="metric-label">{metric.label}</div><AnimatedMetricValue className="metric-value" target={metric.value} /><div className="metric-comparison">{current ? metric.comparison : "历史周期明细"}</div></article>)}</section>
     <section className="usage-charts" aria-label="本期用量图表">{periodKey === "day" ? <UsageTrendChart key={`trend-${periodKey}-${anchor.getTime()}`} period={period} anchor={anchor} /> : periodKey === "week" ? <WeeklyUsageBars key={`bars-${anchor.getTime()}`} period={period} /> : <MonthlyUsageHeatmap key={`heat-${anchor.getTime()}`} anchor={anchor} />}<ModelCostBreakdown key={`cost-${periodKey}`} period={period} /></section>
   </main>;
