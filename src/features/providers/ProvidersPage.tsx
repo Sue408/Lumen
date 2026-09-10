@@ -339,9 +339,11 @@ export function ProvidersPage() {
     if (!draft) return;
     const icon = patch.icon !== undefined ? patch.icon : draft.icon;
     const iconTint = patch.iconTint ?? draft.iconTint;
-    const previous = draft;
+    const previousDraft = draft;
+    const previousSaved = savedDraft;
     setDraft({ ...draft, icon, iconTint });
     if (!selectedProvider) return;
+    setSavedDraft((prev) => (prev ? { ...prev, icon, iconTint } : prev));
     setBusy(true);
     setFormError(null);
     try {
@@ -358,9 +360,9 @@ export function ProvidersPage() {
         enabled: selectedProvider.enabled,
       });
       await refreshLists();
-      setSavedDraft((prev) => (prev ? { ...prev, icon, iconTint } : prev));
     } catch (err) {
-      setDraft(previous);
+      setDraft(previousDraft);
+      setSavedDraft(previousSaved);
       setFormError(String(err));
     } finally {
       setBusy(false);
