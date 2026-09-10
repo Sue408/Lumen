@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Database, Download, FolderOpen, Palette, RotateCcw, Server } from "lucide-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
@@ -32,7 +32,8 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
   const [savedPort, setSavedPort] = useState<number | null>(null);
   const [closeToTray, setCloseToTray] = useState(true);
   const [autostart, setAutostart] = useState<boolean | null>(null);
-  const [autostartBusy, setAutostartBusy] = useState(false);
+  const closeToTraySaving = useRef(false);
+  const autostartSaving = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -94,10 +95,10 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
   };
 
   const toggleCloseToTray = async (next: boolean) => {
-    if (savedPort === null) return;
+    if (savedPort === null || closeToTraySaving.current) return;
+    closeToTraySaving.current = true;
     const previous = closeToTray;
     setCloseToTray(next);
-    setBusy(true);
     try {
       const saved = await saveSettings({ port: savedPort, closeToTray: next });
       setCloseToTray(saved.closeToTray);
@@ -107,14 +108,15 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
       setNotice(null);
       setError(String(err));
     } finally {
-      setBusy(false);
+      closeToTraySaving.current = false;
     }
   };
 
   const toggleAutostart = async (next: boolean) => {
+    if (autostartSaving.current) return;
+    autostartSaving.current = true;
     const previous = autostart;
     setAutostart(next);
-    setAutostartBusy(true);
     try {
       const actual = await setAutostartEnabled(next);
       setAutostart(actual);
@@ -124,7 +126,7 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
       setNotice(null);
       setError(String(err));
     } finally {
-      setAutostartBusy(false);
+      autostartSaving.current = false;
     }
   };
 
@@ -237,7 +239,7 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
                       <TogglePill
                         checked={autostart}
                         label="随系统启动"
-                        disabled={autostartBusy || busy}
+                        disabled={busy}
                         onChange={(next) => void toggleAutostart(next)}
                       />
                     )}
