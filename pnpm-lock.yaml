@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@lobehub/icons-static-svg':
+        specifier: ^1.95.0
+        version: 1.95.0
       '@tauri-apps/api':
         specifier: ^2
         version: 2.11.1
@@ -44,6 +47,9 @@ importers:
         version: 8.2.2
 
 packages:
+
+  '@lobehub/icons-static-svg@1.95.0':
+    resolution: {integrity: sha512-VSObF66DUVQe0EK3xbIoFcw+Fcia1+bLVFkMsQbmz0zCceMxPmoLImS5VM5SM7zL+/NarZ11/ySNfkekcomIkQ==}
 
   '@oxc-project/types@0.149.0':
     resolution: {integrity: sha512-Efcc+iF0j3Bf67YjEqIqWXbX5XddXoK/Mw4K1/JuXwRCZ8N16VR7iT23nlCc9XrveFVh/E5Rqs2StT0V8v9LdA==}
@@ -443,6 +449,8 @@ packages:
         optional: true
 
 snapshots:
+
+  '@lobehub/icons-static-svg@1.95.0': {}
 
   '@oxc-project/types@0.149.0': {}
 

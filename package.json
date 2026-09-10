@@ -8,9 +8,10 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "node --test src/features/usage/*.test.ts"
+    "test": "node --test \"src/**/*.test.ts\""
   },
   "dependencies": {
+    "@lobehub/icons-static-svg": "^1.95.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "lucide-react": "^1.44.0",

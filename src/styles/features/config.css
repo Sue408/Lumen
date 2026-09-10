@@ -1,0 +1,830 @@
+/*
+ * Shared primitives for the configuration registers (providers / routing).
+ * These pages are for operating, so the grammar differs from the usage ledger:
+ * a persistent register on the left, a focused sheet on the right, one accent.
+ */
+
+.config-column {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--page-gap);
+  width: 100%;
+  max-width: var(--page-max);
+  min-height: 0;
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.providers-page h1,
+.routing-page h1 {
+  margin: 0;
+  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.875rem;
+  font-weight: 600;
+  line-height: 1.12;
+}
+
+/* ---- workbench: register + sheet ---- */
+
+.config-workbench {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(13rem, 16rem) minmax(0, 1fr);
+  align-items: stretch;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* ---- register (object index) ---- */
+
+.register-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  padding-right: clamp(1.25rem, 2.5vw, 2rem);
+}
+
+.register-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 1.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.register-title {
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.register-empty {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 0.5rem;
+  align-content: start;
+  justify-items: start;
+  padding: 0.75rem 0 var(--page-gutter-y) 0.7rem;
+  border-left: 2px solid var(--line-faint);
+}
+
+.register {
+  display: grid;
+  flex: 1 1 auto;
+  align-content: start;
+  gap: 2px;
+  min-height: 0;
+  min-width: 0;
+  padding: 5px 5px var(--page-gutter-y);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.register-select {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem 0.5rem 0.7rem;
+  color: var(--ink-soft);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0 4px 4px 0;
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+
+.register-select:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.register-select.is-selected {
+  color: var(--ink);
+  background: var(--surface-active);
+  border-left-color: var(--ochre);
+}
+
+.register-select :is(.register-name, .register-meta) {
+  grid-column: 2;
+}
+
+.register-select .brand-mark {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  margin-top: 0.15rem;
+  color: var(--ink);
+}
+
+.register-select .status-dot {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+.register-select.is-off .brand-mark {
+  color: var(--ink-faint);
+}
+
+.register-body {
+  display: contents;
+}
+
+.register-name {
+  overflow: hidden;
+  font-size: 0.9375rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.register-select.is-selected .register-name {
+  font-weight: 600;
+}
+
+.register-select.is-off .register-name {
+  color: var(--ink-muted);
+}
+
+.register-meta {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.register-select.is-off .register-meta {
+  color: var(--danger);
+}
+
+/* ---- sheet (focused editor) ---- */
+
+.workbench-sheet {
+  min-width: 0;
+  min-height: 0;
+  padding-top: 4px;
+  padding-right: clamp(1rem, 1.6vw, 1.5rem);
+  padding-left: clamp(1.5rem, 3vw, 2.5rem);
+  padding-bottom: var(--page-gutter-y);
+  border-left: 1px solid var(--line);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.sheet-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.6rem;
+  margin-bottom: 1.25rem;
+}
+
+.sheet-head .brand-mark {
+  color: var(--ink-soft);
+}
+
+.sheet-title {
+  margin: 0;
+  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.sheet-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+.sheet-section {
+  margin-top: 1.6rem;
+}
+
+.entry-form > .sheet-section:first-child,
+.workbench-sheet > .sheet-section:first-child {
+  margin-top: 0;
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.7rem;
+}
+
+.section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.section-title svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+/* ---- brand marks & liveness ---- */
+
+.brand-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.brand-mark svg {
+  display: block;
+  width: 1em;
+  height: 1em;
+}
+
+.brand-mark-fallback svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.brand-mark.is-off {
+  color: var(--ink-faint);
+}
+
+.status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.status-dot.is-live {
+  background: var(--live);
+  animation: live-breathe 2.4s ease-in-out infinite;
+}
+
+.status-dot.is-off {
+  background: transparent;
+  border: 1px solid var(--danger);
+}
+
+@keyframes live-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--live-ring);
+  }
+
+  50% {
+    box-shadow: 0 0 0 0.22rem transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.is-live {
+    animation: none;
+  }
+}
+
+/* ---- toggle pill, glyph buttons, quiet buttons ---- */
+
+.toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  padding: 0 0.6rem;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.toggle-pill:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ochre);
+  background: var(--surface-hover-soft);
+}
+
+.toggle-pill.is-off {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.toggle-pill.is-off:hover:not(:disabled) {
+  background: var(--surface-hover-soft);
+}
+
+.toggle-pill.is-small {
+  gap: 0.32rem;
+  height: 1.4rem;
+  padding: 0 0.5rem;
+  font-size: 0.6875rem;
+}
+
+.toggle-pill:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.toggle-pill .status-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+}
+
+.glyph-button {
+  display: inline-grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  place-items: center;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.glyph-button svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.glyph-button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ochre);
+  background: var(--surface-hover-soft);
+}
+
+.glyph-button.is-danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.glyph-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.register-select:focus-visible,
+.glyph-button:focus-visible,
+.quiet-button:focus-visible,
+.toggle-pill:focus-visible,
+.text-action:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.text-action {
+  padding: 0;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  transition: color 100ms ease;
+}
+
+.text-action:hover:not(:disabled) {
+  color: var(--ochre);
+}
+
+.text-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.quiet-button {
+  height: 1.75rem;
+  padding: 0 0.65rem;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.quiet-button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink-muted);
+}
+
+.quiet-button.is-primary {
+  color: var(--ochre);
+  border-color: var(--ochre);
+}
+
+.quiet-button.is-primary:hover:not(:disabled) {
+  color: var(--ochre);
+  background: var(--surface-hover-soft);
+}
+
+.quiet-button.is-danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.quiet-button.is-danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--surface-hover-soft);
+}
+
+.quiet-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ---- bars: unsaved prompt + danger confirm ---- */
+
+.pending-bar,
+.confirm-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--ochre);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+.pending-bar {
+  color: var(--ink-soft);
+}
+
+.confirm-bar {
+  color: var(--ink-soft);
+  border-color: var(--danger);
+}
+
+.pending-bar > span,
+.confirm-bar > span {
+  flex: 1 1 16rem;
+}
+
+/* ---- sticky save bar ---- */
+
+.save-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.2rem;
+  padding: 0.6rem 0;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+}
+
+.save-bar-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+}
+
+.save-bar-note svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  color: var(--ochre);
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.save-bar-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+/* ---- forms ---- */
+
+.entry-form {
+  display: grid;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1rem;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field-wide {
+  grid-column: 1 / -1;
+}
+
+.field > span {
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 0 0.5rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.field input,
+.field select {
+  height: 2rem;
+}
+
+.field textarea {
+  padding: 0.4rem 0.5rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.field input::placeholder,
+.field textarea::placeholder {
+  color: var(--ink-faint);
+}
+
+.field input:focus-visible,
+.field select:focus-visible,
+.field textarea:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.key-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.field-inline {
+  display: inline-flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* ---- nested model list ---- */
+
+.model-list {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.model-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  min-width: 0;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line-faint);
+  font-size: 0.875rem;
+}
+
+.model-name {
+  color: var(--ink);
+}
+
+.model-row .brand-mark {
+  color: var(--ink-soft);
+}
+
+.model-row.is-off .brand-mark {
+  color: var(--ink-faint);
+}
+
+.model-row.is-off .model-name {
+  color: var(--ink-muted);
+}
+
+.model-id {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-price {
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.model-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+.model-row.is-empty {
+  border-bottom: 0;
+}
+
+/* ---- target editor (routing) ---- */
+
+.target-list {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.target-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.6rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line-faint);
+}
+
+.target-row.is-off .target-rank {
+  color: var(--ink-faint);
+  border-color: var(--line-strong);
+}
+
+.target-row .brand-mark {
+  color: var(--ink-soft);
+}
+
+.target-row.is-off .brand-mark {
+  color: var(--ink-faint);
+}
+
+.target-rank {
+  display: inline-grid;
+  width: 1.4rem;
+  height: 1.4rem;
+  flex: 0 0 auto;
+  color: var(--ochre);
+  border: 1px solid var(--ochre);
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  place-items: center;
+}
+
+.target-row select {
+  flex: 1 1 14rem;
+  min-width: 0;
+  height: 2rem;
+  padding: 0 0.5rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.target-row select:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.target-move {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+/* ---- notes / errors / loading ---- */
+
+.inline-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.8125rem;
+}
+
+.empty-note {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+}
+
+.loading-lines {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.loading-lines span {
+  display: block;
+  height: 0.75rem;
+  background: var(--surface-hover);
+  border-radius: 2px;
+}
+
+.loading-lines span:nth-child(2n) {
+  width: 72%;
+}
+
+.loading-lines span:nth-child(3n) {
+  width: 86%;
+}
+
+/* ---- modal (standalone sub-entity editor, e.g. upstream models) ---- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  padding: 2rem;
+  background: var(--scrim);
+  place-items: center;
+}
+
+.modal-card {
+  width: min(28rem, 100%);
+  max-height: calc(100vh - 4rem);
+  padding: 1.25rem 1.4rem 1.4rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow-float);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.modal-title {
+  margin: 0 0 1rem;
+  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.modal-card .form-actions {
+  justify-content: flex-end;
+}

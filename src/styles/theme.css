@@ -44,6 +44,10 @@
   --on-danger: light-dark(#ffffff, #1a1917);
   --increase: light-dark(#756044, #c8a878);
 
+  /* liveness: the only non-chart use of moss, an online status dot */
+  --live: light-dark(#71806a, #8f9e86);
+  --live-ring: light-dark(rgb(113 128 106 / 45%), rgb(143 158 134 / 45%));
+
   /* chart mineral palette: ochre / indigo / moss / yellow, never vermilion */
   --chart-ochre: light-dark(#9b7854, #b98f66);
   --chart-indigo: light-dark(#607087, #7b8ba0);
@@ -64,6 +68,7 @@
   --shadow-tooltip-color: light-dark(rgb(54 46 36 / 8%), rgb(0 0 0 / 0%));
   --shadow-float: 0 0.375rem 1.125rem var(--shadow-color);
   --shadow-tooltip: 0 0.4rem 1rem var(--shadow-tooltip-color);
+  --scrim: light-dark(rgb(28 26 23 / 30%), rgb(0 0 0 / 58%));
 }
 
 :root[data-theme="light"] {

@@ -5,15 +5,30 @@ import { PlaceholderPage } from "./app/PlaceholderPage";
 import { navigationItems, type ViewId } from "./app/navigation";
 import { WindowChrome } from "./components/WindowChrome";
 import { UsagePage } from "./features/usage/UsagePage";
+import { ProvidersPage } from "./features/providers/ProvidersPage";
+import { RoutingPage } from "./features/routing/RoutingPage";
 
 function App() {
   const [view, setView] = useState<ViewId>("usage");
   const currentLabel = navigationItems.find((item) => item.id === view)?.label ?? "";
 
+  const renderView = () => {
+    switch (view) {
+      case "usage":
+        return <UsagePage />;
+      case "providers":
+        return <ProvidersPage />;
+      case "routing":
+        return <RoutingPage />;
+      default:
+        return <PlaceholderPage title={currentLabel} />;
+    }
+  };
+
   return (
     <>
       <AppShell activeView={view} onNavigate={setView}>
-        {view === "usage" ? <UsagePage /> : <PlaceholderPage title={currentLabel} />}
+        {renderView()}
       </AppShell>
       <WindowChrome />
     </>

@@ -1,0 +1,482 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  ChevronDown,
+  ChevronUp,
+  ListOrdered,
+  Plus,
+  Route,
+  SlidersHorizontal,
+  Trash,
+} from "lucide-react";
+import {
+  EmptyNote,
+  GlyphButton,
+  InlineError,
+  LoadingLines,
+  SaveBar,
+  SectionTitle,
+  StatusDot,
+  TogglePill,
+} from "../../components/ConfigControls";
+import { BrandGlyph } from "../brand/BrandMark";
+import { detectBrand, type BrandId } from "../brand/brand";
+import {
+  deleteRoute,
+  listProviders,
+  listRoutes,
+  listUpstreamModels,
+  saveRoute,
+  type Provider,
+  type RouteWithTargets,
+  type UpstreamModel,
+} from "../../services/config";
+import {
+  emptyRouteDraft,
+  isRouteDraftDirty,
+  moveTarget,
+  routeToDraft,
+  validateRouteDraft,
+  type RouteDraft,
+} from "./routingModel";
+
+type Pending = { kind: "existing"; id: string } | { kind: "new" };
+
+function buildBrandLookup(providers: Provider[], models: UpstreamModel[]): Map<string, BrandId | null> {
+  const providerNames = new Map(providers.map((provider) => [provider.id, provider.name]));
+  const lookup = new Map<string, BrandId | null>();
+  for (const model of models) {
+    lookup.set(model.id, detectBrand([providerNames.get(model.providerId), model.modelId]));
+  }
+  return lookup;
+}
+
+function groupedModels(providers: Provider[], models: UpstreamModel[]) {
+  return providers
+    .map((provider) => ({
+      id: provider.id,
+      name: provider.name,
+      models: models.filter((model) => model.providerId === provider.id),
+    }))
+    .filter((group) => group.models.length > 0);
+}
+
+function RouteForm({
+  draft,
+  savedDraft,
+  providers,
+  models,
+  brands,
+  busy,
+  error,
+  onChange,
+  onDiscard,
+  onSubmit,
+}: {
+  draft: RouteDraft;
+  savedDraft: RouteDraft;
+  providers: Provider[];
+  models: UpstreamModel[];
+  brands: Map<string, BrandId | null>;
+  busy: boolean;
+  error: string | null;
+  onChange: (draft: RouteDraft) => void;
+  onDiscard: () => void;
+  onSubmit: () => void;
+}) {
+  const set = (patch: Partial<RouteDraft>) => onChange({ ...draft, ...patch });
+  const setTarget = (index: number, patch: Partial<RouteDraft["targets"][number]>) =>
+    set({ targets: draft.targets.map((target, itemIndex) => (itemIndex === index ? { ...target, ...patch } : target)) });
+  const groups = groupedModels(providers, models);
+  const dirty = isRouteDraftDirty(draft, savedDraft);
+
+  return (
+    <form
+      className="entry-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+    >
+      <section className="sheet-section">
+        <SectionTitle icon={<SlidersHorizontal aria-hidden="true" />}>基础信息</SectionTitle>
+        <div className="field-grid">
+          <label className="field">
+            <span>路由别名</span>
+            <input value={draft.alias} onChange={(event) => set({ alias: event.target.value })} placeholder="deepseek/deepseek-v4-flash" spellCheck={false} />
+          </label>
+          <label className="field">
+            <span>展示名</span>
+            <input value={draft.displayName} onChange={(event) => set({ displayName: event.target.value })} placeholder="留空则同别名" />
+          </label>
+        </div>
+      </section>
+
+      <section className="sheet-section">
+        <SectionTitle
+          icon={<ListOrdered aria-hidden="true" />}
+          action={
+            <button
+              className="text-action"
+              type="button"
+              onClick={() => set({ targets: [...draft.targets, { upstreamModelId: models[0]?.id ?? "", enabled: true }] })}
+              disabled={busy || models.length === 0}
+            >
+              ＋ 添加目标
+            </button>
+          }
+        >
+          上游目标
+        </SectionTitle>
+
+        {draft.targets.length === 0 ? (
+          <EmptyNote>
+            {models.length === 0
+              ? "还没有可用的上游模型，请先到上游提供商页登记。"
+              : "还没有添加目标，添加后才能保存。"}
+          </EmptyNote>
+        ) : (
+          <ol className="target-list">
+            {draft.targets.map((target, index) => (
+              <li className={target.enabled ? "target-row" : "target-row is-off"} key={`${target.upstreamModelId}-${index}`}>
+                <span className="target-rank">{index + 1}</span>
+                <BrandGlyph
+                  brand={brands.get(target.upstreamModelId) ?? null}
+                  size={18}
+                  fallback={<Route aria-hidden="true" />}
+                />
+                <select value={target.upstreamModelId} onChange={(event) => setTarget(index, { upstreamModelId: event.target.value })}>
+                  <option value="">选择上游模型…</option>
+                  {groups.map((group) => (
+                    <optgroup label={group.name} key={group.id}>
+                      {group.models.map((model) => (
+                        <option value={model.id} key={model.id}>
+                          {model.displayName} · {model.modelId}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <TogglePill
+                  small
+                  checked={target.enabled}
+                  label={target.enabled ? "停用该目标" : "启用该目标"}
+                  disabled={busy}
+                  onChange={(next) => setTarget(index, { enabled: next })}
+                />
+                <div className="target-move">
+                  <GlyphButton label="上移" disabled={busy || index === 0} onClick={() => set({ targets: moveTarget(draft.targets, index, -1) })}>
+                    <ChevronUp aria-hidden="true" />
+                  </GlyphButton>
+                  <GlyphButton label="下移" disabled={busy || index === draft.targets.length - 1} onClick={() => set({ targets: moveTarget(draft.targets, index, 1) })}>
+                    <ChevronDown aria-hidden="true" />
+                  </GlyphButton>
+                  <GlyphButton label="移除目标" danger disabled={busy} onClick={() => set({ targets: draft.targets.filter((_, itemIndex) => itemIndex !== index) })}>
+                    <Trash aria-hidden="true" />
+                  </GlyphButton>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      {error ? <InlineError message={error} /> : null}
+      <SaveBar dirty={dirty} busy={busy} label={draft.id ? "保存路由" : "创建路由"} onDiscard={onDiscard} />
+    </form>
+  );
+}
+
+export function RoutingPage() {
+  const [routes, setRoutes] = useState<RouteWithTargets[]>([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [models, setModels] = useState<UpstreamModel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | "new" | null>(null);
+  const [draft, setDraft] = useState<RouteDraft | null>(null);
+  const [savedDraft, setSavedDraft] = useState<RouteDraft | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const dirty = draft !== null && savedDraft !== null && isRouteDraftDirty(draft, savedDraft);
+  const brands = useMemo(() => buildBrandLookup(providers, models), [providers, models]);
+
+  const select = (route: RouteWithTargets) => {
+    const next = routeToDraft(route);
+    setSelectedId(route.id);
+    setDraft(next);
+    setSavedDraft(routeToDraft(route));
+    setFormError(null);
+    setConfirmingDelete(false);
+    setPending(null);
+  };
+
+  const selectNew = () => {
+    setSelectedId("new");
+    setDraft(emptyRouteDraft());
+    setSavedDraft(emptyRouteDraft());
+    setFormError(null);
+    setConfirmingDelete(false);
+    setPending(null);
+  };
+
+  const requestSelect = (route: RouteWithTargets) => {
+    if (dirty) setPending({ kind: "existing", id: route.id });
+    else select(route);
+  };
+
+  const requestNew = () => {
+    if (dirty) setPending({ kind: "new" });
+    else selectNew();
+  };
+
+  const refreshLists = async () => {
+    const [nextRoutes, nextProviders, nextModels] = await Promise.all([
+      listRoutes(),
+      listProviders(),
+      listUpstreamModels(),
+    ]);
+    setRoutes(nextRoutes);
+    setProviders(nextProviders);
+    setModels(nextModels);
+    return nextRoutes;
+  };
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [nextRoutes, nextProviders, nextModels] = await Promise.all([
+          listRoutes(),
+          listProviders(),
+          listUpstreamModels(),
+        ]);
+        if (!alive) return;
+        setRoutes(nextRoutes);
+        setProviders(nextProviders);
+        setModels(nextModels);
+        if (nextRoutes.length > 0) select(nextRoutes[0]);
+        else selectNew();
+      } catch (err) {
+        if (alive) setError(String(err));
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const submit = async (): Promise<boolean> => {
+    if (!draft) return false;
+    const message = validateRouteDraft(draft);
+    if (message) {
+      setFormError(message);
+      return false;
+    }
+    setBusy(true);
+    setFormError(null);
+    try {
+      const saved = await saveRoute({
+        id: draft.id,
+        alias: draft.alias.trim(),
+        displayName: draft.displayName.trim() || draft.alias.trim(),
+        enabled: draft.enabled,
+        targets: draft.targets.map((target, index) => ({
+          upstreamModelId: target.upstreamModelId,
+          priority: index,
+          enabled: target.enabled,
+        })),
+      });
+      await refreshLists();
+      setSelectedId(saved.id);
+      setDraft(routeToDraft(saved));
+      setSavedDraft(routeToDraft(saved));
+      return true;
+    } catch (err) {
+      setFormError(String(err));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const discardDraft = () => {
+    if (!savedDraft) return;
+    setDraft({ ...savedDraft, targets: savedDraft.targets.map((target) => ({ ...target })) });
+    setFormError(null);
+  };
+
+  const applyPending = () => {
+    if (!pending) return;
+    if (pending.kind === "new") selectNew();
+    else {
+      const route = routes.find((item) => item.id === pending.id);
+      if (route) select(route);
+      else setPending(null);
+    }
+  };
+
+  const saveAndSwitch = async () => {
+    const ok = await submit();
+    if (ok) applyPending();
+  };
+
+  const deleteSelected = async () => {
+    if (!selectedId || selectedId === "new") return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteRoute(selectedId);
+      const nextRoutes = await refreshLists();
+      setConfirmingDelete(false);
+      if (nextRoutes.length > 0) select(nextRoutes[0]);
+      else selectNew();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="routing-page">
+      <div className="config-column">
+        <header className="page-header">
+          <div>
+            <div className="eyebrow">ROUTING RECIPES</div>
+            <h1>模型路由</h1>
+          </div>
+        </header>
+
+        {error ? <InlineError message={error} /> : null}
+
+        {loading ? (
+          <LoadingLines rows={5} />
+        ) : (
+          <div className="config-workbench">
+            <section className="register-pane">
+              <div className="register-head">
+                <span className="register-title">路由 · {routes.length} 条</span>
+                <GlyphButton label="新建路由" onClick={requestNew}>
+                  <Plus aria-hidden="true" />
+                </GlyphButton>
+              </div>
+
+              {routes.length === 0 ? (
+                <div className="register-empty">
+                  <EmptyNote>还没有配置路由别名。</EmptyNote>
+                  <button className="text-action" type="button" onClick={requestNew}>
+                    创建第一个路由
+                  </button>
+                </div>
+              ) : (
+                <nav className="register" aria-label="路由别名列表">
+                  {routes.map((route) => {
+                    const primary = [...route.targets].sort((a, b) => a.priority - b.priority)[0];
+                    const brand = primary ? brands.get(primary.upstreamModelId) ?? null : null;
+                    return (
+                      <button
+                        className={`register-select${selectedId === route.id ? " is-selected" : ""}${route.enabled ? "" : " is-off"}`}
+                        type="button"
+                        key={route.id}
+                        aria-current={selectedId === route.id ? "true" : undefined}
+                        onClick={() => requestSelect(route)}
+                      >
+                        <BrandGlyph brand={brand} size={20} fallback={<Route aria-hidden="true" />} />
+                        <span className="register-body">
+                          <span className="register-name">{route.alias}</span>
+                          <span className="register-meta">
+                            {route.enabled
+                              ? `${route.targets.length} 条目标`
+                              : `已停用 · ${route.targets.length} 条目标`}
+                          </span>
+                        </span>
+                        <StatusDot alive={route.enabled} />
+                      </button>
+                    );
+                  })}
+                </nav>
+              )}
+            </section>
+
+            <section className="workbench-sheet" aria-label="路由编辑">
+              {draft ? (
+                <>
+                  <div className="sheet-head">
+                    <BrandGlyph
+                      brand={draft.targets[0] ? brands.get(draft.targets[0].upstreamModelId) ?? null : null}
+                      size={22}
+                      className={draft.enabled ? undefined : "is-off"}
+                      fallback={<Route aria-hidden="true" />}
+                    />
+                    <h2 className="sheet-title">{selectedId === "new" ? "新建路由" : draft.alias || "未命名路由"}</h2>
+                    <TogglePill
+                      checked={draft.enabled}
+                      label="启用该路由"
+                      disabled={busy}
+                      onChange={(next) => setDraft({ ...draft, enabled: next })}
+                    />
+                    <div className="sheet-actions">
+                      {selectedId !== "new" ? (
+                        <GlyphButton label="删除该路由" danger disabled={busy} onClick={() => setConfirmingDelete(true)}>
+                          <Trash aria-hidden="true" />
+                        </GlyphButton>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {pending ? (
+                    <div className="pending-bar">
+                      <span>有未保存的修改，切换前要保存吗？</span>
+                      <button className="quiet-button is-primary" type="button" onClick={() => void saveAndSwitch()} disabled={busy}>
+                        保存并切换
+                      </button>
+                      <button className="quiet-button" type="button" onClick={applyPending} disabled={busy}>
+                        放弃并切换
+                      </button>
+                      <button className="quiet-button" type="button" onClick={() => setPending(null)} disabled={busy}>
+                        取消
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {confirmingDelete ? (
+                    <div className="confirm-bar">
+                      <span>确认移除该路由别名？</span>
+                      <button className="quiet-button is-danger" type="button" onClick={() => void deleteSelected()} disabled={busy}>
+                        移除
+                      </button>
+                      <button className="quiet-button" type="button" onClick={() => setConfirmingDelete(false)} disabled={busy}>
+                        取消
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <RouteForm
+                    key={selectedId ?? "new"}
+                    draft={draft}
+                    savedDraft={savedDraft ?? draft}
+                    providers={providers}
+                    models={models}
+                    brands={brands}
+                    busy={busy}
+                    error={formError}
+                    onChange={setDraft}
+                    onDiscard={discardDraft}
+                    onSubmit={() => void submit()}
+                  />
+                </>
+              ) : null}
+            </section>
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
