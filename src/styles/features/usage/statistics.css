@@ -1,0 +1,130 @@
+.usage-page {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(20rem, 24rem);
+  align-content: start;
+  min-width: 0;
+  padding: 2rem 2.5rem 1.75rem;
+  gap: 1.5rem;
+  overflow: hidden;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.eyebrow {
+  margin-bottom: 4px;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+  letter-spacing: 0.12em;
+}
+
+.usage-page h1 {
+  margin: 0;
+  font-size: 1.875rem;
+  font-weight: 600;
+  line-height: 1.12;
+}
+
+.period-switcher {
+  display: flex;
+  gap: 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.period-switcher button {
+  position: relative;
+  padding: 7px 1px 8px;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.period-switcher button::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  content: "";
+  background: transparent;
+}
+
+.period-switcher button:hover,
+.period-switcher button.is-selected {
+  color: var(--ink);
+}
+
+.period-switcher button.is-selected {
+  font-weight: 600;
+}
+
+.period-switcher button.is-selected::after {
+  background: var(--ochre);
+}
+
+.usage-summary {
+  margin: 0;
+  color: #403b35;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.usage-summary strong {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.metric {
+  min-width: 0;
+  padding: 0 18px;
+  border-right: 1px solid var(--line);
+}
+
+.metric:first-child {
+  padding-left: 0;
+}
+
+.metric:last-child {
+  padding-right: 0;
+  border-right: 0;
+}
+
+.metric-label {
+  margin-bottom: 4px;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+
+.metric-value {
+  overflow: hidden;
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1.12;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-comparison {
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+

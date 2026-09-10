@@ -1,0 +1,89 @@
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 11.5rem minmax(0, 1fr);
+  width: 100%;
+  height: 100vh;
+  min-width: 56.25rem;
+  min-height: 38.75rem;
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 1.75rem 1rem 1.25rem;
+  background: #f7f4ef;
+  border-right: 1px solid var(--line);
+}
+
+.brand,
+.usage-page h1,
+.usage-summary,
+.metric-value,
+.chart-heading h2,
+.donut-center strong {
+  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+}
+
+.brand {
+  margin: 0 10px 28px;
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.navigation {
+  display: grid;
+  gap: 4px;
+}
+
+.nav-item {
+  width: 100%;
+  min-height: 2.25rem;
+  padding: 8px 10px;
+  text-align: left;
+  color: #6e685f;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition:
+    color 100ms ease,
+    background-color 100ms ease;
+}
+
+.nav-item:hover {
+  color: var(--ink);
+  background: rgba(238, 234, 227, 0.55);
+}
+
+.nav-item:active,
+.nav-item.is-active {
+  color: var(--ink);
+  font-weight: 600;
+  background: #eeeae3;
+}
+
+.runtime-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 10px;
+  color: #716c63;
+  font-size: 0.75rem;
+}
+
+.runtime-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--moss);
+  animation: breathe 2500ms ease-in-out infinite;
+}
+

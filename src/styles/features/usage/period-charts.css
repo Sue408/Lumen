@@ -1,0 +1,204 @@
+.weekly-bars {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  align-items: end;
+  gap: clamp(0.5rem, 2vw, 1.5rem);
+  height: 100%;
+  min-height: 0;
+  padding: 1rem 0 0.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.bar-column {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 1.75rem;
+  align-items: end;
+  gap: 0.35rem;
+  height: 100%;
+  min-width: 0;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.bar-track {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.22rem;
+  width: 100%;
+  height: 100%;
+}
+
+.bar-current,
+.bar-previous {
+  display: block;
+  width: min(1.15rem, 35%);
+  min-height: 0.15rem;
+  border-radius: 2px 2px 0 0;
+  transform-origin: center bottom;
+  animation: bar-rise 350ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.bar-current {
+  background: var(--ochre);
+}
+
+.bar-previous {
+  background: #d2cdc4;
+}
+
+.bar-column.is-empty .bar-track::after {
+  width: 55%;
+  height: 1px;
+  content: "";
+  background: var(--line);
+}
+
+.bar-tooltip,
+.heat-tooltip {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: calc(100% - 0.5rem);
+  display: grid;
+  gap: 0.2rem;
+  min-width: 8rem;
+  padding: 0.55rem 0.65rem;
+  color: var(--ink-muted);
+  background: rgba(251, 250, 248, 0.98);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 0.4rem 1rem rgba(54, 46, 36, 0.08);
+  font-size: 0.75rem;
+  text-align: left;
+  transform: translateX(-50%);
+  animation: tooltip-in 120ms ease-out both;
+  pointer-events: none;
+}
+
+.bar-tooltip strong,
+.heat-tooltip strong {
+  color: var(--ink);
+}
+
+.heatmap-wrap {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  height: 100%;
+  min-height: 0;
+  padding-top: 0.6rem;
+}
+
+.heatmap-weekdays,
+.usage-heatmap {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: clamp(0.35rem, 1vh, 0.7rem);
+}
+
+.heatmap-weekdays {
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+  text-align: center;
+}
+
+.usage-heatmap {
+  grid-auto-rows: minmax(2rem, 1fr);
+  min-height: 0;
+}
+
+.heat-cell {
+  position: relative;
+  display: grid;
+  min-height: 2rem;
+  place-items: center;
+  color: #554c42;
+  background: #f1ede6;
+  border: 1px solid rgba(155, 120, 84, 0.08);
+  border-radius: 3px;
+  cursor: default;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  transition: transform 100ms ease, border-color 100ms ease;
+  animation: heat-cell-in 220ms ease-out both;
+}
+
+.heat-cell:hover:not(.is-blank) {
+  z-index: 2;
+  border-color: var(--ochre);
+  transform: scale(1.04);
+}
+
+.heat-cell.level-1 { background: #e9dfd4; }
+.heat-cell.level-2 { background: #d7c3af; }
+.heat-cell.level-3 { color: #fffaf5; background: #b28d68; }
+.heat-cell.level-4 { color: #fffaf5; background: #806044; }
+.heat-cell.is-future { color: #aaa39a; background: transparent; border-style: dashed; }
+.heat-cell.is-blank { visibility: hidden; }
+
+.heat-tooltip {
+  bottom: calc(100% + 0.35rem);
+}
+
+.heatmap-scale {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+}
+
+.heatmap-scale i {
+  width: 0.8rem;
+  height: 0.8rem;
+  background: #f1ede6;
+  border-radius: 2px;
+}
+
+.heatmap-scale i.level-1 { background: #e9dfd4; }
+.heatmap-scale i.level-2 { background: #d7c3af; }
+.heatmap-scale i.level-3 { background: #b28d68; }
+.heatmap-scale i.level-4 { background: #806044; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes bar-rise {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+@keyframes heat-cell-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes tooltip-in {
+  from { opacity: 0; transform: translate(-50%, 0.3rem) scale(0.98); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar-current,
+  .bar-previous,
+  .heat-cell,
+  .bar-tooltip,
+  .heat-tooltip {
+    animation: none;
+  }
+}
+

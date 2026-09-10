@@ -1,0 +1,44 @@
+:root {
+  font-family: Inter, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  color: #1c1a17;
+  background: var(--paper);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --paper: #fbfaf8;
+  --ink: #1c1a17;
+  --ink-muted: #777168;
+  --ink-faint: #9a9389;
+  --line: #ded9d0;
+  --paper-deep: #f0ece5;
+  --ochre: #9b7854;
+  --moss: #71806a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  overflow: hidden;
+  background: var(--paper);
+}
+
+button {
+  color: inherit;
+  font: inherit;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}

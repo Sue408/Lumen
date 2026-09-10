@@ -1,0 +1,154 @@
+/* Usage page layout correction: keep metric strip compact and reserve the lower track for charts. */
+.usage-page {
+  grid-template-rows: auto auto auto minmax(20rem, 1fr);
+}
+
+.metric-strip {
+  align-self: start;
+}
+
+.header-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.period-control-stack {
+  display: grid;
+  justify-items: end;
+  gap: 0.3rem;
+}
+
+.period-control-stack .period-switcher {
+  width: max-content;
+}
+
+.period-control-stack .period-navigator {
+  min-height: 1.75rem;
+  gap: 0.35rem;
+}
+
+.period-control-stack .period-navigator > button:first-child,
+.period-control-stack .period-navigator > button:nth-child(3) {
+  width: 1.55rem;
+  height: 1.55rem;
+  font-size: 1rem;
+}
+
+.period-control-stack .period-navigator strong {
+  min-width: 9.5rem;
+  font-size: 0.75rem;
+}
+
+.period-control-stack .today-button,
+.today-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+@media (max-width: 50rem) {
+  .header-actions {
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  .period-control-stack {
+    justify-items: start;
+  }
+}
+
+/* Compact usage header controls: icon actions first, period controls second. */
+.header-actions {
+  align-items: flex-end;
+  gap: clamp(0.75rem, 1vw, 1.25rem);
+}
+
+.header-utility-actions {
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  height: clamp(1.55rem, 2vw, 2rem);
+  gap: clamp(0.3rem, 0.5vw, 0.6rem);
+  padding-bottom: 0;
+}
+
+.icon-button {
+  position: relative;
+  display: inline-grid;
+  width: clamp(1.55rem, 2vw, 2rem);
+  height: clamp(1.55rem, 2vw, 2rem);
+  place-items: center;
+  justify-content: center;
+  align-content: center;
+  padding: 0;
+  margin: 0;
+  line-height: 0;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease, opacity 150ms ease;
+}
+
+.icon-button svg {
+  width: clamp(1rem, 1.2vw, 1.25rem);
+  height: clamp(1rem, 1.2vw, 1.25rem);
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.icon-button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ochre);
+  background: rgba(238, 234, 227, 0.45);
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.period-control-stack {
+  gap: clamp(0.25rem, 0.35vw, 0.45rem);
+}
+
+.period-control-stack .period-navigator {
+  min-height: clamp(1.55rem, 2vw, 2rem);
+  column-gap: clamp(0.1rem, 0.18vw, 0.2rem);
+  justify-content: flex-start;
+}
+
+.period-control-stack .period-navigator > button:first-child,
+.period-control-stack .period-navigator > button:nth-child(3) {
+  width: clamp(1.55rem, 2vw, 2rem);
+  height: clamp(1.55rem, 2vw, 2rem);
+  font-size: clamp(0.95rem, 0.9vw, 1.1rem);
+}
+
+.period-control-stack .period-navigator strong {
+  min-width: clamp(8.25rem, 11vw, 12rem);
+  font-size: clamp(0.75rem, 0.85vw, 0.95rem);
+}
+
+@media (max-width: 50rem) {
+  .header-utility-actions {
+    padding-bottom: 0;
+  }
+}
+
+
+.icon-button.today-button {
+  margin-left: 0;
+}
+
+.period-control-stack .period-switcher {
+  gap: clamp(1rem, 1.6vw, 1.75rem);
+}
+
+.period-control-stack .period-switcher button {
+  font-size: clamp(0.875rem, 0.85vw, 1rem);
+}
