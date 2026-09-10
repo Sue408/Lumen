@@ -5,7 +5,6 @@
   justify-self: center;
   grid-template-rows: auto auto auto clamp(22rem, 48vh, 44rem);
   gap: var(--page-gap);
-  animation: page-enter 150ms ease-out both;
 }
 
 .metric-value {
@@ -291,17 +290,6 @@
   color: var(--moss);
 }
 
-@keyframes page-enter {
-  from {
-    opacity: 0;
-    transform: translateY(0.25rem);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @keyframes draw-line {
   to {
     stroke-dashoffset: 0;
@@ -350,7 +338,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .usage-page,
   .runtime-dot,
   .donut-arcs,
   .donut-segment,

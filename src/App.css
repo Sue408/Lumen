@@ -1,6 +1,7 @@
 @import "./styles/theme.css";
 @import "./styles/layout.css";
 @import "./styles/base.css";
+@import "./styles/motion.css";
 @import "./styles/shell.css";
 @import "./styles/features/usage/statistics.css";
 @import "./styles/features/usage/charts.css";
