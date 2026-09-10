@@ -1,8 +1,10 @@
-import { useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { cumulativeToDistribution, buildMonthHeatmap } from "./usageVisualData";
 import type { UsagePeriod } from "./usageData";
 
 const tokenNumber = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
+
+const weekLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
 type BarHover = {
   index: number;
@@ -16,21 +18,59 @@ export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
   const values = cumulativeToDistribution(period.series.currentValues);
   const previous = cumulativeToDistribution(period.series.previousValues);
   const max = Math.max(...values, ...previous, 1);
-  const labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  const labels = weekLabels;
   const containerRef = useRef<HTMLDivElement>(null);
+  const rectRef = useRef<DOMRect | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const pendingRef = useRef<BarHover | null>(null);
   const [hover, setHover] = useState<BarHover | null>(null);
 
-  const handlePointerMove = (event: PointerEvent<HTMLDivElement>, index: number) => {
+  useEffect(() => {
+    const refresh = () => {
+      if (containerRef.current) rectRef.current = containerRef.current.getBoundingClientRect();
+    };
+    window.addEventListener("resize", refresh);
+    return () => {
+      window.removeEventListener("resize", refresh);
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    };
+  }, []);
+
+  const handlePointerEnter = () => {
+    if (containerRef.current) rectRef.current = containerRef.current.getBoundingClientRect();
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     const container = containerRef.current;
     if (!container) return;
-    const bounds = container.getBoundingClientRect();
-    setHover({
-      index,
-      x: event.clientX - bounds.left,
-      y: event.clientY - bounds.top,
-      width: bounds.width,
-      height: bounds.height,
-    });
+    const rect = rectRef.current ?? container.getBoundingClientRect();
+    rectRef.current = rect;
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const ratio = x / rect.width;
+    const index = Math.min(labels.length - 1, Math.max(0, Math.floor(ratio * labels.length)));
+    pendingRef.current = { index, x, y, width: rect.width, height: rect.height };
+    if (frameRef.current === null) {
+      frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = null;
+        const pending = pendingRef.current;
+        if (!pending) return;
+        setHover((prev) =>
+          prev && prev.index === pending.index && prev.x === pending.x && prev.y === pending.y
+            ? prev
+            : pending,
+        );
+      });
+    }
+  };
+
+  const handlePointerLeave = () => {
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    pendingRef.current = null;
+    setHover(null);
   };
 
   const hoveredValue = hover ? values[hover.index] ?? 0 : 0;
@@ -40,11 +80,19 @@ export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
 
   return <article className="chart-panel trend-panel">
     <header className="chart-heading"><h2>每日用量分布<span className="chart-unit">万 Tokens</span></h2><span className="chart-meta">本周 · 上周同期</span></header>
-    <div className="weekly-bars" ref={containerRef} role="img" aria-label="本周每日 Token 用量柱状图" onPointerLeave={() => setHover(null)}>
+    <div
+      className="weekly-bars"
+      ref={containerRef}
+      role="img"
+      aria-label="本周每日 Token 用量柱状图"
+      onPointerEnter={handlePointerEnter}
+      onPointerMove={handlePointerMove}
+      onPointerLeave={handlePointerLeave}
+    >
       {labels.map((label, index) => {
         const value = values[index] ?? 0;
         const prior = previous[index] ?? 0;
-        return <div className={`bar-column${value === 0 ? " is-empty" : ""}`} key={label} onPointerMove={(event) => handlePointerMove(event, index)}>
+        return <div className={`bar-column${value === 0 ? " is-empty" : ""}`} key={label}>
           <div className="bar-track"><i className="bar-previous" style={{ height: `${(prior / max) * 100}%` }} /><i className="bar-current" style={{ height: `${(value / max) * 100}%` }} /></div>
           <span>{label}</span>
         </div>;

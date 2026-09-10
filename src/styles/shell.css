@@ -41,6 +41,9 @@
 }
 
 .nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   width: 100%;
   min-height: 2.25rem;
   padding: 8px 10px;
@@ -54,6 +57,13 @@
   transition:
     color 100ms ease,
     background-color 100ms ease;
+}
+
+.nav-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex: 0 0 auto;
+  stroke-width: 1.5;
 }
 
 .nav-item:hover {

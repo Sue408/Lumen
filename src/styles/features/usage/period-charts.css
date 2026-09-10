@@ -93,7 +93,7 @@
   left: var(--tip-x);
   top: var(--tip-y);
   transform: translate(0.75rem, calc(-100% - 0.75rem));
-  transition: left 90ms ease, top 90ms ease;
+  will-change: left, top;
 }
 
 .bar-tooltip.is-left {
