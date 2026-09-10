@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -69,17 +70,29 @@ pub struct AppState {
     pub events: Arc<dyn EventSink>,
     pub gateway: Mutex<Option<GatewayHandle>>,
     port: Mutex<u16>,
+    data_dir: PathBuf,
 }
 
 impl AppState {
-    pub fn new(db: Db, http: reqwest::Client, events: Arc<dyn EventSink>, port: u16) -> Self {
+    pub fn new(
+        db: Db,
+        http: reqwest::Client,
+        events: Arc<dyn EventSink>,
+        port: u16,
+        data_dir: PathBuf,
+    ) -> Self {
         Self {
             db,
             http,
             events,
             gateway: Mutex::new(None),
             port: Mutex::new(port),
+            data_dir,
         }
+    }
+
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
     }
 
     pub fn port(&self) -> u16 {

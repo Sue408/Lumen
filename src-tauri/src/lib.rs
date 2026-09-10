@@ -74,7 +74,7 @@ pub fn run() {
                     .and_then(|value| value.parse().ok())
                     .unwrap_or(settings.port)
             };
-            let state = Arc::new(AppState::new(db, http, events, port));
+            let state = Arc::new(AppState::new(db, http, events, port, data_dir));
             app.manage(state);
             Ok(())
         })
@@ -100,6 +100,8 @@ pub fn run() {
             commands::query_usage_overview_cmd,
             commands::get_settings_cmd,
             commands::save_settings_cmd,
+            commands::export_seed_cmd,
+            commands::reset_data_cmd,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

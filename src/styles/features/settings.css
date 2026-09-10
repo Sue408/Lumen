@@ -1,0 +1,170 @@
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100vh;
+  padding: var(--page-gutter-y) var(--page-gutter-x);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.settings-page .settings-column {
+  display: grid;
+  gap: var(--page-gap);
+  align-content: start;
+  width: 100%;
+  max-width: 44rem;
+  margin: 0 auto;
+}
+
+.settings-page h1 {
+  margin: 0;
+  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.875rem;
+  font-weight: 600;
+  line-height: 1.12;
+}
+
+.settings-page .page-header {
+  margin-bottom: clamp(1rem, 2.5vh, 1.75rem);
+}
+
+.settings-page .settings-notice {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+
+.settings-page .settings-section {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.settings-page .settings-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.settings-page .settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.3rem 1rem;
+}
+
+.settings-page .settings-row-label {
+  min-width: 0;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+
+.settings-page .settings-row-note {
+  grid-column: 1 / -1;
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+}
+
+.settings-page .settings-row-control {
+  justify-self: end;
+}
+
+.settings-page .settings-input {
+  width: 8rem;
+  height: 2rem;
+  padding: 0 0.5rem;
+  color: var(--ink);
+  text-align: right;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-page .settings-input:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.settings-page .settings-input:disabled {
+  color: var(--ink-muted);
+  background: var(--surface-hover-soft);
+  cursor: not-allowed;
+}
+
+.settings-page .settings-segment {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem;
+  padding: 0.15rem;
+  border: 1px solid var(--line-faint);
+  border-radius: 4px;
+}
+
+.settings-page .settings-segment button {
+  height: 1.5rem;
+  padding: 0 0.85rem;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.settings-page .settings-segment button:hover {
+  color: var(--ink);
+}
+
+.settings-page .settings-segment button.is-selected {
+  color: var(--ink);
+  border-color: var(--ochre);
+  background: var(--surface-active);
+}
+
+.settings-page .settings-segment button:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.settings-page .settings-path {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-page .quiet-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.settings-page .quiet-button svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.settings-page .toggle-pill.is-pending {
+  color: var(--ink-muted);
+  border-color: var(--line);
+}
+
+.settings-page .toggle-pill.is-pending .status-dot {
+  border: 1px solid var(--ink-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-page .settings-segment button {
+    transition: none;
+  }
+}

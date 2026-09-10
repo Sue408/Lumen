@@ -130,10 +130,6 @@
   margin-top: 0;
 }
 
-.theme-toggle {
-  flex: 0 0 auto;
-}
-
 .runtime-dot {
   width: 6px;
   height: 6px;

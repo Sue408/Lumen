@@ -129,6 +129,22 @@ fn reset(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+/// 清空全部业务数据（提供商 / 模型 / 路由 / 密钥 / 日志），保留 `settings`。
+pub fn clear_business_data(conn: &Connection) -> Result<(), AppError> {
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
+    let result = conn.execute_batch(
+        "DELETE FROM route_targets;
+         DELETE FROM routes;
+         DELETE FROM upstream_models;
+         DELETE FROM providers;
+         DELETE FROM virtual_keys;
+         DELETE FROM request_logs;",
+    );
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    result?;
+    Ok(())
+}
+
 fn configure(conn: &Connection) -> Result<(), AppError> {
     conn.pragma_update(None, "foreign_keys", "ON")?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;

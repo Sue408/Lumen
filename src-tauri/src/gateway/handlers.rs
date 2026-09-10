@@ -329,6 +329,7 @@ mod tests {
             reqwest::Client::new(),
             sink.clone(),
             0,
+            std::path::PathBuf::new(),
         ));
         let router = crate::gateway::build_router(state);
 
@@ -359,7 +360,7 @@ mod tests {
     async fn unknown_model_returns_404_and_records_failure() {
         let db = open_in_memory().unwrap();
         let sink = Arc::new(MockSink::default());
-        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
         let router = crate::gateway::build_router(state);
 
         let response = router
@@ -387,7 +388,7 @@ mod tests {
         let db = open_in_memory().unwrap();
         seed_upstream(&db, &base_url, "anthropic", "lumen/claude");
         let sink = Arc::new(MockSink::default());
-        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
         let router = crate::gateway::build_router(state);
 
         let response = router

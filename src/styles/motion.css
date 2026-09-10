@@ -1,6 +1,7 @@
 .usage-page,
 .providers-page,
-.routing-page {
+.routing-page,
+.settings-page {
   animation: page-enter 150ms ease-out both;
 }
 
@@ -19,7 +20,8 @@
 @media (prefers-reduced-motion: reduce) {
   .usage-page,
   .providers-page,
-  .routing-page {
+  .routing-page,
+  .settings-page {
     animation: none;
   }
 }
