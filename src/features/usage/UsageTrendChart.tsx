@@ -9,7 +9,7 @@ import {
   resampleSeries,
 } from "./trendInteraction";
 import type { UsagePeriod } from "./usageData";
-import { isCurrentPeriod } from "./ledgerQuery";
+import { isCurrentPeriod } from "./period";
 
 type UsageTrendChartProps = {
   period: UsagePeriod;

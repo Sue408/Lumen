@@ -6,6 +6,7 @@ import { navigationItems, type ViewId } from "./app/navigation";
 import { useTheme } from "./app/useTheme";
 import { WindowChrome } from "./components/WindowChrome";
 import { UsagePage } from "./features/usage/UsagePage";
+import { LogsPage } from "./features/logs/LogsPage";
 import { ProvidersPage } from "./features/providers/ProvidersPage";
 import { RoutingPage } from "./features/routing/RoutingPage";
 import { SettingsPage } from "./features/settings/SettingsPage";
@@ -19,6 +20,8 @@ function App() {
     switch (view) {
       case "usage":
         return <UsagePage />;
+      case "logs":
+        return <LogsPage />;
       case "providers":
         return <ProvidersPage />;
       case "routing":

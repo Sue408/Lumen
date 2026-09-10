@@ -12,6 +12,7 @@ export type LogFilter = {
   from?: string | null;
   to?: string | null;
   usageSource?: UsageSource | "unreliable" | null;
+  attentionOnly?: boolean | null;
   limit?: number | null;
   offset?: number | null;
 };
@@ -81,6 +82,14 @@ function matchMockLogs(filter: LogFilter): RequestLog[] {
   return mockLogs.filter((log) => {
     if (filter.routeAlias && log.routeAlias !== filter.routeAlias) return false;
     if (filter.status && log.status !== filter.status) return false;
+    if (
+      filter.attentionOnly &&
+      log.status !== "error" &&
+      log.usageSource !== "missing" &&
+      log.usageSource !== "partial"
+    ) {
+      return false;
+    }
     if (filter.usageSource) {
       if (filter.usageSource === "unreliable") {
         if (log.usageSource !== "missing" && log.usageSource !== "partial") return false;

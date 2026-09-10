@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { cumulativeToDistribution, buildMonthHeatmap } from "./usageVisualData";
-import { isCurrentPeriod } from "./ledgerQuery";
+import { isCurrentPeriod } from "./period";
 import type { UsagePeriod } from "./usageData";
 
 const tokenNumber = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });

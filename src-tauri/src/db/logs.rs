@@ -24,13 +24,16 @@ pub struct LogFilter {
     /// 或 "unreliable" 表示 missing 与 partial 两者。
     #[serde(default)]
     pub usage_source: Option<String>,
+    /// 只保留需要关注的记录：status = 'error' 或 usage_source 为 missing / partial。
+    #[serde(default)]
+    pub attention_only: Option<bool>,
     #[serde(default)]
     pub limit: Option<i64>,
     #[serde(default)]
     pub offset: Option<i64>,
 }
 
-/// 过滤条件共用的 WHERE 子句（?1..?6），list 与 count 必须保持一致。
+/// 过滤条件共用的 WHERE 子句（?1..?7），list 与 count 必须保持一致。
 const FILTER_WHERE: &str = "WHERE (?1 IS NULL OR route_alias = ?1)
            AND (?2 IS NULL OR status = ?2)
            AND (?3 IS NULL OR (
@@ -43,7 +46,9 @@ const FILTER_WHERE: &str = "WHERE (?1 IS NULL OR route_alias = ?1)
            AND (?5 IS NULL OR occurred_at < ?5)
            AND (?6 IS NULL
                 OR (?6 = 'unreliable' AND usage_source IN ('missing', 'partial'))
-                OR (?6 <> 'unreliable' AND usage_source = ?6))";
+                OR (?6 <> 'unreliable' AND usage_source = ?6))
+           AND (?7 IS NULL OR ?7 = 0
+                OR status = 'error' OR usage_source IN ('missing', 'partial'))";
 
 /// 绑定到 FILTER_WHERE 的规范化参数：空串一律折算为 NULL。
 struct PreparedFilter {
@@ -53,6 +58,7 @@ struct PreparedFilter {
     from: Option<String>,
     to: Option<String>,
     usage_source: Option<String>,
+    attention_only: Option<bool>,
 }
 
 fn non_empty(value: &Option<String>) -> Option<String> {
@@ -82,6 +88,7 @@ impl PreparedFilter {
             from: canonical_time(&filter.from)?,
             to: canonical_time(&filter.to)?,
             usage_source: non_empty(&filter.usage_source),
+            attention_only: filter.attention_only.filter(|value| *value),
         })
     }
 }
@@ -135,7 +142,7 @@ pub fn list_logs(conn: &Connection, filter: &LogFilter) -> Result<Vec<RequestLog
     let offset = filter.offset.unwrap_or(0).max(0);
     let prepared = PreparedFilter::from_filter(filter)?;
     let sql = format!(
-        "SELECT * FROM request_logs {FILTER_WHERE} ORDER BY occurred_at DESC LIMIT ?7 OFFSET ?8"
+        "SELECT * FROM request_logs {FILTER_WHERE} ORDER BY occurred_at DESC LIMIT ?8 OFFSET ?9"
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(
@@ -146,6 +153,7 @@ pub fn list_logs(conn: &Connection, filter: &LogFilter) -> Result<Vec<RequestLog
             prepared.from,
             prepared.to,
             prepared.usage_source,
+            prepared.attention_only,
             limit,
             offset,
         ],
@@ -170,6 +178,7 @@ pub fn count_logs(conn: &Connection, filter: &LogFilter) -> Result<i64, AppError
             prepared.from,
             prepared.to,
             prepared.usage_source,
+            prepared.attention_only,
         ],
         |row| row.get(0),
     )?;
@@ -261,6 +270,19 @@ mod tests {
         };
         let ids: Vec<String> = list_logs(&conn, &filter).unwrap().into_iter().map(|l| l.id).collect();
         assert_eq!(ids, vec!["log-3", "log-2"]);
+    }
+
+    #[test]
+    fn attention_only_keeps_failures_and_unreliable() {
+        let db = fixture();
+        let conn = db.lock().unwrap();
+        let filter = LogFilter {
+            attention_only: Some(true),
+            ..Default::default()
+        };
+        let ids: Vec<String> = list_logs(&conn, &filter).unwrap().into_iter().map(|l| l.id).collect();
+        assert_eq!(ids, vec!["log-3", "log-2"]);
+        assert_eq!(count_logs(&conn, &filter).unwrap(), 2);
     }
 
     #[test]

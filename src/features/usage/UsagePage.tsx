@@ -5,18 +5,16 @@ import { AnimatedMetricValue } from "./AnimatedMetricValue";
 import { ModelCostBreakdown } from "./ModelCostBreakdown";
 import { UsageTrendChart } from "./UsageTrendChart";
 import { WeeklyUsageBars, MonthlyUsageHeatmap } from "./PeriodUsageCharts";
-import { LedgerPage } from "./LedgerPage";
 import {
   formatPeriodCursor,
   isCurrentPeriod,
   shiftPeriod,
-} from "./ledgerQuery";
+} from "./period";
 import { periodLabels, type PeriodKey, type UsagePeriod } from "./usageData";
 
 export function UsagePage() {
   const [periodKey, setPeriodKey] = useState<PeriodKey>("day");
   const [anchor, setAnchor] = useState(() => new Date());
-  const [showLedger, setShowLedger] = useState(false);
   const [overview, setOverview] = useState<UsagePeriod | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,9 +59,6 @@ export function UsagePage() {
   const moveCursor = (direction: number) =>
     setAnchor((value) => shiftPeriod(periodKey, value, direction));
 
-  if (showLedger)
-    return <LedgerPage periodKey={periodKey} anchor={anchor} onBack={() => setShowLedger(false)} />;
-
   return (
     <main className="usage-page">
       <header className="page-header">
@@ -85,22 +80,6 @@ export function UsagePage() {
         )}
         <div className="header-actions">
           <div className="header-utility-actions" aria-label="账本操作">
-            <button
-              className="icon-button"
-              type="button"
-              title="查看明细"
-              aria-label="查看明细"
-              onClick={() => setShowLedger(true)}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M6 4.5h12M6 9.5h12M6 14.5h7M6 19.5h12" />
-                <circle cx="3.5" cy="4.5" r="0.75" />
-                <circle cx="3.5" cy="9.5" r="0.75" />
-                <circle cx="3.5" cy="14.5" r="0.75" />
-                <circle cx="3.5" cy="19.5" r="0.75" />
-              </svg>
-              <span className="sr-only">查看明细</span>
-            </button>
             <button
               className="icon-button today-button"
               type="button"

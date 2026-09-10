@@ -5,9 +5,7 @@ import {
   getPeriodBounds,
   shiftPeriod,
   isCurrentPeriod,
-  filterLedgerEntries,
-  type LedgerEntry,
-} from "./ledgerQuery.ts";
+} from "./period.ts";
 
 test("period cursor formats the selected day, week, and month", () => {
   const date = new Date(2026, 8, 10, 14, 37);
@@ -24,14 +22,15 @@ test("period navigation moves by the selected accounting unit", () => {
   assert.equal(localDate(shiftPeriod("month", date, -1)), "2026-08-10");
 });
 
-test("ledger filters entries by model and search text", () => {
-  const entries: LedgerEntry[] = [
-    { id: "1", occurredAt: new Date(2026, 8, 10, 9, 20), model: "GPT-5", kind: "聊天", tokens: 12000, cost: 0.12 },
-    { id: "2", occurredAt: new Date(2026, 8, 10, 10, 20), model: "Claude Sonnet", kind: "工具调用", tokens: 8000, cost: 0.08 },
-  ];
-  assert.deepEqual(filterLedgerEntries(entries, { model: "GPT-5" }).map((entry) => entry.id), ["1"]);
-  assert.deepEqual(filterLedgerEntries(entries, { query: "工具" }).map((entry) => entry.id), ["2"]);
+test("period bounds are half-open and match the accounting unit", () => {
+  const { start, end } = getPeriodBounds("day", new Date(2026, 8, 10, 14, 37));
+  assert.equal(start.getHours(), 0);
+  assert.equal(end.getDate(), 11);
+  assert.equal(end.getHours(), 0);
 });
 
-
-
+test("current period detection compares accounting starts", () => {
+  const now = new Date(2026, 8, 10, 14, 37);
+  assert.equal(isCurrentPeriod("day", new Date(2026, 8, 10, 8, 0), now), true);
+  assert.equal(isCurrentPeriod("day", new Date(2026, 8, 9, 8, 0), now), false);
+});
