@@ -4,6 +4,8 @@ pub mod models;
 pub mod providers;
 pub mod routes;
 pub mod seed;
+pub mod settings;
+pub mod stats;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -59,6 +61,11 @@ CREATE TABLE IF NOT EXISTS virtual_keys (
     name        TEXT NOT NULL,
     enabled     INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS request_logs (

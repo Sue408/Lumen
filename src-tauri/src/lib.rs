@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
 use crate::db::models::RequestLog;
-use crate::state::{AppState, DEFAULT_PORT, EventSink, GatewayStatus};
+use crate::state::{AppState, EventSink, GatewayStatus};
 
 /// 把网关事件桥接到 Tauri 事件总线，使 `gateway/` 保持与 Tauri 解耦。
 struct TauriEventSink {
@@ -62,10 +62,16 @@ pub fn run() {
             let events = Arc::new(TauriEventSink {
                 app: app.handle().clone(),
             });
-            let port = std::env::var("LUMEN_PORT")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(DEFAULT_PORT);
+            let port = {
+                let conn = db
+                    .lock()
+                    .map_err(|_| error::AppError::message("数据库锁已中毒"))?;
+                let settings = db::settings::get_settings(&conn)?;
+                std::env::var("LUMEN_PORT")
+                    .ok()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(settings.port)
+            };
             let state = Arc::new(AppState::new(db, http, events, port));
             app.manage(state);
             Ok(())
@@ -88,6 +94,10 @@ pub fn run() {
             commands::delete_virtual_key_cmd,
             commands::list_logs_cmd,
             commands::count_logs_cmd,
+            commands::list_log_aliases_cmd,
+            commands::query_usage_overview_cmd,
+            commands::get_settings_cmd,
+            commands::save_settings_cmd,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

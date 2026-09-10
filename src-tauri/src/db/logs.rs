@@ -88,7 +88,39 @@ pub fn list_logs(conn: &Connection, filter: &LogFilter) -> Result<Vec<RequestLog
     Ok(logs)
 }
 
-pub fn count_logs(conn: &Connection) -> Result<i64, AppError> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM request_logs", [], |row| row.get(0))?;
+pub fn count_logs(conn: &Connection, filter: &LogFilter) -> Result<i64, AppError> {
+    let query = filter
+        .query
+        .as_ref()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM request_logs
+         WHERE (?1 IS NULL OR route_alias = ?1)
+           AND (?2 IS NULL OR status = ?2)
+           AND (?3 IS NULL OR (
+                COALESCE(route_alias, '') || ' ' ||
+                COALESCE(upstream_model_name, '') || ' ' ||
+                kind || ' ' ||
+                CAST(total_tokens AS TEXT)
+           ) LIKE '%' || ?3 || '%')",
+        params![filter.route_alias, filter.status, query],
+        |row| row.get(0),
+    )?;
     Ok(count)
+}
+
+/// 日志中出现过的别名，供筛选下拉使用。
+pub fn list_log_aliases(conn: &Connection) -> Result<Vec<String>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT route_alias FROM request_logs
+         WHERE route_alias IS NOT NULL
+         ORDER BY route_alias ASC",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut aliases = Vec::new();
+    for row in rows {
+        aliases.push(row?);
+    }
+    Ok(aliases)
 }

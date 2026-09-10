@@ -68,7 +68,7 @@ pub struct AppState {
     pub http: reqwest::Client,
     pub events: Arc<dyn EventSink>,
     pub gateway: Mutex<Option<GatewayHandle>>,
-    pub port: u16,
+    port: Mutex<u16>,
 }
 
 impl AppState {
@@ -78,7 +78,17 @@ impl AppState {
             http,
             events,
             gateway: Mutex::new(None),
-            port,
+            port: Mutex::new(port),
+        }
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port.lock().map(|guard| *guard).unwrap_or(DEFAULT_PORT)
+    }
+
+    pub fn set_port(&self, port: u16) {
+        if let Ok(mut guard) = self.port.lock() {
+            *guard = port;
         }
     }
 
@@ -88,10 +98,11 @@ impl AppState {
             .lock()
             .map(|guard| guard.is_some())
             .unwrap_or(false);
+        let port = self.port();
         GatewayStatus {
             running,
-            port: self.port,
-            base_url: GatewayStatus::base_url_for(self.port),
+            port,
+            base_url: GatewayStatus::base_url_for(port),
             error: None,
         }
     }

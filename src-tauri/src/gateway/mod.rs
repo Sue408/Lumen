@@ -34,7 +34,8 @@ pub async fn start(state: Arc<AppState>) -> Result<(), AppError> {
         }
     }
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], state.port));
+    let port = state.port();
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let router = build_router(state.clone());
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
@@ -47,7 +48,6 @@ pub async fn start(state: Arc<AppState>) -> Result<(), AppError> {
             .await;
     });
 
-    let port = state.port;
     {
         let mut guard = state
             .gateway

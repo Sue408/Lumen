@@ -17,7 +17,7 @@ pub async fn start_gateway(state: State<'_, Arc<AppState>>) -> Result<GatewaySta
     if let Err(error) = gateway::start(state.clone()).await {
         state
             .events
-            .status(&GatewayStatus::failed(state.port, error.to_string()));
+            .status(&GatewayStatus::failed(state.port(), error.to_string()));
         return Err(error);
     }
     Ok(state.status())
