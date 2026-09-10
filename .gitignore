@@ -25,3 +25,6 @@ dist-ssr
 
 # Local visual brainstorming artifacts
 .superpowers/
+
+# Local gateway seed config (may contain API keys)
+lumen.seed.json

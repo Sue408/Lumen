@@ -1,4 +1,5 @@
 import { navigationItems, type ViewId } from "./navigation";
+import { useGatewayStatus } from "./useGatewayStatus";
 import { useTheme } from "./useTheme";
 
 type SidebarProps = {
@@ -9,6 +10,15 @@ type SidebarProps = {
 export function Sidebar({ activeView, onNavigate }: SidebarProps) {
   const { theme, toggle } = useTheme();
   const isDark = theme === "dark";
+  const gateway = useGatewayStatus();
+  const running = gateway.status?.running ?? false;
+  const statusLabel = gateway.error
+    ? "启动失败"
+    : gateway.busy
+      ? "切换中"
+      : running
+        ? "网关运行中"
+        : "网关已停止";
 
   return (
     <aside className="sidebar" aria-label="主导航">
@@ -31,10 +41,22 @@ export function Sidebar({ activeView, onNavigate }: SidebarProps) {
         })}
       </nav>
       <div className="sidebar-footer">
-        <div className="runtime-status" role="status">
-          <span className="runtime-dot" aria-hidden="true" />
-          本机运行
-        </div>
+        <button
+          className={`runtime-status${gateway.error ? " is-error" : ""}`}
+          type="button"
+          role="switch"
+          aria-checked={running}
+          aria-label={`${statusLabel}，点击${running ? "停止" : "启动"}网关`}
+          title={`${statusLabel} · ${gateway.status?.baseUrl ?? "127.0.0.1:8787"}`}
+          disabled={gateway.busy}
+          onClick={gateway.toggle}
+        >
+          <span
+            className={`runtime-dot ${running ? "is-running" : "is-stopped"}${gateway.error ? " is-error" : ""}`}
+            aria-hidden="true"
+          />
+          {statusLabel}
+        </button>
         <button
           className="icon-button theme-toggle"
           type="button"

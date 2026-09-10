@@ -1,0 +1,58 @@
+{
+  "providers": [
+    {
+      "name": "OpenAI",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "sk-REPLACE_ME",
+      "authScheme": "bearer",
+      "protocol": "openai",
+      "extraHeaders": {},
+      "enabled": true
+    },
+    {
+      "name": "Anthropic",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "apiKey": "sk-ant-REPLACE_ME",
+      "authScheme": "x-api-key",
+      "protocol": "anthropic",
+      "extraHeaders": { "anthropic-version": "2023-06-01" },
+      "enabled": true
+    }
+  ],
+  "upstreamModels": [
+    {
+      "provider": "OpenAI",
+      "modelId": "gpt-4o-mini",
+      "displayName": "GPT-4o mini",
+      "inputPrice": 0.15,
+      "outputPrice": 0.6,
+      "enabled": true
+    },
+    {
+      "provider": "Anthropic",
+      "modelId": "claude-sonnet-4-5",
+      "displayName": "Claude Sonnet",
+      "inputPrice": 3.0,
+      "outputPrice": 15.0,
+      "enabled": true
+    }
+  ],
+  "routes": [
+    {
+      "alias": "lumen/mini",
+      "displayName": "Lumen 小模型",
+      "enabled": true,
+      "targets": [
+        { "upstreamModel": "GPT-4o mini", "priority": 0, "enabled": true }
+      ]
+    },
+    {
+      "alias": "lumen/claude",
+      "displayName": "Lumen Claude",
+      "enabled": true,
+      "targets": [
+        { "upstreamModel": "Claude Sonnet", "priority": 0, "enabled": true }
+      ]
+    }
+  ]
+}

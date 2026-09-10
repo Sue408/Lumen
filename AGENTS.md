@@ -2,12 +2,22 @@
 
 本文件约束本项目的代码结构与样式规则。核心设计规范见 `docs/UIUX设计文档`，冲突时以设计文档为准。
 
-## 目录分层
+## 项目背景
+
+**Lumen 是一个运行在本机的个人 LLM 网关**：把多个上游提供商聚合成统一的本地接口，按模型别名把请求路由到对应的上游模型，并记录每一次调用的 token 与花费。产品定位是一本私人的 AI 使用账本——安静、可翻查、只服务一个人，不是控制台也不是仪表盘。
+
+- **技术栈**：Tauri 2（Rust 后端）+ React 19 / TypeScript / Vite（前端），图表用原生 SVG，不引图表库。
+- **核心能力**：本地 HTTP 网关（OpenAI 兼容端点）、模型别名路由、用量与花费记账、使用日志流水。
+- **设计语言**：见 `docs/UIUX设计文档`（账簿隐喻、纸感、矿物颜料、朱砂铁律、去脚手架图表）。
+- **后端原则**：所有数据落 SQLite，配置与流水同库；单价按「每百万 token」存储，费用在网关层计算。
+
+## 前端目录分层
 
 ```
 src/
   app/            应用外壳：导航注册表、侧边栏、页面框架、路由状态
   components/     无业务的通用 UI 原语（如 WindowChrome、运行时探测）
+  services/       跨业务的 IPC 封装：Tauri `invoke`/事件 + 浏览器 mock 回退
   features/<域>/  业务页面与其纯逻辑模块，测试与被测模块同目录
   styles/         全部样式，按 base / shell / features 分区
   App.tsx         组合根：持有顶层视图状态，装配 AppShell 与页面
@@ -19,6 +29,26 @@ src/
 - 新增一个业务页面 = 在 `features/<域>/` 建组件与纯逻辑 + 在 `app/navigation.ts` 注册导航项 + 在 `App.tsx` 挂载。
 - 纯计算/格式化逻辑独立成不依赖 React 的模块，并配 `<module>.test.ts`（`node --test` 可跑）。
 - 通用、跨业务复用的 UI 才放 `components/`；只有一个域用的组件留在该 `features/<域>/` 内。
+
+## 后端目录分层
+
+```
+src-tauri/src/
+  lib.rs         组合根：Tauri builder、setup（初始化 DB / 装配状态）、退出清理
+  state.rs       共享状态：DB 连接、HTTP 客户端、设置、网关句柄
+  error.rs       统一错误类型与 HTTP / IPC 错误映射
+  db/            SQLite：连接、migration、各表 CRUD 与查询
+  gateway/       本地代理网关：路由解析、上游转发、定价、HTTP handler
+  commands/      Tauri 命令：网关启停、配置 CRUD、用量查询
+```
+
+规则：
+
+- **数据结构只有一处定义**：所有持久化实体集中放 `db/models.rs`，DTO 与序列化命名（`camelCase`）就地声明。
+- **网关与 IPC 解耦**：`gateway/` 只依赖 `state` 与 `db`，不依赖 Tauri；`commands/` 负责把 `gateway` 能力暴露给前端。
+- **费用计算独立成纯函数**：放 `gateway/usage.rs`，脱离数据库可直接单测。
+- **DB 访问统一走 `db::with_db`**（`spawn_blocking` 包装），不在 handler 里直接持锁跨 `await`。
+- 端口默认 `127.0.0.1:8787`，只绑回环；网关默认关闭，由前端显式启停。
 
 ## 样式与主题
 
@@ -57,4 +87,6 @@ src/
 
 - 前端逻辑：`pnpm test`
 - 类型与构建：`pnpm build`
+- 后端测试：`cargo test`（于 `src-tauri/`）
+- 后端静态检查：`cargo clippy -- -D warnings`（于 `src-tauri/`）
 - 改动样式或结构后，必须确认既有页面的 DOM 结构与类名序列未变。

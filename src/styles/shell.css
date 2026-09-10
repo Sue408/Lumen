@@ -84,8 +84,38 @@
   gap: 8px;
   margin-top: auto;
   padding: 10px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
   color: var(--ink-muted);
+  font: inherit;
   font-size: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.runtime-status:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.runtime-status:active {
+  background: var(--surface-active);
+}
+
+.runtime-status:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.runtime-status:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.runtime-status.is-error {
+  color: var(--danger);
 }
 
 .sidebar-footer {
@@ -109,7 +139,16 @@
   height: 6px;
   flex: 0 0 auto;
   border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+.runtime-dot.is-running {
   background: var(--moss);
   animation: breathe 2500ms ease-in-out infinite;
+}
+
+.runtime-dot.is-error {
+  background: var(--danger);
+  animation: none;
 }
 
