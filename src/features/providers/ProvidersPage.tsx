@@ -333,6 +333,40 @@ export function ProvidersPage() {
     setFormError(null);
   };
 
+  const setProviderAppearance = async (
+    patch: { icon?: string | null; iconTint?: IconTint },
+  ) => {
+    if (!draft) return;
+    const icon = patch.icon !== undefined ? patch.icon : draft.icon;
+    const iconTint = patch.iconTint ?? draft.iconTint;
+    const previous = draft;
+    setDraft({ ...draft, icon, iconTint });
+    if (!selectedProvider) return;
+    setBusy(true);
+    setFormError(null);
+    try {
+      await saveProvider({
+        id: selectedProvider.id,
+        name: selectedProvider.name,
+        baseUrl: selectedProvider.baseUrl,
+        apiKey: selectedProvider.apiKey,
+        authScheme: selectedProvider.authScheme,
+        protocol: selectedProvider.protocol,
+        extraHeaders: selectedProvider.extraHeaders,
+        icon,
+        iconTint,
+        enabled: selectedProvider.enabled,
+      });
+      await refreshLists();
+      setSavedDraft((prev) => (prev ? { ...prev, icon, iconTint } : prev));
+    } catch (err) {
+      setDraft(previous);
+      setFormError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const applyPending = () => {
     if (!pending) return;
     if (pending.kind === "new") selectNew();
@@ -535,8 +569,8 @@ export function ProvidersPage() {
                       glyphClassName={draft.enabled ? undefined : "is-off"}
                       fallback={<Server aria-hidden="true" />}
                       disabled={busy}
-                      onChange={(value) => setDraft({ ...draft, icon: value })}
-                      onTintChange={(value) => setDraft({ ...draft, iconTint: value })}
+                      onChange={(value) => void setProviderAppearance({ icon: value })}
+                      onTintChange={(value) => void setProviderAppearance({ iconTint: value })}
                     />
                     <h2 className="sheet-title">{selectedId === "new" ? "新上游" : draft.name || "未命名上游"}</h2>
                     <TogglePill

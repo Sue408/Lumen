@@ -114,8 +114,6 @@ export function IconPicker({
 
   const select = (value: BrandId | null) => {
     onChange(value);
-    triggerRef.current?.focus();
-    close();
   };
 
   const handlePanelKeys = (event: KeyboardEvent<HTMLDivElement>) => {

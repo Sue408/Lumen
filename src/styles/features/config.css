@@ -82,8 +82,6 @@
   padding: 5px 5px var(--page-gutter-y);
   overflow-y: auto;
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
 }
 
 .register-select {
@@ -179,8 +177,6 @@
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
 }
 
 .sheet-head {
@@ -325,8 +321,6 @@
   box-shadow: var(--shadow-float);
   overflow-y: auto;
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
 }
 
 .brand-picker-auto {
@@ -965,8 +959,6 @@
   box-shadow: var(--shadow-float);
   overflow-y: auto;
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
 }
 
 .modal-title {

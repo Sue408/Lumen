@@ -159,8 +159,7 @@
 .ledger-list {
   min-height: 0;
   overflow: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
+  scrollbar-gutter: stable;
 }
 
 .ledger-list-head,
