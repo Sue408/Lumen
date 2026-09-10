@@ -23,12 +23,13 @@ pub fn insert_log(conn: &Connection, log: &RequestLog) -> Result<(), AppError> {
     conn.execute(
         "INSERT INTO request_logs (
             id, occurred_at, endpoint, method, route_alias, route_id,
-            upstream_model_id, upstream_model_name, provider_id, virtual_key_id,
-            kind, input_tokens, output_tokens, total_tokens, cost,
-            status, http_status, latency_ms, error_message, is_stream
+            upstream_model_id, upstream_model_name, model_real, provider_id, virtual_key_id,
+            kind, input_tokens, output_tokens, total_tokens,
+            cache_read_tokens, cache_creation_tokens, reasoning_tokens,
+            cost, usage_source, status, http_status, latency_ms, error_message, request_id, is_stream
          ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-            ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+            ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
          )",
         params![
             log.id,
@@ -39,17 +40,23 @@ pub fn insert_log(conn: &Connection, log: &RequestLog) -> Result<(), AppError> {
             log.route_id,
             log.upstream_model_id,
             log.upstream_model_name,
+            log.model_real,
             log.provider_id,
             log.virtual_key_id,
             log.kind,
             log.input_tokens,
             log.output_tokens,
             log.total_tokens,
+            log.cache_read_tokens,
+            log.cache_creation_tokens,
+            log.reasoning_tokens,
             log.cost,
+            log.usage_source,
             log.status,
             log.http_status,
             log.latency_ms,
             log.error_message,
+            log.request_id,
             log.is_stream as i64,
         ],
     )?;

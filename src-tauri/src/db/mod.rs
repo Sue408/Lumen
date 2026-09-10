@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS upstream_models (
     display_name  TEXT NOT NULL,
     input_price   REAL NOT NULL DEFAULT 0,
     output_price  REAL NOT NULL DEFAULT 0,
+    cache_read_price     REAL NOT NULL DEFAULT 0,
+    cache_creation_price REAL NOT NULL DEFAULT 0,
     enabled       INTEGER NOT NULL DEFAULT 1
 );
 
@@ -77,17 +79,23 @@ CREATE TABLE IF NOT EXISTS request_logs (
     route_id            TEXT,
     upstream_model_id   TEXT,
     upstream_model_name TEXT,
+    model_real          TEXT,
     provider_id         TEXT,
     virtual_key_id      TEXT,
     kind                TEXT NOT NULL DEFAULT 'chat',
     input_tokens        INTEGER NOT NULL DEFAULT 0,
     output_tokens       INTEGER NOT NULL DEFAULT 0,
     total_tokens        INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens   INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens    INTEGER NOT NULL DEFAULT 0,
     cost                REAL NOT NULL DEFAULT 0,
+    usage_source        TEXT NOT NULL DEFAULT 'missing',
     status              TEXT NOT NULL,
     http_status         INTEGER,
     latency_ms          INTEGER,
     error_message       TEXT,
+    request_id          TEXT,
     is_stream           INTEGER NOT NULL DEFAULT 0
 );
 
@@ -96,41 +104,38 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_alias ON request_logs(route_alias);
 CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(status);
 "#;
 
-fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, AppError> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let mut rows = stmt.query([])?;
-    while let Some(row) = rows.next()? {
-        let name: String = row.get(1)?;
-        if name == column {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
+/// 每次修改 `SCHEMA` 就 +1；启动时版本不符即重建空库（pre-launch 阶段不做逐列迁移）。
+const SCHEMA_VERSION: i64 = 1;
 
-fn add_column_if_missing(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    definition: &str,
-) -> Result<(), AppError> {
-    if !column_exists(conn, table, column)? {
-        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"))?;
-    }
+/// 依赖外键的表按子表在前顺序清空，避免重建时的外键约束。
+const DROP_ALL: &str = "
+DROP TABLE IF EXISTS route_targets;
+DROP TABLE IF EXISTS routes;
+DROP TABLE IF EXISTS upstream_models;
+DROP TABLE IF EXISTS providers;
+DROP TABLE IF EXISTS virtual_keys;
+DROP TABLE IF EXISTS request_logs;
+DROP TABLE IF EXISTS settings;
+";
+
+fn reset(conn: &Connection) -> Result<(), AppError> {
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
+    conn.execute_batch(DROP_ALL)?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
     Ok(())
 }
 
 fn configure(conn: &Connection) -> Result<(), AppError> {
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version != SCHEMA_VERSION {
+        if version != 0 {
+            tracing::warn!("数据库 schema 版本 {version} 与当前 {SCHEMA_VERSION} 不符，已重建空库");
+        }
+        reset(conn)?;
+    }
     conn.execute_batch(SCHEMA)?;
-    // 兼容旧库：为已存在的 providers 表补列。
-    add_column_if_missing(conn, "providers", "protocol", "TEXT NOT NULL DEFAULT 'openai'")?;
-    add_column_if_missing(
-        conn,
-        "providers",
-        "extra_headers",
-        "TEXT NOT NULL DEFAULT '{}'",
-    )?;
+    conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
 }
 

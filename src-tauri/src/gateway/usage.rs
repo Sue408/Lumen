@@ -9,63 +9,203 @@ use crate::state::AppState;
 
 pub const PER_MILLION: f64 = 1_000_000.0;
 
-/// 费用 = 输入 token 计价 + 输出 token 计价，单价均为「每百万 token」。
-/// 结果保留 6 位小数，避免浮点尾差进入数据库。
-pub fn calculate_cost(
-    input_tokens: i64,
-    output_tokens: i64,
-    input_price: f64,
-    output_price: f64,
-) -> f64 {
-    let cost = input_tokens as f64 / PER_MILLION * input_price
-        + output_tokens as f64 / PER_MILLION * output_price;
-    (cost * 1_000_000.0).round() / 1_000_000.0
+/// 用量的来源与可信度。缺失的字段一律不折算为 0。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum UsageSource {
+    /// 上游明确返回，可直接结算。
+    Provider,
+    /// 网关 tokenizer 估算，仅用于限额与展示。
+    #[allow(dead_code)]
+    Estimated,
+    /// 上游未返回任何可用用量。
+    #[default]
+    Missing,
+    /// 有部分真实用量，但流未正常收尾，不得视为完整。
+    Partial,
 }
 
+impl UsageSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UsageSource::Provider => "provider",
+            UsageSource::Estimated => "estimated",
+            UsageSource::Partial => "partial",
+            UsageSource::Missing => "missing",
+        }
+    }
+}
+
+/// 六类规范量 + 来源标记。所有缓存/推理量都保留，避免「缺失即 0」。
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct UsageTotals {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub total_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub reasoning_tokens: i64,
+    /// 输入总量是否已包含缓存命中部分（OpenAI/DeepSeek 为真，Anthropic 为假）。
+    pub contains_cache_read: bool,
+    pub source: UsageSource,
 }
 
 impl UsageTotals {
-    pub fn merged(&self, other: &UsageTotals) -> UsageTotals {
-        UsageTotals {
-            input_tokens: self.input_tokens.max(other.input_tokens),
-            output_tokens: self.output_tokens.max(other.output_tokens),
-            total_tokens: self
-                .total_tokens
-                .max(other.total_tokens),
+    pub fn missing() -> Self {
+        Self {
+            source: UsageSource::Missing,
+            ..Self::default()
         }
     }
 }
 
-/// 从 OpenAI 兼容响应中提取 usage，同时兼容 `prompt_tokens` 与 `input_tokens` 命名。
-pub fn extract_usage(value: &Value) -> Option<UsageTotals> {
-    let usage = value.get("usage")?;
-    if usage.is_null() {
+/// 从响应 JSON 中解析出的「原始存在性」字段；`None` 表示上游未返回，而非 0。
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct UsageFields {
+    pub input: Option<i64>,
+    pub output: Option<i64>,
+    pub total: Option<i64>,
+    pub cache_read: Option<i64>,
+    pub cache_creation: Option<i64>,
+    pub reasoning: Option<i64>,
+}
+
+impl UsageFields {
+    pub fn is_empty(&self) -> bool {
+        self.input.is_none()
+            && self.output.is_none()
+            && self.total.is_none()
+            && self.cache_read.is_none()
+            && self.cache_creation.is_none()
+            && self.reasoning.is_none()
+    }
+
+    /// 流式合并：上游后续出现的字段「覆盖」先前值（Anthropic 的 output 为累计值，
+    /// cache 字段保留最新非空），缺省字段沿用旧值。绝不能做无差别的整块替换或逐字段取大。
+    pub fn merge(self, next: UsageFields) -> UsageFields {
+        UsageFields {
+            input: next.input.or(self.input),
+            output: next.output.or(self.output),
+            total: next.total.or(self.total),
+            cache_read: next.cache_read.or(self.cache_read),
+            cache_creation: next.cache_creation.or(self.cache_creation),
+            reasoning: next.reasoning.or(self.reasoning),
+        }
+    }
+}
+
+/// 只接受非负整数；字符串数字显式解析；`null`/负数/其它类型一律视为缺失。
+fn token(value: Option<&Value>) -> Option<i64> {
+    let value = value?;
+    let parsed = match value {
+        Value::Number(number) => number.as_i64()?,
+        Value::String(text) => text.trim().parse::<i64>().ok()?,
+        _ => return None,
+    };
+    (parsed >= 0).then_some(parsed)
+}
+
+/// 跨厂商提取六类量，覆盖 OpenAI Chat / Responses / Anthropic / DeepSeek 的常见字段。
+pub fn extract_fields(usage: &Value) -> UsageFields {
+    UsageFields {
+        input: token(
+            usage
+                .get("prompt_tokens")
+                .or_else(|| usage.get("input_tokens")),
+        ),
+        output: token(
+            usage
+                .get("completion_tokens")
+                .or_else(|| usage.get("output_tokens")),
+        ),
+        total: token(usage.get("total_tokens")),
+        cache_read: token(
+            usage
+                .get("cache_read_input_tokens")
+                .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
+                .or_else(|| usage.get("prompt_cache_hit_tokens")),
+        ),
+        cache_creation: token(
+            usage
+                .get("cache_creation_input_tokens")
+                .or_else(|| usage.pointer("/prompt_tokens_details/cache_write_tokens")),
+        ),
+        reasoning: token(
+            usage
+                .pointer("/completion_tokens_details/reasoning_tokens")
+                .or_else(|| usage.pointer("/output_tokens_details/reasoning_tokens")),
+        ),
+    }
+}
+
+/// 把存在性字段收敛为规范量。输入与输出都缺失时返回 `None`（无法结算）。
+pub fn finalize(fields: UsageFields, contains_cache_read: bool) -> Option<UsageTotals> {
+    if fields.input.is_none() && fields.output.is_none() && fields.total.is_none() {
         return None;
     }
-    let input = usage
-        .get("prompt_tokens")
-        .or_else(|| usage.get("input_tokens"))
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let output = usage
-        .get("completion_tokens")
-        .or_else(|| usage.get("output_tokens"))
-        .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let total = usage
-        .get("total_tokens")
-        .and_then(Value::as_i64)
-        .unwrap_or(input + output);
+    let input = fields.input.unwrap_or(0);
+    let output = fields.output.unwrap_or(0);
+    let cache_read = fields.cache_read.unwrap_or(0);
+    let cache_creation = fields.cache_creation.unwrap_or(0);
+    let computed_total = if contains_cache_read {
+        input + output
+    } else {
+        input + cache_read + cache_creation + output
+    };
+    let source = if fields.input.is_some() && fields.output.is_some() {
+        UsageSource::Provider
+    } else {
+        UsageSource::Partial
+    };
     Some(UsageTotals {
         input_tokens: input,
         output_tokens: output,
-        total_tokens: total,
+        total_tokens: fields.total.unwrap_or(computed_total),
+        cache_read_tokens: cache_read,
+        cache_creation_tokens: cache_creation,
+        reasoning_tokens: fields.reasoning.unwrap_or(0),
+        contains_cache_read,
+        source,
     })
+}
+
+/// 从完整响应中提取规范用量（非流式）。`contains_cache_read` 由协议决定。
+pub fn extract_usage(value: &Value, contains_cache_read: bool) -> Option<UsageTotals> {
+    let usage = value.get("usage").filter(|usage| !usage.is_null())?;
+    finalize(extract_fields(usage), contains_cache_read)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Pricing {
+    pub input: f64,
+    pub output: f64,
+    pub cache_read: f64,
+    pub cache_creation: f64,
+}
+
+/// 计费：先按边界判断命中是否已含在输入中，再分别计价。
+/// 缓存单价为 0 时回退到输入单价，保证「未配置缓存价」不会把命中算成免费。
+/// 结果保留 6 位小数，避免浮点尾差进入数据库。
+pub fn calculate_cost(usage: &UsageTotals, price: &Pricing) -> f64 {
+    let cache_read_price = if price.cache_read > 0.0 {
+        price.cache_read
+    } else {
+        price.input
+    };
+    let cache_creation_price = if price.cache_creation > 0.0 {
+        price.cache_creation
+    } else {
+        price.input
+    };
+    let billable_input = if usage.contains_cache_read {
+        (usage.input_tokens - usage.cache_read_tokens).max(0)
+    } else {
+        usage.input_tokens
+    };
+    let cost = billable_input as f64 / PER_MILLION * price.input
+        + usage.cache_read_tokens as f64 / PER_MILLION * cache_read_price
+        + usage.cache_creation_tokens as f64 / PER_MILLION * cache_creation_price
+        + usage.output_tokens as f64 / PER_MILLION * price.output;
+    (cost * 1_000_000.0).round() / 1_000_000.0
 }
 
 pub struct LogContext {
@@ -79,7 +219,8 @@ pub struct LogContext {
     pub status: String,
     pub http_status: Option<i64>,
     pub error_message: Option<String>,
-    pub usage: Option<UsageTotals>,
+    pub request_id: Option<String>,
+    pub usage: UsageTotals,
 }
 
 pub fn build_log(context: LogContext) -> RequestLog {
@@ -94,21 +235,23 @@ pub fn build_log(context: LogContext) -> RequestLog {
         status,
         http_status,
         error_message,
+        request_id,
         usage,
     } = context;
 
-    let totals = usage.unwrap_or_default();
-    let cost = route
-        .as_ref()
-        .map(|route| {
-            calculate_cost(
-                totals.input_tokens,
-                totals.output_tokens,
-                route.input_price,
-                route.output_price,
-            )
-        })
-        .unwrap_or(0.0);
+    let cost = match (&route, usage.source) {
+        (Some(_), UsageSource::Missing) => 0.0,
+        (Some(route), _) => calculate_cost(
+            &usage,
+            &Pricing {
+                input: route.input_price,
+                output: route.output_price,
+                cache_read: route.cache_read_price,
+                cache_creation: route.cache_creation_price,
+            },
+        ),
+        (None, _) => 0.0,
+    };
 
     RequestLog {
         id: uuid::Uuid::new_v4().to_string(),
@@ -119,17 +262,23 @@ pub fn build_log(context: LogContext) -> RequestLog {
         route_id: route.as_ref().map(|route| route.route_id.clone()),
         upstream_model_id: route.as_ref().map(|route| route.upstream_model_id.clone()),
         upstream_model_name: route.as_ref().map(|route| route.display_name.clone()),
+        model_real: route.as_ref().map(|route| route.model_id.clone()),
         provider_id: route.as_ref().map(|route| route.provider_id.clone()),
         virtual_key_id: None,
         kind,
-        input_tokens: totals.input_tokens,
-        output_tokens: totals.output_tokens,
-        total_tokens: totals.total_tokens,
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        total_tokens: usage.total_tokens,
+        cache_read_tokens: usage.cache_read_tokens,
+        cache_creation_tokens: usage.cache_creation_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
         cost,
+        usage_source: usage.source.as_str().to_string(),
         status,
         http_status,
         latency_ms: Some(latency_ms),
         error_message,
+        request_id,
         is_stream,
     }
 }
@@ -146,37 +295,161 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn pricing(input: f64, output: f64) -> Pricing {
+        Pricing {
+            input,
+            output,
+            cache_read: 0.0,
+            cache_creation: 0.0,
+        }
+    }
+
+    fn totals(input: i64, output: i64, contains_cache_read: bool) -> UsageTotals {
+        UsageTotals {
+            input_tokens: input,
+            output_tokens: output,
+            total_tokens: input + output,
+            contains_cache_read,
+            source: UsageSource::Provider,
+            ..UsageTotals::default()
+        }
+    }
+
     #[test]
     fn cost_uses_per_million_pricing() {
-        assert_eq!(calculate_cost(1_000_000, 1_000_000, 3.0, 15.0), 18.0);
-        assert_eq!(calculate_cost(0, 0, 3.0, 15.0), 0.0);
+        assert_eq!(
+            calculate_cost(&totals(1_000_000, 1_000_000, true), &pricing(3.0, 15.0)),
+            18.0
+        );
+        assert_eq!(
+            calculate_cost(&totals(0, 0, true), &pricing(3.0, 15.0)),
+            0.0
+        );
     }
 
     #[test]
     fn cost_rounds_to_six_decimals() {
-        assert_eq!(calculate_cost(1, 0, 3.0, 0.0), 0.000003);
+        assert_eq!(
+            calculate_cost(&totals(1, 0, true), &pricing(3.0, 0.0)),
+            0.000003
+        );
+    }
+
+    #[test]
+    fn cost_subtracts_cache_when_input_contains_it() {
+        let mut usage = totals(100, 0, true);
+        usage.cache_read_tokens = 60;
+        // 未配置缓存价：命中回退输入价，总价与全按输入计相同，不重复计费。
+        assert_eq!(calculate_cost(&usage, &pricing(3.0, 0.0)), 0.0003);
+
+        let price = Pricing {
+            input: 3.0,
+            output: 0.0,
+            cache_read: 1.0,
+            cache_creation: 0.0,
+        };
+        // 未命中 40 × 3 + 命中 60 × 1，每百万。
+        assert_eq!(calculate_cost(&usage, &price), 0.00018);
+    }
+
+    #[test]
+    fn cost_keeps_cache_separate_when_input_excludes_it() {
+        let mut usage = totals(100, 0, false);
+        usage.cache_read_tokens = 60;
+        let price = Pricing {
+            input: 3.0,
+            output: 0.0,
+            cache_read: 1.0,
+            cache_creation: 0.0,
+        };
+        // Anthropic 语义：输入不含缓存读取，两部分相加。
+        assert_eq!(calculate_cost(&usage, &price), 0.00036);
     }
 
     #[test]
     fn extract_usage_accepts_openai_naming() {
         let value = json!({ "usage": { "prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20 } });
-        assert_eq!(
-            extract_usage(&value),
-            Some(UsageTotals { input_tokens: 12, output_tokens: 8, total_tokens: 20 })
-        );
+        let usage = extract_usage(&value, true).unwrap();
+        assert_eq!(usage.input_tokens, 12);
+        assert_eq!(usage.output_tokens, 8);
+        assert_eq!(usage.total_tokens, 20);
+        assert_eq!(usage.source, UsageSource::Provider);
     }
 
     #[test]
-    fn extract_usage_accepts_alternate_naming_and_derives_total() {
-        let value = json!({ "usage": { "input_tokens": 5, "output_tokens": 7 } });
-        assert_eq!(
-            extract_usage(&value),
-            Some(UsageTotals { input_tokens: 5, output_tokens: 7, total_tokens: 12 })
-        );
+    fn extract_usage_reads_cache_and_reasoning_fields() {
+        let value = json!({
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_tokens_details": { "cached_tokens": 64 },
+                "completion_tokens_details": { "reasoning_tokens": 5 }
+            }
+        });
+        let usage = extract_usage(&value, true).unwrap();
+        assert_eq!(usage.cache_read_tokens, 64);
+        assert_eq!(usage.reasoning_tokens, 5);
+    }
+
+    #[test]
+    fn extract_usage_reads_anthropic_cache_fields() {
+        let value = json!({
+            "usage": {
+                "input_tokens": 500,
+                "output_tokens": 120,
+                "cache_read_input_tokens": 100,
+                "cache_creation_input_tokens": 400
+            }
+        });
+        let usage = extract_usage(&value, false).unwrap();
+        assert_eq!(usage.input_tokens, 500);
+        assert_eq!(usage.cache_read_tokens, 100);
+        assert_eq!(usage.cache_creation_tokens, 400);
+        // 输入不含缓存：总量应把读取与写入补回。
+        assert_eq!(usage.total_tokens, 1120);
+    }
+
+    #[test]
+    fn extract_usage_treats_negative_and_null_as_missing() {
+        assert_eq!(extract_usage(&json!({ "usage": null }), true), None);
+        let value = json!({ "usage": { "prompt_tokens": -1, "completion_tokens": -1 } });
+        assert_eq!(extract_usage(&value, true), None);
+        let partial = json!({ "usage": { "prompt_tokens": -1, "completion_tokens": 7 } });
+        let usage = extract_usage(&partial, true).unwrap();
+        assert_eq!(usage.input_tokens, 0);
+        assert_eq!(usage.output_tokens, 7);
+        assert_eq!(usage.source, UsageSource::Partial);
+    }
+
+    #[test]
+    fn extract_usage_parses_string_numbers() {
+        let value = json!({ "usage": { "prompt_tokens": "12", "completion_tokens": "8" } });
+        let usage = extract_usage(&value, true).unwrap();
+        assert_eq!(usage.input_tokens, 12);
+        assert_eq!(usage.output_tokens, 8);
     }
 
     #[test]
     fn extract_usage_returns_none_without_usage() {
-        assert_eq!(extract_usage(&json!({ "choices": [] })), None);
+        assert_eq!(extract_usage(&json!({ "choices": [] }), true), None);
+    }
+
+    #[test]
+    fn merge_overwrites_present_fields_only() {
+        let start = UsageFields {
+            input: Some(25),
+            output: Some(1),
+            cache_read: Some(10),
+            ..UsageFields::default()
+        };
+        let delta = UsageFields {
+            output: Some(15),
+            ..UsageFields::default()
+        };
+        let merged = start.merge(delta);
+        assert_eq!(merged.input, Some(25));
+        assert_eq!(merged.output, Some(15));
+        assert_eq!(merged.cache_read, Some(10));
     }
 }

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::extract::State;
 use axum::http::{header, StatusCode};
@@ -10,13 +10,16 @@ use serde_json::{json, Value};
 use crate::db::routes::list_enabled_aliases;
 use crate::db::with_db;
 use crate::error::AppError;
-use crate::gateway::forward::{error_response, send, stream_response};
+use crate::gateway::forward::{
+    contains_cache_read, ensure_include_usage, error_response, request_id, send, stream_response,
+};
 use crate::gateway::resolve::resolve;
-use crate::gateway::usage::{build_log, extract_usage, record, LogContext};
+use crate::gateway::usage::{build_log, extract_usage, record, LogContext, UsageTotals};
 use crate::state::AppState;
 
 const CHAT_ENDPOINT: &str = "/v1/chat/completions";
 const MESSAGES_ENDPOINT: &str = "/v1/messages";
+const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(600);
 
 pub async fn health() -> Response {
     Json(json!({ "status": "ok" })).into_response()
@@ -84,7 +87,8 @@ async fn forward_completion(
                 status: "error".to_string(),
                 http_status: Some(404),
                 error_message: Some(format!("未找到模型：{alias}")),
-                usage: None,
+                request_id: None,
+                usage: UsageTotals::missing(),
             });
             let _ = record(&state, log).await;
             return AppError::ModelNotFound(alias).into_response();
@@ -93,8 +97,11 @@ async fn forward_completion(
     };
 
     body["model"] = Value::String(route.model_id.clone());
+    ensure_include_usage(&mut body, &route.protocol, is_stream);
+    let cache_in_input = contains_cache_read(&route.protocol);
     let started = Instant::now();
-    let response = match send(&state, &route, &body, upstream_path).await {
+    let timeout = if is_stream { None } else { Some(UPSTREAM_TIMEOUT) };
+    let response = match send(&state, &route, &body, upstream_path, timeout).await {
         Ok(response) => response,
         Err(error) => {
             let log = build_log(LogContext {
@@ -108,12 +115,14 @@ async fn forward_completion(
                 status: "error".to_string(),
                 http_status: None,
                 error_message: Some(error.to_string()),
-                usage: None,
+                request_id: None,
+                usage: UsageTotals::missing(),
             });
             let _ = record(&state, log).await;
             return error.into_response();
         }
     };
+    let request_id = request_id(response.headers());
 
     if is_stream {
         return stream_response(state, route, alias, endpoint.to_string(), response);
@@ -126,7 +135,7 @@ async fn forward_completion(
         Err(error) => return crate::error::AppError::from(error).into_response(),
     };
     let value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-    let usage = extract_usage(&value);
+    let usage = extract_usage(&value, cache_in_input).unwrap_or_else(UsageTotals::missing);
 
     let log = build_log(LogContext {
         endpoint: endpoint.to_string(),
@@ -147,6 +156,7 @@ async fn forward_completion(
         } else {
             Some(error_message(&value, &text))
         },
+        request_id,
         usage,
     });
     let _ = record(&state, log).await;
@@ -272,6 +282,8 @@ mod tests {
                 display_name: "Mock".into(),
                 input_price: 1.0,
                 output_price: 2.0,
+                cache_read_price: 0.0,
+                cache_creation_price: 0.0,
                 enabled: true,
             },
         )

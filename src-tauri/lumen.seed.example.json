@@ -26,6 +26,8 @@
       "displayName": "GPT-4o mini",
       "inputPrice": 0.15,
       "outputPrice": 0.6,
+      "cacheReadPrice": 0.075,
+      "cacheCreationPrice": 0,
       "enabled": true
     },
     {
@@ -34,6 +36,8 @@
       "displayName": "Claude Sonnet",
       "inputPrice": 3.0,
       "outputPrice": 15.0,
+      "cacheReadPrice": 0.3,
+      "cacheCreationPrice": 3.75,
       "enabled": true
     }
   ],

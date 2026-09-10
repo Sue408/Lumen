@@ -58,7 +58,9 @@ pub fn run() {
                 }
             }
 
-            let http = reqwest::Client::builder().build()?;
+            let http = reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .build()?;
             let events = Arc::new(TauriEventSink {
                 app: app.handle().clone(),
             });

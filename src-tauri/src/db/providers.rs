@@ -83,14 +83,17 @@ pub fn save_upstream_model(
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     conn.execute(
         "INSERT INTO upstream_models
-            (id, provider_id, model_id, display_name, input_price, output_price, enabled)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            (id, provider_id, model_id, display_name, input_price, output_price,
+             cache_read_price, cache_creation_price, enabled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(id) DO UPDATE SET
             provider_id = excluded.provider_id,
             model_id = excluded.model_id,
             display_name = excluded.display_name,
             input_price = excluded.input_price,
             output_price = excluded.output_price,
+            cache_read_price = excluded.cache_read_price,
+            cache_creation_price = excluded.cache_creation_price,
             enabled = excluded.enabled",
         params![
             id,
@@ -99,6 +102,8 @@ pub fn save_upstream_model(
             input.display_name,
             input.input_price,
             input.output_price,
+            input.cache_read_price,
+            input.cache_creation_price,
             input.enabled as i64,
         ],
     )?;

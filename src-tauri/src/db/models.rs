@@ -78,6 +78,8 @@ pub struct UpstreamModel {
     pub display_name: String,
     pub input_price: f64,
     pub output_price: f64,
+    pub cache_read_price: f64,
+    pub cache_creation_price: f64,
     pub enabled: bool,
 }
 
@@ -92,6 +94,10 @@ pub struct UpstreamModelInput {
     pub input_price: f64,
     #[serde(default)]
     pub output_price: f64,
+    #[serde(default)]
+    pub cache_read_price: f64,
+    #[serde(default)]
+    pub cache_creation_price: f64,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -105,6 +111,8 @@ impl UpstreamModel {
             display_name: row.get("display_name")?,
             input_price: row.get("input_price")?,
             output_price: row.get("output_price")?,
+            cache_read_price: row.get("cache_read_price")?,
+            cache_creation_price: row.get("cache_creation_price")?,
             enabled: row.get::<_, i64>("enabled")? != 0,
         })
     }
@@ -227,17 +235,23 @@ pub struct RequestLog {
     pub route_id: Option<String>,
     pub upstream_model_id: Option<String>,
     pub upstream_model_name: Option<String>,
+    pub model_real: Option<String>,
     pub provider_id: Option<String>,
     pub virtual_key_id: Option<String>,
     pub kind: String,
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub total_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_creation_tokens: i64,
+    pub reasoning_tokens: i64,
     pub cost: f64,
+    pub usage_source: String,
     pub status: String,
     pub http_status: Option<i64>,
     pub latency_ms: Option<i64>,
     pub error_message: Option<String>,
+    pub request_id: Option<String>,
     pub is_stream: bool,
 }
 
@@ -252,17 +266,23 @@ impl RequestLog {
             route_id: row.get("route_id")?,
             upstream_model_id: row.get("upstream_model_id")?,
             upstream_model_name: row.get("upstream_model_name")?,
+            model_real: row.get("model_real")?,
             provider_id: row.get("provider_id")?,
             virtual_key_id: row.get("virtual_key_id")?,
             kind: row.get("kind")?,
             input_tokens: row.get("input_tokens")?,
             output_tokens: row.get("output_tokens")?,
             total_tokens: row.get("total_tokens")?,
+            cache_read_tokens: row.get("cache_read_tokens")?,
+            cache_creation_tokens: row.get("cache_creation_tokens")?,
+            reasoning_tokens: row.get("reasoning_tokens")?,
             cost: row.get("cost")?,
+            usage_source: row.get("usage_source")?,
             status: row.get("status")?,
             http_status: row.get("http_status")?,
             latency_ms: row.get("latency_ms")?,
             error_message: row.get("error_message")?,
+            request_id: row.get("request_id")?,
             is_stream: row.get::<_, i64>("is_stream")? != 0,
         })
     }

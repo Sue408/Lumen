@@ -47,6 +47,10 @@ struct SeedModel {
     input_price: f64,
     #[serde(default)]
     output_price: f64,
+    #[serde(default)]
+    cache_read_price: f64,
+    #[serde(default)]
+    cache_creation_price: f64,
     #[serde(default = "default_true")]
     enabled: bool,
 }
@@ -142,8 +146,9 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
         };
         tx.execute(
             "INSERT INTO upstream_models
-                (id, provider_id, model_id, display_name, input_price, output_price, enabled)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                (id, provider_id, model_id, display_name, input_price, output_price,
+                 cache_read_price, cache_creation_price, enabled)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 id,
                 provider_id,
@@ -151,6 +156,8 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
                 display_name,
                 model.input_price,
                 model.output_price,
+                model.cache_read_price,
+                model.cache_creation_price,
                 model.enabled as i64,
             ],
         )?;
