@@ -9,6 +9,8 @@ export type GatewayStatus = {
   error: string | null;
 };
 
+export type UsageSource = "provider" | "estimated" | "partial" | "missing";
+
 export type RequestLog = {
   id: string;
   occurredAt: string;
@@ -18,17 +20,23 @@ export type RequestLog = {
   routeId: string | null;
   upstreamModelId: string | null;
   upstreamModelName: string | null;
+  modelReal: string | null;
   providerId: string | null;
   virtualKeyId: string | null;
   kind: string;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  reasoningTokens: number;
   cost: number;
+  usageSource: UsageSource;
   status: string;
   httpStatus: number | null;
   latencyMs: number | null;
   errorMessage: string | null;
+  requestId: string | null;
   isStream: boolean;
 };
 
