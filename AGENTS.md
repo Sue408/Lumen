@@ -20,6 +20,14 @@ src/
 - 纯计算/格式化逻辑独立成不依赖 React 的模块，并配 `<module>.test.ts`（`node --test` 可跑）。
 - 通用、跨业务复用的 UI 才放 `components/`；只有一个域用的组件留在该 `features/<域>/` 内。
 
+## 样式与主题
+
+**颜色只有一个来源：`src/styles/theme.css`。** 所有颜色与阴影都必须写成 token 引用（`var(--ink)`、`var(--chart-ochre)`、`var(--shadow-float)`），**禁止**在页面样式或组件里硬编码十六进制 / `rgb()` 色值。`theme.css` 用 CSS `light-dark()` 按 `color-scheme` 一次声明明暗两套值，`App.css` 将其作为第一行 `@import` 引入。
+
+- 新增一个颜色语义时，先在 `theme.css` 补 token（明 + 暗两个值），再在调用点引用。
+- 非颜色的结构差异（如深色下取消阴影）也通过 token 表达，不要在调用点写主题分支。
+- 图表数据只持语义键（如 `ChartTone`），颜色映射由组件层转成 `var(--chart-*)`，数据不出现色值。
+
 ## 新页面 CSS 规则
 
 **1. 纯 CSS，不用 CSS Modules / 预处理器 / 原子类。**

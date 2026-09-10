@@ -22,7 +22,7 @@
 .today-button:hover {
   color: var(--ink);
   border-color: var(--ochre);
-  background: rgba(238, 234, 227, 0.45);
+  background: var(--surface-hover-soft);
 }
 
 .period-navigator {
@@ -49,7 +49,7 @@
 
 .period-navigator > button:hover:not(:disabled) {
   border-color: var(--ochre);
-  background: #f0ece5;
+  background: var(--paper-deep);
 }
 
 .period-navigator button:disabled {
@@ -183,7 +183,7 @@
 
 .ledger-row {
   min-height: 4.25rem;
-  border-top: 1px solid rgba(222, 217, 208, 0.7);
+  border-top: 1px solid var(--line-faint);
   font-size: 0.8125rem;
 }
 

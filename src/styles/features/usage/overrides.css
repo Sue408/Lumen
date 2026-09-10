@@ -104,7 +104,7 @@
 .icon-button:hover:not(:disabled) {
   color: var(--ink);
   border-color: var(--ochre);
-  background: rgba(238, 234, 227, 0.45);
+  background: var(--surface-hover-soft);
 }
 
 .icon-button:disabled {

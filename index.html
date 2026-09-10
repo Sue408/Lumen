@@ -5,6 +5,18 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Lumen · 用量统计</title>
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("lumen-theme");
+          if (saved === "light" || saved === "dark") {
+            document.documentElement.dataset.theme = saved;
+          }
+        } catch (error) {
+          /* storage unavailable — fall back to the OS preference */
+        }
+      })();
+    </script>
   </head>
 
   <body>

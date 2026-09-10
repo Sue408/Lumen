@@ -6,10 +6,12 @@ export type Metric = {
   comparison: string;
 };
 
+export type ChartTone = "ochre" | "indigo" | "moss" | "yellow";
+
 export type ModelCost = {
   name: string;
   cost: number;
-  color: string;
+  tone: ChartTone;
 };
 
 export type UsagePeriod = {
@@ -28,13 +30,6 @@ export type UsagePeriod = {
     previousValues: number[];
   };
   modelCosts: ModelCost[];
-};
-
-const colors = {
-  ochre: "#9b7854",
-  indigo: "#607087",
-  moss: "#71806a",
-  yellow: "#b39a60",
 };
 
 export const periodLabels: Record<PeriodKey, string> = {
@@ -65,10 +60,10 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
       previousValues: [6, 22, 31, 42, 47],
     },
     modelCosts: [
-      { name: "Claude Sonnet", cost: 2.31, color: colors.ochre },
-      { name: "GPT-5", cost: 1.3, color: colors.indigo },
-      { name: "Gemini Pro", cost: 0.77, color: colors.moss },
-      { name: "其他", cost: 0.44, color: colors.yellow },
+      { name: "Claude Sonnet", cost: 2.31, tone: "ochre" },
+      { name: "GPT-5", cost: 1.3, tone: "indigo" },
+      { name: "Gemini Pro", cost: 0.77, tone: "moss" },
+      { name: "其他", cost: 0.44, tone: "yellow" },
     ],
   },
   week: {
@@ -92,10 +87,10 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
       previousValues: [58, 146, 214, 268, 329, 362],
     },
     modelCosts: [
-      { name: "Claude Sonnet", cost: 15.1, color: colors.ochre },
-      { name: "GPT-5", cost: 8.49, color: colors.indigo },
-      { name: "Gemini Pro", cost: 5.03, color: colors.moss },
-      { name: "其他", cost: 2.84, color: colors.yellow },
+      { name: "Claude Sonnet", cost: 15.1, tone: "ochre" },
+      { name: "GPT-5", cost: 8.49, tone: "indigo" },
+      { name: "Gemini Pro", cost: 5.03, tone: "moss" },
+      { name: "其他", cost: 2.84, tone: "yellow" },
     ],
   },
   month: {
@@ -119,10 +114,10 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
       previousValues: [122, 318, 486, 662, 751],
     },
     modelCosts: [
-      { name: "Claude Sonnet", cost: 36.68, color: colors.ochre },
-      { name: "GPT-5", cost: 20.63, color: colors.indigo },
-      { name: "Gemini Pro", cost: 12.23, color: colors.moss },
-      { name: "其他", cost: 6.88, color: colors.yellow },
+      { name: "Claude Sonnet", cost: 36.68, tone: "ochre" },
+      { name: "GPT-5", cost: 20.63, tone: "indigo" },
+      { name: "Gemini Pro", cost: 12.23, tone: "moss" },
+      { name: "其他", cost: 6.88, tone: "yellow" },
     ],
   },
 };

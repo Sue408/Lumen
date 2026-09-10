@@ -1,7 +1,9 @@
 import type { CSSProperties } from "react";
 import { AnimatedMetricValue } from "./AnimatedMetricValue";
 import { buildDonutSegments } from "./chartGeometry";
-import type { UsagePeriod } from "./usageData";
+import type { ChartTone, UsagePeriod } from "./usageData";
+
+const toneColor = (tone: ChartTone) => `var(--chart-${tone})`;
 
 type ModelCostBreakdownProps = {
   period: UsagePeriod;
@@ -44,7 +46,7 @@ export function ModelCostBreakdown({ period }: ModelCostBreakdownProps) {
                     "--segment-length": (segment.length / 100) * donutCircumference,
                     "--segment-rest": ((100 - segment.length) / 100) * donutCircumference,
                     "--segment-offset": (segment.offset / 100) * donutCircumference,
-                    stroke: model.color,
+                    stroke: toneColor(model.tone),
                   } as CSSProperties;
                   return (
                     <circle
@@ -75,7 +77,7 @@ export function ModelCostBreakdown({ period }: ModelCostBreakdownProps) {
             return (
               <div className="cost-row" role="listitem" key={model.name}>
                 <span className="model-name">
-                  <i style={{ backgroundColor: model.color }} aria-hidden="true" />
+                  <i style={{ backgroundColor: toneColor(model.tone) }} aria-hidden="true" />
                   {model.name}
                 </span>
                 <span className="model-cost">{currency.format(model.cost)}</span>

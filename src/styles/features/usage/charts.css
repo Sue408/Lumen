@@ -63,7 +63,7 @@
 }
 
 .key-line.is-previous {
-  border-top-color: #b9b4ab;
+  border-top-color: var(--line-strong);
   border-top-style: dashed;
 }
 
@@ -115,7 +115,7 @@
 }
 
 .previous-line {
-  stroke: #b9b4ab;
+  stroke: var(--line-strong);
   stroke-width: 1.4;
   stroke-dasharray: 5 6;
 }

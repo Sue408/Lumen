@@ -47,7 +47,7 @@
 }
 
 .bar-previous {
-  background: #d2cdc4;
+  background: var(--bar-previous);
 }
 
 .bar-column.is-empty .bar-track::after {
@@ -68,10 +68,10 @@
   min-width: 8rem;
   padding: 0.55rem 0.65rem;
   color: var(--ink-muted);
-  background: rgba(251, 250, 248, 0.98);
+  background: var(--tooltip-bg);
   border: 1px solid var(--line);
   border-radius: 4px;
-  box-shadow: 0 0.4rem 1rem rgba(54, 46, 36, 0.08);
+  box-shadow: var(--shadow-tooltip);
   font-size: 0.75rem;
   text-align: left;
   transform: translateX(-50%);
@@ -116,9 +116,9 @@
   display: grid;
   min-height: 2rem;
   place-items: center;
-  color: #554c42;
-  background: #f1ede6;
-  border: 1px solid rgba(155, 120, 84, 0.08);
+  color: var(--heat-text);
+  background: var(--heat-0);
+  border: 1px solid var(--heat-cell-line);
   border-radius: 3px;
   cursor: default;
   font-size: 0.75rem;
@@ -133,11 +133,11 @@
   transform: scale(1.04);
 }
 
-.heat-cell.level-1 { background: #e9dfd4; }
-.heat-cell.level-2 { background: #d7c3af; }
-.heat-cell.level-3 { color: #fffaf5; background: #b28d68; }
-.heat-cell.level-4 { color: #fffaf5; background: #806044; }
-.heat-cell.is-future { color: #aaa39a; background: transparent; border-style: dashed; }
+.heat-cell.level-1 { background: var(--heat-1); }
+.heat-cell.level-2 { background: var(--heat-2); }
+.heat-cell.level-3 { color: var(--heat-text-strong); background: var(--heat-3); }
+.heat-cell.level-4 { color: var(--heat-text-strong); background: var(--heat-4); }
+.heat-cell.is-future { color: var(--ink-faint); background: transparent; border-style: dashed; }
 .heat-cell.is-blank { visibility: hidden; }
 
 .heat-tooltip {
@@ -156,14 +156,14 @@
 .heatmap-scale i {
   width: 0.8rem;
   height: 0.8rem;
-  background: #f1ede6;
+  background: var(--heat-0);
   border-radius: 2px;
 }
 
-.heatmap-scale i.level-1 { background: #e9dfd4; }
-.heatmap-scale i.level-2 { background: #d7c3af; }
-.heatmap-scale i.level-3 { background: #b28d68; }
-.heatmap-scale i.level-4 { background: #806044; }
+.heatmap-scale i.level-1 { background: var(--heat-1); }
+.heatmap-scale i.level-2 { background: var(--heat-2); }
+.heatmap-scale i.level-3 { background: var(--heat-3); }
+.heatmap-scale i.level-4 { background: var(--heat-4); }
 
 .sr-only {
   position: absolute;

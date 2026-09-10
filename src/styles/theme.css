@@ -1,0 +1,75 @@
+/*
+ * Theme tokens — the single source of truth for every colour and depth value.
+ *
+ * `light-dark()` resolves against the element's used `color-scheme`, so the
+ * whole theme flips from one declaration on :root. The OS preference is the
+ * default; `[data-theme]` is the manual override and wins over it.
+ *
+ * Keep every literal colour here. Page styles must reference these tokens and
+ * never hardcode a hex value.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* paper & ink */
+  --paper: light-dark(#fbfaf8, #1a1917);
+  --paper-deep: light-dark(#f0ece5, #24221f);
+  --ink: light-dark(#1c1a17, #ece8e1);
+  --ink-soft: light-dark(#403b35, #cfc9c0);
+  --ink-muted: light-dark(#777168, #9f988d);
+  --ink-faint: light-dark(#9a9389, #736d64);
+
+  /* lines & rules */
+  --line: light-dark(#ded9d0, #35322d);
+  --line-strong: light-dark(#b9b4ab, #4a463f);
+  --line-faint: light-dark(rgb(222 217 208 / 70%), rgb(255 255 255 / 8%));
+  --guide-line: light-dark(#b7afa3, #524d45);
+  --point-hollow: light-dark(#9e978d, #8a8378);
+  --tooltip-line: light-dark(#d8d1c7, #3d3933);
+  --heat-cell-line: light-dark(rgb(155 120 84 / 8%), rgb(255 255 255 / 6%));
+
+  /* surfaces */
+  --surface-sidebar: light-dark(#f7f4ef, #201f1c);
+  --surface-active: light-dark(#eeeae3, #2c2a26);
+  --surface-hover: light-dark(rgb(238 234 227 / 55%), rgb(255 255 255 / 6%));
+  --surface-hover-soft: light-dark(rgb(238 234 227 / 45%), rgb(255 255 255 / 5%));
+  --surface-hover-strong: light-dark(rgb(238 234 227 / 70%), rgb(255 255 255 / 8%));
+  --tooltip-bg: light-dark(rgb(251 250 248 / 97%), rgb(32 31 28 / 98%));
+  --bar-previous: light-dark(#d2cdc4, #4a463f);
+
+  /* signals (vermilion stays reserved for failure / disabled / over-budget) */
+  --ochre: light-dark(#9b7854, #b98f66);
+  --moss: light-dark(#71806a, #8f9e86);
+  --danger: light-dark(#a65d55, #c76a58);
+  --on-danger: light-dark(#ffffff, #1a1917);
+  --increase: light-dark(#756044, #c8a878);
+
+  /* chart mineral palette: ochre / indigo / moss / yellow, never vermilion */
+  --chart-ochre: light-dark(#9b7854, #b98f66);
+  --chart-indigo: light-dark(#607087, #7b8ba0);
+  --chart-moss: light-dark(#71806a, #8f9e86);
+  --chart-yellow: light-dark(#b39a60, #c8b078);
+
+  /* heat scale */
+  --heat-0: light-dark(#f1ede6, #24221f);
+  --heat-1: light-dark(#e9dfd4, #2f2b26);
+  --heat-2: light-dark(#d7c3af, #4a4034);
+  --heat-3: light-dark(#b28d68, #6f5539);
+  --heat-4: light-dark(#806044, #9a7450);
+  --heat-text: light-dark(#554c42, #d8d1c7);
+  --heat-text-strong: light-dark(#fffaf5, #f4efe8);
+
+  /* depth: light uses paper shadows, dark drops them and lets borders carry the layer */
+  --shadow-color: light-dark(rgb(50 43 35 / 10%), rgb(0 0 0 / 0%));
+  --shadow-tooltip-color: light-dark(rgb(54 46 36 / 8%), rgb(0 0 0 / 0%));
+  --shadow-float: 0 0.375rem 1.125rem var(--shadow-color);
+  --shadow-tooltip: 0 0.4rem 1rem var(--shadow-tooltip-color);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}

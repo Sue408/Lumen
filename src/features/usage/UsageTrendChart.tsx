@@ -192,9 +192,9 @@ export function UsageTrendChart({ period, anchor }: UsageTrendChartProps) {
                 y2={chartSize.height}
                 gradientUnits="userSpaceOnUse"
               >
-                <stop offset="0%" stopColor="#9b7854" stopOpacity="0.16" />
-                <stop offset="55%" stopColor="#9b7854" stopOpacity="0.055" />
-                <stop offset="100%" stopColor="#9b7854" stopOpacity="0" />
+                <stop offset="0%" stopOpacity="0.16" style={{ stopColor: "var(--chart-ochre)" }} />
+                <stop offset="55%" stopOpacity="0.055" style={{ stopColor: "var(--chart-ochre)" }} />
+                <stop offset="100%" stopOpacity="0" style={{ stopColor: "var(--chart-ochre)" }} />
               </linearGradient>
               <clipPath id={clipId}>
                 <rect className="area-reveal" x="0" y="0" width={chartSize.width} height={chartSize.height} />
