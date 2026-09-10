@@ -1,5 +1,6 @@
 import { navigationItems, type ViewId } from "./navigation";
 import { useGatewayStatus } from "./useGatewayStatus";
+import logoMark from "../assets/lumen-mark.png";
 
 type SidebarProps = {
   activeView: ViewId;
@@ -19,7 +20,10 @@ export function Sidebar({ activeView, onNavigate }: SidebarProps) {
 
   return (
     <aside className="sidebar" aria-label="主导航">
-      <div className="brand">Lumen</div>
+      <div className="brand">
+        <img className="brand-logo" src={logoMark} alt="" aria-hidden="true" />
+        <span>Lumen</span>
+      </div>
       <nav className="navigation">
         {navigationItems.map((item) => {
           const Icon = item.icon;
