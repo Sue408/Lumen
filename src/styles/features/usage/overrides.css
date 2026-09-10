@@ -7,6 +7,12 @@
   align-self: start;
 }
 
+.usage-loading {
+  align-self: start;
+  max-width: 42rem;
+  padding-top: 0.5rem;
+}
+
 .header-actions {
   display: flex;
   align-items: flex-end;

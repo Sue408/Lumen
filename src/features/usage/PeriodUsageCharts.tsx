@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { cumulativeToDistribution, buildMonthHeatmap } from "./usageVisualData";
+import { isCurrentPeriod } from "./ledgerQuery";
 import type { UsagePeriod } from "./usageData";
 
 const tokenNumber = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
@@ -111,8 +112,12 @@ export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
   </article>;
 }
 
-export function MonthlyUsageHeatmap({ anchor }: { anchor: Date }) {
-  const cells = buildMonthHeatmap(anchor);
+export function MonthlyUsageHeatmap({ period, anchor }: { period: UsagePeriod; anchor: Date }) {
+  const values = cumulativeToDistribution(period.series.currentValues);
+  const now = isCurrentPeriod("month", anchor)
+    ? new Date()
+    : new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0, 23, 59);
+  const cells = buildMonthHeatmap(anchor, values, now);
   const [hovered, setHovered] = useState<number | null>(null);
   return <article className="chart-panel trend-panel">
     <header className="chart-heading"><h2>每日使用活跃度<span className="chart-unit">Token 强度</span></h2><span className="chart-meta">深色代表用量更高</span></header>
