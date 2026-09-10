@@ -9,6 +9,7 @@ export function moveTarget<T>(list: T[], index: number, delta: number): T[] {
 }
 
 export type RouteTargetDraft = {
+  uid: string;
   upstreamModelId: string;
   enabled: boolean;
 };
@@ -20,6 +21,10 @@ export type RouteDraft = {
   enabled: boolean;
   targets: RouteTargetDraft[];
 };
+
+export function makeTarget(upstreamModelId: string): RouteTargetDraft {
+  return { uid: crypto.randomUUID(), upstreamModelId, enabled: true };
+}
 
 export function emptyRouteDraft(): RouteDraft {
   return { id: null, alias: "", displayName: "", enabled: true, targets: [] };
@@ -33,7 +38,11 @@ export function routeToDraft(route: RouteWithTargets): RouteDraft {
     enabled: route.enabled,
     targets: [...route.targets]
       .sort((a, b) => a.priority - b.priority)
-      .map((target) => ({ upstreamModelId: target.upstreamModelId, enabled: target.enabled })),
+      .map((target) => ({
+        uid: crypto.randomUUID(),
+        upstreamModelId: target.upstreamModelId,
+        enabled: target.enabled,
+      })),
   };
 }
 

@@ -20,6 +20,7 @@ import {
   TogglePill,
 } from "../../components/ConfigControls";
 import { Modal } from "../../components/Modal";
+import { RegisterList } from "../../components/RegisterList";
 import { BrandGlyph } from "../brand/BrandMark";
 import { detectBrand } from "../brand/brand";
 import {
@@ -456,7 +457,10 @@ export function ProvidersPage() {
                   </button>
                 </div>
               ) : (
-                <nav className="register" aria-label="上游提供商列表">
+                <RegisterList
+                  ariaLabel="上游提供商列表"
+                  selectedKey={selectedId === "new" ? null : selectedId}
+                >
                   {providers.map((provider) => {
                     const providerModels = modelsForProvider(models, provider.id);
                     const brand = detectBrand([
@@ -469,6 +473,7 @@ export function ProvidersPage() {
                         className={`register-select${selectedId === provider.id ? " is-selected" : ""}${provider.enabled ? "" : " is-off"}`}
                         type="button"
                         key={provider.id}
+                        data-register-key={provider.id}
                         aria-current={selectedId === provider.id ? "true" : undefined}
                         onClick={() => requestSelect(provider)}
                       >
@@ -483,7 +488,7 @@ export function ProvidersPage() {
                       </button>
                     );
                   })}
-                </nav>
+                </RegisterList>
               )}
             </section>
 

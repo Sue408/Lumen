@@ -828,3 +828,69 @@
 .modal-card .form-actions {
   justify-content: flex-end;
 }
+
+/* ---- motion: state changes should read as changes, never decoration ---- */
+
+@keyframes sheet-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes notice-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes row-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.entry-form {
+  animation: sheet-enter 150ms ease;
+}
+
+.pending-bar,
+.confirm-bar {
+  animation: notice-enter 150ms ease;
+}
+
+.model-row,
+.target-row {
+  animation: row-enter 150ms ease;
+}
+
+.status-dot {
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .entry-form,
+  .pending-bar,
+  .confirm-bar,
+  .model-row,
+  .target-row {
+    animation: none;
+  }
+
+  .status-dot {
+    transition: none;
+  }
+}

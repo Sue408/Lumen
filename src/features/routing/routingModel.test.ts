@@ -28,16 +28,15 @@ test("routeToDraft sorts targets by priority", () => {
       { id: "t1", routeId: "r1", upstreamModelId: "m1", priority: 0, enabled: true },
     ],
   };
-  assert.deepEqual(routeToDraft(route), {
-    id: "r1",
-    alias: "deepseek",
-    displayName: "DeepSeek",
-    enabled: true,
-    targets: [
+  const draft = routeToDraft(route);
+  assert.deepEqual(
+    draft.targets.map(({ upstreamModelId, enabled }) => ({ upstreamModelId, enabled })),
+    [
       { upstreamModelId: "m1", enabled: true },
       { upstreamModelId: "m2", enabled: false },
     ],
-  });
+  );
+  assert.ok(draft.targets.every((target) => target.uid.length > 0));
 });
 
 test("isRouteDraftDirty detects field, target and order changes", () => {
@@ -77,7 +76,7 @@ test("validateRouteDraft enforces alias, targets and uniqueness", () => {
     "请至少指定一个上游目标。",
   );
   assert.equal(
-    validateRouteDraft({ ...draft, alias: "gpt", targets: [{ upstreamModelId: "", enabled: true }] }),
+    validateRouteDraft({ ...draft, alias: "gpt", targets: [{ uid: "u1", upstreamModelId: "", enabled: true }] }),
     "每个目标都需要选择上游模型。",
   );
   assert.equal(
@@ -85,14 +84,14 @@ test("validateRouteDraft enforces alias, targets and uniqueness", () => {
       ...draft,
       alias: "gpt",
       targets: [
-        { upstreamModelId: "m1", enabled: true },
-        { upstreamModelId: "m1", enabled: true },
+        { uid: "u1", upstreamModelId: "m1", enabled: true },
+        { uid: "u2", upstreamModelId: "m1", enabled: true },
       ],
     }),
     "同一个上游模型不能重复添加。",
   );
   assert.equal(
-    validateRouteDraft({ ...draft, alias: "gpt", targets: [{ upstreamModelId: "m1", enabled: true }] }),
+    validateRouteDraft({ ...draft, alias: "gpt", targets: [{ uid: "u1", upstreamModelId: "m1", enabled: true }] }),
     null,
   );
 });

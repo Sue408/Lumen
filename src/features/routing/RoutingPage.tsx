@@ -20,6 +20,7 @@ import {
 } from "../../components/ConfigControls";
 import { BrandGlyph } from "../brand/BrandMark";
 import { detectBrand, type BrandId } from "../brand/brand";
+import { RegisterList } from "../../components/RegisterList";
 import {
   deleteRoute,
   listProviders,
@@ -33,11 +34,13 @@ import {
 import {
   emptyRouteDraft,
   isRouteDraftDirty,
+  makeTarget,
   moveTarget,
   routeToDraft,
   validateRouteDraft,
   type RouteDraft,
 } from "./routingModel";
+import { useFlipList } from "./useFlipList";
 
 type Pending = { kind: "existing"; id: string } | { kind: "new" };
 
@@ -88,6 +91,7 @@ function RouteForm({
     set({ targets: draft.targets.map((target, itemIndex) => (itemIndex === index ? { ...target, ...patch } : target)) });
   const groups = groupedModels(providers, models);
   const dirty = isRouteDraftDirty(draft, savedDraft);
+  const { containerRef, capture } = useFlipList<HTMLOListElement>();
 
   return (
     <form
@@ -118,7 +122,10 @@ function RouteForm({
             <button
               className="text-action"
               type="button"
-              onClick={() => set({ targets: [...draft.targets, { upstreamModelId: models[0]?.id ?? "", enabled: true }] })}
+              onClick={() => {
+                capture();
+                set({ targets: [...draft.targets, makeTarget(models[0]?.id ?? "")] });
+              }}
               disabled={busy || models.length === 0}
             >
               ＋ 添加目标
@@ -135,9 +142,13 @@ function RouteForm({
               : "还没有添加目标，添加后才能保存。"}
           </EmptyNote>
         ) : (
-          <ol className="target-list">
+          <ol className="target-list" ref={containerRef}>
             {draft.targets.map((target, index) => (
-              <li className={target.enabled ? "target-row" : "target-row is-off"} key={`${target.upstreamModelId}-${index}`}>
+              <li
+                className={target.enabled ? "target-row" : "target-row is-off"}
+                key={target.uid}
+                data-flip-key={target.uid}
+              >
                 <span className="target-rank">{index + 1}</span>
                 <BrandGlyph
                   brand={brands.get(target.upstreamModelId) ?? null}
@@ -164,13 +175,13 @@ function RouteForm({
                   onChange={(next) => setTarget(index, { enabled: next })}
                 />
                 <div className="target-move">
-                  <GlyphButton label="上移" disabled={busy || index === 0} onClick={() => set({ targets: moveTarget(draft.targets, index, -1) })}>
+                  <GlyphButton label="上移" disabled={busy || index === 0} onClick={() => { capture(); set({ targets: moveTarget(draft.targets, index, -1) }); }}>
                     <ChevronUp aria-hidden="true" />
                   </GlyphButton>
-                  <GlyphButton label="下移" disabled={busy || index === draft.targets.length - 1} onClick={() => set({ targets: moveTarget(draft.targets, index, 1) })}>
+                  <GlyphButton label="下移" disabled={busy || index === draft.targets.length - 1} onClick={() => { capture(); set({ targets: moveTarget(draft.targets, index, 1) }); }}>
                     <ChevronDown aria-hidden="true" />
                   </GlyphButton>
-                  <GlyphButton label="移除目标" danger disabled={busy} onClick={() => set({ targets: draft.targets.filter((_, itemIndex) => itemIndex !== index) })}>
+                  <GlyphButton label="移除目标" danger disabled={busy} onClick={() => { capture(); set({ targets: draft.targets.filter((_, itemIndex) => itemIndex !== index) }); }}>
                     <Trash aria-hidden="true" />
                   </GlyphButton>
                 </div>
@@ -207,7 +218,7 @@ export function RoutingPage() {
     const next = routeToDraft(route);
     setSelectedId(route.id);
     setDraft(next);
-    setSavedDraft(routeToDraft(route));
+    setSavedDraft(structuredClone(next));
     setFormError(null);
     setConfirmingDelete(false);
     setPending(null);
@@ -294,9 +305,10 @@ export function RoutingPage() {
         })),
       });
       await refreshLists();
+      const nextDraft = routeToDraft(saved);
       setSelectedId(saved.id);
-      setDraft(routeToDraft(saved));
-      setSavedDraft(routeToDraft(saved));
+      setDraft(nextDraft);
+      setSavedDraft(structuredClone(nextDraft));
       return true;
     } catch (err) {
       setFormError(String(err));
@@ -376,7 +388,10 @@ export function RoutingPage() {
                   </button>
                 </div>
               ) : (
-                <nav className="register" aria-label="路由别名列表">
+                <RegisterList
+                  ariaLabel="路由别名列表"
+                  selectedKey={selectedId === "new" ? null : selectedId}
+                >
                   {routes.map((route) => {
                     const primary = [...route.targets].sort((a, b) => a.priority - b.priority)[0];
                     const brand = primary ? brands.get(primary.upstreamModelId) ?? null : null;
@@ -385,6 +400,7 @@ export function RoutingPage() {
                         className={`register-select${selectedId === route.id ? " is-selected" : ""}${route.enabled ? "" : " is-off"}`}
                         type="button"
                         key={route.id}
+                        data-register-key={route.id}
                         aria-current={selectedId === route.id ? "true" : undefined}
                         onClick={() => requestSelect(route)}
                       >
@@ -401,7 +417,7 @@ export function RoutingPage() {
                       </button>
                     );
                   })}
-                </nav>
+                </RegisterList>
               )}
             </section>
 
