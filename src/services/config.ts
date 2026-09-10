@@ -3,6 +3,7 @@ import { isTauriRuntime } from "../components/tauriRuntime";
 
 export type AuthScheme = "bearer" | "x-api-key";
 export type Protocol = "openai" | "anthropic";
+export type IconTint = "ink" | "brand";
 
 export type Provider = {
   id: string;
@@ -12,6 +13,8 @@ export type Provider = {
   authScheme: AuthScheme;
   protocol: Protocol;
   extraHeaders: Record<string, string>;
+  icon: string | null;
+  iconTint: IconTint;
   enabled: boolean;
   createdAt: string;
 };
@@ -24,6 +27,8 @@ export type ProviderInput = {
   authScheme?: AuthScheme;
   protocol?: Protocol;
   extraHeaders?: Record<string, string>;
+  icon?: string | null;
+  iconTint?: IconTint;
   enabled?: boolean;
 };
 
@@ -34,6 +39,8 @@ export type UpstreamModel = {
   displayName: string;
   inputPrice: number;
   outputPrice: number;
+  icon: string | null;
+  iconTint: IconTint;
   enabled: boolean;
 };
 
@@ -44,6 +51,8 @@ export type UpstreamModelInput = {
   displayName: string;
   inputPrice?: number;
   outputPrice?: number;
+  icon?: string | null;
+  iconTint?: IconTint;
   enabled?: boolean;
 };
 
@@ -91,6 +100,8 @@ const mockProviders: Provider[] = [
     authScheme: "x-api-key",
     protocol: "anthropic",
     extraHeaders: {},
+    icon: "deepseek",
+    iconTint: "ink",
     enabled: true,
     createdAt: "2026-09-01T02:00:00+00:00",
   },
@@ -102,6 +113,8 @@ const mockProviders: Provider[] = [
     authScheme: "bearer",
     protocol: "openai",
     extraHeaders: { "OpenAI-Beta": "assistants=v2" },
+    icon: "openai",
+    iconTint: "ink",
     enabled: false,
     createdAt: "2026-09-03T05:30:00+00:00",
   },
@@ -115,6 +128,8 @@ const mockModels: UpstreamModel[] = [
     displayName: "DeepSeek V4 Flash",
     inputPrice: 0.15,
     outputPrice: 0.6,
+    icon: null,
+    iconTint: "ink",
     enabled: true,
   },
   {
@@ -124,6 +139,8 @@ const mockModels: UpstreamModel[] = [
     displayName: "DeepSeek V4 Reasoner",
     inputPrice: 0.55,
     outputPrice: 2.2,
+    icon: null,
+    iconTint: "ink",
     enabled: true,
   },
   {
@@ -133,6 +150,8 @@ const mockModels: UpstreamModel[] = [
     displayName: "GPT-4o",
     inputPrice: 2.5,
     outputPrice: 10,
+    icon: null,
+    iconTint: "ink",
     enabled: false,
   },
 ];
@@ -172,6 +191,8 @@ function mockSaveProvider(input: ProviderInput): Provider {
     authScheme: input.authScheme ?? "bearer",
     protocol: input.protocol ?? "openai",
     extraHeaders: input.extraHeaders ?? {},
+    icon: input.icon ?? existing?.icon ?? null,
+    iconTint: input.iconTint ?? existing?.iconTint ?? "ink",
     enabled: input.enabled ?? true,
     createdAt: existing?.createdAt ?? nowIso(),
   };
@@ -203,6 +224,8 @@ function mockSaveUpstreamModel(input: UpstreamModelInput): UpstreamModel {
     displayName: input.displayName || input.modelId,
     inputPrice: input.inputPrice ?? 0,
     outputPrice: input.outputPrice ?? 0,
+    icon: input.icon ?? existing?.icon ?? null,
+    iconTint: input.iconTint ?? existing?.iconTint ?? "ink",
     enabled: input.enabled ?? true,
   };
   if (existing) Object.assign(existing, model);

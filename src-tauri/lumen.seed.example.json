@@ -7,6 +7,8 @@
       "authScheme": "bearer",
       "protocol": "openai",
       "extraHeaders": {},
+      "icon": "openai",
+      "iconTint": "brand",
       "enabled": true
     },
     {

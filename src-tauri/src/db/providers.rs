@@ -32,8 +32,8 @@ pub fn save_provider(conn: &Connection, input: &ProviderInput) -> Result<Provide
     let extra_headers = serde_json::to_string(&input.extra_headers)?;
     conn.execute(
         "INSERT INTO providers
-            (id, name, base_url, api_key, auth_scheme, protocol, extra_headers, enabled, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            (id, name, base_url, api_key, auth_scheme, protocol, extra_headers, icon, icon_tint, enabled, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             base_url = excluded.base_url,
@@ -41,6 +41,8 @@ pub fn save_provider(conn: &Connection, input: &ProviderInput) -> Result<Provide
             auth_scheme = excluded.auth_scheme,
             protocol = excluded.protocol,
             extra_headers = excluded.extra_headers,
+            icon = excluded.icon,
+            icon_tint = excluded.icon_tint,
             enabled = excluded.enabled",
         params![
             id,
@@ -50,6 +52,8 @@ pub fn save_provider(conn: &Connection, input: &ProviderInput) -> Result<Provide
             input.auth_scheme,
             input.protocol,
             extra_headers,
+            input.icon,
+            input.icon_tint,
             input.enabled as i64,
             created_at,
         ],
@@ -84,8 +88,8 @@ pub fn save_upstream_model(
     conn.execute(
         "INSERT INTO upstream_models
             (id, provider_id, model_id, display_name, input_price, output_price,
-             cache_read_price, cache_creation_price, enabled)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             cache_read_price, cache_creation_price, icon, icon_tint, enabled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(id) DO UPDATE SET
             provider_id = excluded.provider_id,
             model_id = excluded.model_id,
@@ -94,6 +98,8 @@ pub fn save_upstream_model(
             output_price = excluded.output_price,
             cache_read_price = excluded.cache_read_price,
             cache_creation_price = excluded.cache_creation_price,
+            icon = excluded.icon,
+            icon_tint = excluded.icon_tint,
             enabled = excluded.enabled",
         params![
             id,
@@ -104,6 +110,8 @@ pub fn save_upstream_model(
             input.output_price,
             input.cache_read_price,
             input.cache_creation_price,
+            input.icon,
+            input.icon_tint,
             input.enabled as i64,
         ],
     )?;

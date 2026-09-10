@@ -1,5 +1,6 @@
 import type {
   AuthScheme,
+  IconTint,
   Provider,
   Protocol,
   UpstreamModel,
@@ -51,6 +52,8 @@ export type ProviderDraft = {
   authScheme: AuthScheme;
   protocol: Protocol;
   extraHeadersText: string;
+  icon: string | null;
+  iconTint: IconTint;
   enabled: boolean;
 };
 
@@ -63,6 +66,8 @@ export function emptyProviderDraft(): ProviderDraft {
     authScheme: "bearer",
     protocol: "openai",
     extraHeadersText: "",
+    icon: null,
+    iconTint: "ink",
     enabled: true,
   };
 }
@@ -76,6 +81,8 @@ export function providerToDraft(provider: Provider): ProviderDraft {
     authScheme: provider.authScheme,
     protocol: provider.protocol,
     extraHeadersText: formatExtraHeaders(provider.extraHeaders),
+    icon: provider.icon,
+    iconTint: provider.iconTint,
     enabled: provider.enabled,
   };
 }
@@ -87,6 +94,8 @@ export function isProviderDraftDirty(draft: ProviderDraft, original: ProviderDra
     draft.apiKey !== original.apiKey ||
     draft.authScheme !== original.authScheme ||
     draft.protocol !== original.protocol ||
+    draft.icon !== original.icon ||
+    draft.iconTint !== original.iconTint ||
     draft.enabled !== original.enabled ||
     !sameHeaders(parseExtraHeaders(draft.extraHeadersText), parseExtraHeaders(original.extraHeadersText))
   );

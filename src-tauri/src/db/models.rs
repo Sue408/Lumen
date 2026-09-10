@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 pub const AUTH_BEARER: &str = "bearer";
 pub const PROTOCOL_OPENAI: &str = "openai";
 pub const PROTOCOL_ANTHROPIC: &str = "anthropic";
+pub const ICON_TINT_INK: &str = "ink";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +16,8 @@ pub struct Provider {
     pub auth_scheme: String,
     pub protocol: String,
     pub extra_headers: BTreeMap<String, String>,
+    pub icon: Option<String>,
+    pub icon_tint: String,
     pub enabled: bool,
     pub created_at: String,
 }
@@ -33,6 +36,10 @@ pub struct ProviderInput {
     pub protocol: String,
     #[serde(default)]
     pub extra_headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default = "default_icon_tint")]
+    pub icon_tint: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -43,6 +50,10 @@ fn default_auth_scheme() -> String {
 
 fn default_protocol() -> String {
     PROTOCOL_OPENAI.to_string()
+}
+
+fn default_icon_tint() -> String {
+    ICON_TINT_INK.to_string()
 }
 
 fn default_true() -> bool {
@@ -63,6 +74,8 @@ impl Provider {
             auth_scheme: row.get("auth_scheme")?,
             protocol: row.get("protocol")?,
             extra_headers: parse_headers(&row.get::<_, String>("extra_headers")?),
+            icon: row.get("icon")?,
+            icon_tint: row.get("icon_tint")?,
             enabled: row.get::<_, i64>("enabled")? != 0,
             created_at: row.get("created_at")?,
         })
@@ -80,6 +93,8 @@ pub struct UpstreamModel {
     pub output_price: f64,
     pub cache_read_price: f64,
     pub cache_creation_price: f64,
+    pub icon: Option<String>,
+    pub icon_tint: String,
     pub enabled: bool,
 }
 
@@ -98,6 +113,10 @@ pub struct UpstreamModelInput {
     pub cache_read_price: f64,
     #[serde(default)]
     pub cache_creation_price: f64,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default = "default_icon_tint")]
+    pub icon_tint: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -113,6 +132,8 @@ impl UpstreamModel {
             output_price: row.get("output_price")?,
             cache_read_price: row.get("cache_read_price")?,
             cache_creation_price: row.get("cache_creation_price")?,
+            icon: row.get("icon")?,
+            icon_tint: row.get("icon_tint")?,
             enabled: row.get::<_, i64>("enabled")? != 0,
         })
     }

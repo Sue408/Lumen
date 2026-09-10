@@ -36,6 +36,56 @@ export const BRAND_IDS = [
 
 export type BrandId = (typeof BRAND_IDS)[number];
 
+export const BRAND_LABELS: Record<BrandId, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  gemini: "Google Gemini",
+  deepseek: "DeepSeek",
+  mistral: "Mistral",
+  meta: "Meta Llama",
+  grok: "xAI Grok",
+  qwen: "通义千问",
+  moonshot: "月之暗面 Kimi",
+  zhipu: "智谱 GLM",
+  cohere: "Cohere",
+  perplexity: "Perplexity",
+  ollama: "Ollama",
+  openrouter: "OpenRouter",
+  groq: "Groq",
+  together: "Together AI",
+  fireworks: "Fireworks AI",
+  huggingface: "Hugging Face",
+  azure: "Azure OpenAI",
+  bedrock: "AWS Bedrock",
+  minimax: "MiniMax",
+  baichuan: "百川智能",
+  doubao: "字节豆包",
+  zeroone: "零一万物",
+  stepfun: "阶跃星辰",
+  baidu: "百度文心",
+  alibaba: "阿里云",
+  internlm: "书生·浦语",
+  nvidia: "NVIDIA",
+  siliconcloud: "硅基流动",
+  sensenova: "商汤日日新",
+  hunyuan: "腾讯混元",
+  spark: "讯飞星火",
+};
+
+const BRAND_ID_SET: ReadonlySet<string> = new Set(BRAND_IDS);
+
+export function isBrandId(value: string | null | undefined): value is BrandId {
+  return typeof value === "string" && BRAND_ID_SET.has(value);
+}
+
+/** 显式选择的图标优先，否则回落到关键词识别。 */
+export function resolveBrand(
+  icon: string | null | undefined,
+  parts: Array<string | undefined | null>,
+): BrandId | null {
+  return isBrandId(icon) ? icon : detectBrand(parts);
+}
+
 const RULES: Array<[RegExp, BrandId]> = [
   [/deepseek/, "deepseek"],
   [/anthropic|claude/, "anthropic"],

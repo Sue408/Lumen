@@ -54,6 +54,46 @@
   --chart-moss: light-dark(#71806a, #8f9e86);
   --chart-yellow: light-dark(#b39a60, #c8b078);
 
+  /*
+   * Brand marks: the only non-mineral colours in the system, and only when an
+   * icon is explicitly set to 品牌色. Default is ink (`currentColor`). Values
+   * are the brand's signature hue; dark variants are lightened so near-black
+   * marks stay legible on the night paper.
+   */
+  --brand-openai: light-dark(#10a37f, #2cd4a8);
+  --brand-anthropic: light-dark(#d97757, #e8a088);
+  --brand-gemini: light-dark(#4285f4, #7baaf7);
+  --brand-deepseek: light-dark(#4d6bfe, #7c93ff);
+  --brand-mistral: light-dark(#fa520f, #ff7a45);
+  --brand-meta: light-dark(#0467df, #4d9bff);
+  --brand-grok: light-dark(#3a3530, #cbc5bc);
+  --brand-qwen: light-dark(#615ced, #8b87f5);
+  --brand-moonshot: light-dark(#3a3530, #cbc5bc);
+  --brand-zhipu: light-dark(#3859ff, #7c93ff);
+  --brand-cohere: light-dark(#39594d, #6fa48f);
+  --brand-perplexity: light-dark(#20808d, #3fb6c4);
+  --brand-ollama: light-dark(#3a3530, #cbc5bc);
+  --brand-openrouter: light-dark(#6467f2, #9294f7);
+  --brand-groq: light-dark(#f55036, #ff7a63);
+  --brand-together: light-dark(#0f6fff, #5c9bff);
+  --brand-fireworks: light-dark(#5019c5, #8a5cf0);
+  --brand-huggingface: light-dark(#e5a500, #ffd21e);
+  --brand-azure: light-dark(#0078d4, #3fa3e8);
+  --brand-bedrock: light-dark(#232f3e, #8fa3b8);
+  --brand-minimax: light-dark(#ee2e57, #ff6b8a);
+  --brand-baichuan: light-dark(#1784fb, #5ea9ff);
+  --brand-doubao: light-dark(#3370ff, #6e9bff);
+  --brand-zeroone: light-dark(#0f6a52, #4f9e7d);
+  --brand-stepfun: light-dark(#16a085, #46c6a8);
+  --brand-baidu: light-dark(#2932e1, #6e74f0);
+  --brand-alibaba: light-dark(#ff6a00, #ff9447);
+  --brand-internlm: light-dark(#0a66c2, #4d9be0);
+  --brand-nvidia: light-dark(#76b900, #a6dd3d);
+  --brand-siliconcloud: light-dark(#6e29f6, #a276fa);
+  --brand-sensenova: light-dark(#1b2a4a, #7c8db0);
+  --brand-hunyuan: light-dark(#0052d9, #4d8fea);
+  --brand-spark: light-dark(#1e6fff, #5c9bff);
+
   /* heat scale */
   --heat-0: light-dark(#f1ede6, #24221f);
   --heat-1: light-dark(#e9dfd4, #2f2b26);

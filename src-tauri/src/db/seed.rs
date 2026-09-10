@@ -5,7 +5,7 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 use serde::Deserialize;
 
-use super::models::{AUTH_BEARER, PROTOCOL_OPENAI};
+use super::models::{AUTH_BEARER, ICON_TINT_INK, PROTOCOL_OPENAI};
 use crate::error::AppError;
 
 #[derive(Debug, Deserialize)]
@@ -32,6 +32,10 @@ struct SeedProvider {
     protocol: String,
     #[serde(default)]
     extra_headers: BTreeMap<String, String>,
+    #[serde(default)]
+    icon: Option<String>,
+    #[serde(default = "default_icon_tint")]
+    icon_tint: String,
     #[serde(default = "default_true")]
     enabled: bool,
 }
@@ -51,6 +55,10 @@ struct SeedModel {
     cache_read_price: f64,
     #[serde(default)]
     cache_creation_price: f64,
+    #[serde(default)]
+    icon: Option<String>,
+    #[serde(default = "default_icon_tint")]
+    icon_tint: String,
     #[serde(default = "default_true")]
     enabled: bool,
 }
@@ -85,6 +93,10 @@ fn default_protocol() -> String {
     PROTOCOL_OPENAI.to_string()
 }
 
+fn default_icon_tint() -> String {
+    ICON_TINT_INK.to_string()
+}
+
 fn default_true() -> bool {
     true
 }
@@ -116,8 +128,8 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
         let extra_headers = serde_json::to_string(&provider.extra_headers)?;
         tx.execute(
             "INSERT INTO providers
-                (id, name, base_url, api_key, auth_scheme, protocol, extra_headers, enabled, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                (id, name, base_url, api_key, auth_scheme, protocol, extra_headers, icon, icon_tint, enabled, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 id,
                 provider.name,
@@ -126,6 +138,8 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
                 provider.auth_scheme,
                 provider.protocol,
                 extra_headers,
+                provider.icon,
+                provider.icon_tint,
                 provider.enabled as i64,
                 now,
             ],
@@ -147,8 +161,8 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
         tx.execute(
             "INSERT INTO upstream_models
                 (id, provider_id, model_id, display_name, input_price, output_price,
-                 cache_read_price, cache_creation_price, enabled)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 cache_read_price, cache_creation_price, icon, icon_tint, enabled)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 id,
                 provider_id,
@@ -158,6 +172,8 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
                 model.output_price,
                 model.cache_read_price,
                 model.cache_creation_price,
+                model.icon,
+                model.icon_tint,
                 model.enabled as i64,
             ],
         )?;

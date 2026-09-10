@@ -33,6 +33,7 @@ import together from "@lobehub/icons-static-svg/icons/together.svg?raw";
 import zeroone from "@lobehub/icons-static-svg/icons/zeroone.svg?raw";
 import zhipu from "@lobehub/icons-static-svg/icons/zhipu.svg?raw";
 import type { BrandId } from "./brand";
+import type { IconTint } from "../../services/config";
 
 const BRAND_SVG: Record<BrandId, string> = {
   openai,
@@ -75,11 +76,13 @@ export function BrandGlyph({
   size = 20,
   fallback,
   className,
+  tint = "ink",
 }: {
   brand: BrandId | null;
   size?: number;
   fallback: ReactNode;
   className?: string;
+  tint?: IconTint;
 }) {
   const classes = className ? `brand-mark ${className}` : "brand-mark";
   if (!brand) {
@@ -92,7 +95,11 @@ export function BrandGlyph({
   return (
     <span
       className={classes}
-      style={{ fontSize: `${size}px` }}
+      style={{
+        fontSize: `${size}px`,
+        ...(tint === "brand" ? { color: `var(--brand-${brand})` } : {}),
+      }}
+      data-tint={tint}
       aria-hidden="true"
       dangerouslySetInnerHTML={{ __html: BRAND_SVG[brand] }}
     />

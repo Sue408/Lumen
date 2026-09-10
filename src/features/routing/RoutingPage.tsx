@@ -19,7 +19,7 @@ import {
   TogglePill,
 } from "../../components/ConfigControls";
 import { BrandGlyph } from "../brand/BrandMark";
-import { detectBrand, type BrandId } from "../brand/brand";
+import { resolveBrand, type BrandId } from "../brand/brand";
 import { RegisterList } from "../../components/RegisterList";
 import {
   deleteRoute,
@@ -27,6 +27,7 @@ import {
   listRoutes,
   listUpstreamModels,
   saveRoute,
+  type IconTint,
   type Provider,
   type RouteWithTargets,
   type UpstreamModel,
@@ -44,13 +45,23 @@ import { useFlipList } from "./useFlipList";
 
 type Pending = { kind: "existing"; id: string } | { kind: "new" };
 
-function buildBrandLookup(providers: Provider[], models: UpstreamModel[]): Map<string, BrandId | null> {
+type ModelMark = { brand: BrandId | null; tint: IconTint; enabled: boolean };
+
+function buildBrandLookup(providers: Provider[], models: UpstreamModel[]): Map<string, ModelMark> {
   const providerNames = new Map(providers.map((provider) => [provider.id, provider.name]));
-  const lookup = new Map<string, BrandId | null>();
+  const lookup = new Map<string, ModelMark>();
   for (const model of models) {
-    lookup.set(model.id, detectBrand([providerNames.get(model.providerId), model.modelId]));
+    lookup.set(model.id, {
+      brand: resolveBrand(model.icon, [providerNames.get(model.providerId), model.modelId]),
+      tint: model.iconTint,
+      enabled: model.enabled,
+    });
   }
   return lookup;
+}
+
+function markTint(mark: ModelMark | null | undefined): IconTint {
+  return mark && mark.enabled ? mark.tint : "ink";
 }
 
 function groupedModels(providers: Provider[], models: UpstreamModel[]) {
@@ -79,7 +90,7 @@ function RouteForm({
   savedDraft: RouteDraft;
   providers: Provider[];
   models: UpstreamModel[];
-  brands: Map<string, BrandId | null>;
+  brands: Map<string, ModelMark>;
   busy: boolean;
   error: string | null;
   onChange: (draft: RouteDraft) => void;
@@ -151,7 +162,8 @@ function RouteForm({
               >
                 <span className="target-rank">{index + 1}</span>
                 <BrandGlyph
-                  brand={brands.get(target.upstreamModelId) ?? null}
+                  brand={brands.get(target.upstreamModelId)?.brand ?? null}
+                  tint={markTint(brands.get(target.upstreamModelId))}
                   size={18}
                   fallback={<Route aria-hidden="true" />}
                 />
@@ -394,7 +406,7 @@ export function RoutingPage() {
                 >
                   {routes.map((route) => {
                     const primary = [...route.targets].sort((a, b) => a.priority - b.priority)[0];
-                    const brand = primary ? brands.get(primary.upstreamModelId) ?? null : null;
+                    const mark = primary ? brands.get(primary.upstreamModelId) ?? null : null;
                     return (
                       <button
                         className={`register-select${selectedId === route.id ? " is-selected" : ""}${route.enabled ? "" : " is-off"}`}
@@ -404,7 +416,7 @@ export function RoutingPage() {
                         aria-current={selectedId === route.id ? "true" : undefined}
                         onClick={() => requestSelect(route)}
                       >
-                        <BrandGlyph brand={brand} size={20} fallback={<Route aria-hidden="true" />} />
+                        <BrandGlyph brand={mark?.brand ?? null} tint={markTint(mark)} size={20} fallback={<Route aria-hidden="true" />} />
                         <span className="register-body">
                           <span className="register-name">{route.alias}</span>
                           <span className="register-meta">
@@ -426,7 +438,8 @@ export function RoutingPage() {
                 <>
                   <div className="sheet-head">
                     <BrandGlyph
-                      brand={draft.targets[0] ? brands.get(draft.targets[0].upstreamModelId) ?? null : null}
+                      brand={draft.targets[0] ? brands.get(draft.targets[0].upstreamModelId)?.brand ?? null : null}
+                      tint={draft.targets[0] ? markTint(brands.get(draft.targets[0].upstreamModelId)) : "ink"}
                       size={22}
                       className={draft.enabled ? undefined : "is-off"}
                       fallback={<Route aria-hidden="true" />}

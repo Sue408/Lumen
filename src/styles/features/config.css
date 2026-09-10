@@ -275,6 +275,158 @@
   color: var(--ink-faint);
 }
 
+/* ---- brand icon picker (anchored popover) ---- */
+
+.brand-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  margin: -2px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+}
+
+.brand-picker-trigger:hover:not(:disabled) {
+  border-color: var(--ochre);
+  background: var(--surface-hover-soft);
+}
+
+.brand-picker-trigger:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.brand-picker-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.brand-picker-trigger .brand-mark.is-off {
+  color: var(--ink-faint);
+}
+
+.brand-picker {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  gap: 0.5rem;
+  width: 17.5rem;
+  max-width: calc(100vw - 2rem);
+  max-height: min(20rem, calc(100vh - 2rem));
+  padding: 0.6rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow-float);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.brand-picker-auto {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.35rem 0.45rem;
+  color: var(--ink-soft);
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--line-faint);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.brand-picker-auto:hover {
+  color: var(--ink);
+  border-color: var(--ochre);
+}
+
+.brand-picker-auto.is-selected {
+  color: var(--ink);
+  border-color: var(--ochre);
+  background: var(--surface-active);
+}
+
+.brand-picker-tint {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem;
+  padding: 0.15rem;
+  border: 1px solid var(--line-faint);
+  border-radius: 4px;
+}
+
+.brand-picker-tint button {
+  height: 1.5rem;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.brand-picker-tint button:hover {
+  color: var(--ink);
+}
+
+.brand-picker-tint button.is-selected {
+  color: var(--ink);
+  border-color: var(--ochre);
+  background: var(--surface-active);
+}
+
+.brand-picker-tint button:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.brand-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.25rem;
+}
+
+.brand-picker-cell {
+  display: grid;
+  height: 2rem;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  place-items: center;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.brand-picker-cell:hover {
+  color: var(--ink);
+  border-color: var(--ochre);
+  background: var(--surface-hover-soft);
+}
+
+.brand-picker-cell.is-selected {
+  color: var(--ink);
+  border-color: var(--ochre);
+  background: var(--surface-active);
+}
+
+.brand-picker-auto:focus-visible,
+.brand-picker-cell:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
 .status-dot {
   width: 0.5rem;
   height: 0.5rem;

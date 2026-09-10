@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS providers (
     auth_scheme  TEXT NOT NULL DEFAULT 'bearer',
     protocol     TEXT NOT NULL DEFAULT 'openai',
     extra_headers TEXT NOT NULL DEFAULT '{}',
+    icon         TEXT,
+    icon_tint    TEXT NOT NULL DEFAULT 'ink',
     enabled      INTEGER NOT NULL DEFAULT 1,
     created_at   TEXT NOT NULL
 );
@@ -38,6 +40,8 @@ CREATE TABLE IF NOT EXISTS upstream_models (
     output_price  REAL NOT NULL DEFAULT 0,
     cache_read_price     REAL NOT NULL DEFAULT 0,
     cache_creation_price REAL NOT NULL DEFAULT 0,
+    icon          TEXT,
+    icon_tint     TEXT NOT NULL DEFAULT 'ink',
     enabled       INTEGER NOT NULL DEFAULT 1
 );
 
@@ -105,7 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(status);
 "#;
 
 /// 每次修改 `SCHEMA` 就 +1；启动时版本不符即重建空库（pre-launch 阶段不做逐列迁移）。
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 3;
 
 /// 依赖外键的表按子表在前顺序清空，避免重建时的外键约束。
 const DROP_ALL: &str = "

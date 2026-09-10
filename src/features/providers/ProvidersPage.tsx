@@ -22,7 +22,8 @@ import {
 import { Modal } from "../../components/Modal";
 import { RegisterList } from "../../components/RegisterList";
 import { BrandGlyph } from "../brand/BrandMark";
-import { detectBrand } from "../brand/brand";
+import { IconPicker } from "../brand/IconPicker";
+import { detectBrand, resolveBrand } from "../brand/brand";
 import {
   deleteProvider,
   deleteUpstreamModel,
@@ -30,6 +31,7 @@ import {
   listUpstreamModels,
   saveProvider,
   saveUpstreamModel,
+  type IconTint,
   type Provider,
   type UpstreamModel,
 } from "../../services/config";
@@ -214,8 +216,8 @@ export function ProvidersPage() {
       ? providers.find((provider) => provider.id === selectedId) ?? null
       : null;
   const selectedModels = selectedProvider ? modelsForProvider(models, selectedProvider.id) : [];
-  const selectedBrand = selectedProvider
-    ? detectBrand([selectedProvider.name, selectedProvider.baseUrl, ...selectedModels.map((model) => model.modelId)])
+  const autoBrand = draft
+    ? detectBrand([draft.name, draft.baseUrl, ...selectedModels.map((model) => model.modelId)])
     : null;
   const dirty = draft !== null && savedDraft !== null && isProviderDraftDirty(draft, savedDraft);
 
@@ -307,6 +309,8 @@ export function ProvidersPage() {
         authScheme: draft.authScheme,
         protocol: draft.protocol,
         extraHeaders: parseExtraHeaders(draft.extraHeadersText),
+        icon: draft.icon,
+        iconTint: draft.iconTint,
         enabled: draft.enabled,
       });
       await refreshLists();
@@ -410,6 +414,32 @@ export function ProvidersPage() {
     }
   };
 
+  const setModelAppearance = async (
+    model: UpstreamModel,
+    patch: { icon?: string | null; iconTint?: IconTint },
+  ) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await saveUpstreamModel({
+        id: model.id,
+        providerId: model.providerId,
+        modelId: model.modelId,
+        displayName: model.displayName,
+        inputPrice: model.inputPrice,
+        outputPrice: model.outputPrice,
+        icon: patch.icon !== undefined ? patch.icon : model.icon,
+        iconTint: patch.iconTint ?? model.iconTint,
+        enabled: model.enabled,
+      });
+      await refreshLists();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const removeModel = async (id: string) => {
     setBusy(true);
     setError(null);
@@ -463,7 +493,7 @@ export function ProvidersPage() {
                 >
                   {providers.map((provider) => {
                     const providerModels = modelsForProvider(models, provider.id);
-                    const brand = detectBrand([
+                    const brand = resolveBrand(provider.icon, [
                       provider.name,
                       provider.baseUrl,
                       ...providerModels.map((model) => model.modelId),
@@ -477,7 +507,7 @@ export function ProvidersPage() {
                         aria-current={selectedId === provider.id ? "true" : undefined}
                         onClick={() => requestSelect(provider)}
                       >
-                        <BrandGlyph brand={brand} size={20} fallback={<Server aria-hidden="true" />} />
+                        <BrandGlyph brand={brand} size={20} tint={provider.enabled ? provider.iconTint : "ink"} fallback={<Server aria-hidden="true" />} />
                         <span className="register-body">
                           <span className="register-name">{provider.name}</span>
                           <span className="register-meta">
@@ -496,7 +526,18 @@ export function ProvidersPage() {
               {draft ? (
                 <>
                   <div className="sheet-head">
-                    <BrandGlyph brand={selectedBrand} size={22} className={draft.enabled ? undefined : "is-off"} fallback={<Server aria-hidden="true" />} />
+                    <IconPicker
+                      icon={draft.icon}
+                      auto={autoBrand}
+                      tint={draft.iconTint}
+                      size={22}
+                      enabled={draft.enabled}
+                      glyphClassName={draft.enabled ? undefined : "is-off"}
+                      fallback={<Server aria-hidden="true" />}
+                      disabled={busy}
+                      onChange={(value) => setDraft({ ...draft, icon: value })}
+                      onTintChange={(value) => setDraft({ ...draft, iconTint: value })}
+                    />
                     <h2 className="sheet-title">{selectedId === "new" ? "新上游" : draft.name || "未命名上游"}</h2>
                     <TogglePill
                       checked={draft.enabled}
@@ -582,10 +623,16 @@ export function ProvidersPage() {
                       <ul className="model-list">
                         {selectedModels.map((model) => (
                           <li className={model.enabled ? "model-row" : "model-row is-off"} key={model.id}>
-                            <BrandGlyph
-                              brand={detectBrand([selectedProvider.name, model.modelId])}
+                            <IconPicker
+                              icon={model.icon}
+                              auto={detectBrand([selectedProvider.name, model.modelId])}
+                              tint={model.iconTint}
                               size={18}
+                              enabled={model.enabled}
                               fallback={<Boxes aria-hidden="true" />}
+                              disabled={busy}
+                              onChange={(value) => void setModelAppearance(model, { icon: value })}
+                              onTintChange={(value) => void setModelAppearance(model, { iconTint: value })}
                             />
                             <span className="model-name">{model.displayName}</span>
                             <code className="model-id">{model.modelId}</code>

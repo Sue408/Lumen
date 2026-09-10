@@ -269,6 +269,8 @@ mod tests {
                 },
                 protocol: protocol.into(),
                 extra_headers: std::collections::BTreeMap::new(),
+                icon: None,
+                icon_tint: "ink".into(),
                 enabled: true,
             },
         )
@@ -284,6 +286,8 @@ mod tests {
                 output_price: 2.0,
                 cache_read_price: 0.0,
                 cache_creation_price: 0.0,
+                icon: None,
+                icon_tint: "ink".into(),
                 enabled: true,
             },
         )

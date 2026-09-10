@@ -20,6 +20,8 @@ const provider: Provider = {
   authScheme: "x-api-key",
   protocol: "anthropic",
   extraHeaders: { "X-Trace": "1" },
+  icon: null,
+  iconTint: "ink",
   enabled: true,
   createdAt: "2026-09-01T02:00:00+00:00",
 };
@@ -39,6 +41,8 @@ test("isProviderDraftDirty normalises header text before comparing", () => {
   assert.equal(isProviderDraftDirty(base, base), false);
   assert.equal(isProviderDraftDirty({ ...base, name: "Other" }, base), true);
   assert.equal(isProviderDraftDirty({ ...base, enabled: false }, base), true);
+  assert.equal(isProviderDraftDirty({ ...base, icon: "openai" }, base), true);
+  assert.equal(isProviderDraftDirty({ ...base, iconTint: "brand" }, base), true);
   assert.equal(isProviderDraftDirty({ ...base, extraHeadersText: "  " }, base), true);
   assert.equal(
     isProviderDraftDirty({ ...base, extraHeadersText: "X-Trace: 1\n" }, base),
