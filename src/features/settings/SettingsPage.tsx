@@ -1,11 +1,24 @@
 import { useEffect, useState } from "react";
 import { Database, Download, FolderOpen, Palette, RotateCcw, Server } from "lucide-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { InlineError, LoadingLines, SaveBar, SectionTitle } from "../../components/ConfigControls";
+import {
+  InlineError,
+  LoadingLines,
+  SaveBar,
+  SectionTitle,
+  TogglePill,
+} from "../../components/ConfigControls";
 import { isTauriRuntime } from "../../components/tauriRuntime";
 import { useGatewayStatus } from "../../app/useGatewayStatus";
 import type { Theme } from "../../app/useTheme";
-import { exportSeed, getSettings, resetData, saveSettings } from "../../services/settings";
+import {
+  exportSeed,
+  getAutostart,
+  getSettings,
+  resetData,
+  saveSettings,
+  setAutostart as setAutostartEnabled,
+} from "../../services/settings";
 
 type SettingsPageProps = {
   theme: Theme;
@@ -17,6 +30,9 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
   const running = gateway.status?.running ?? false;
   const [port, setPort] = useState("");
   const [savedPort, setSavedPort] = useState<number | null>(null);
+  const [closeToTray, setCloseToTray] = useState(true);
+  const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [autostartBusy, setAutostartBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -37,10 +53,17 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
         if (!alive) return;
         setPort(String(settings.port));
         setSavedPort(settings.port);
+        setCloseToTray(settings.closeToTray);
       } catch (err) {
         if (alive) setError(String(err));
       } finally {
         if (alive) setLoading(false);
+      }
+      try {
+        const enabled = await getAutostart();
+        if (alive) setAutostart(enabled);
+      } catch (err) {
+        if (alive) setError(String(err));
       }
     })();
     return () => {
@@ -56,16 +79,52 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
     }
     setBusy(true);
     setFormError(null);
-    setNotice(null);
     try {
-      const saved = await saveSettings({ port: value });
+      const saved = await saveSettings({ port: value, closeToTray });
       setPort(String(saved.port));
       setSavedPort(saved.port);
+      setCloseToTray(saved.closeToTray);
+      setError(null);
       setNotice("端口已保存，下次启动生效");
     } catch (err) {
       setFormError(String(err));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const toggleCloseToTray = async (next: boolean) => {
+    if (savedPort === null) return;
+    const previous = closeToTray;
+    setCloseToTray(next);
+    setBusy(true);
+    try {
+      const saved = await saveSettings({ port: savedPort, closeToTray: next });
+      setCloseToTray(saved.closeToTray);
+      setError(null);
+    } catch (err) {
+      setCloseToTray(previous);
+      setNotice(null);
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleAutostart = async (next: boolean) => {
+    const previous = autostart;
+    setAutostart(next);
+    setAutostartBusy(true);
+    try {
+      const actual = await setAutostartEnabled(next);
+      setAutostart(actual);
+      setError(null);
+    } catch (err) {
+      setAutostart(previous);
+      setNotice(null);
+      setError(String(err));
+    } finally {
+      setAutostartBusy(false);
     }
   };
 
@@ -161,20 +220,43 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
                 <div className="settings-row">
                   <span className="settings-row-label">随系统启动</span>
                   <div className="settings-row-control">
-                    <button
-                      className="toggle-pill is-pending"
-                      type="button"
-                      role="switch"
-                      aria-checked={false}
-                      aria-label="随系统启动（待接入）"
-                      title="待接入"
-                      disabled
-                    >
-                      <span className="status-dot" aria-hidden="true" />
-                      待接入
-                    </button>
+                    {autostart === null ? (
+                      <button
+                        className="toggle-pill is-pending"
+                        type="button"
+                        role="switch"
+                        aria-checked={false}
+                        aria-label="随系统启动（读取中）"
+                        title="读取中"
+                        disabled
+                      >
+                        <span className="status-dot" aria-hidden="true" />
+                        读取中
+                      </button>
+                    ) : (
+                      <TogglePill
+                        checked={autostart}
+                        label="随系统启动"
+                        disabled={autostartBusy || busy}
+                        onChange={(next) => void toggleAutostart(next)}
+                      />
+                    )}
                   </div>
-                  <span className="settings-row-note">功能完善后接入</span>
+                  <span className="settings-row-note">开机后自动运行，并以最小化方式静默进入托盘</span>
+                </div>
+                <div className="settings-row">
+                  <span className="settings-row-label">关闭窗口时收进托盘</span>
+                  <div className="settings-row-control">
+                    <TogglePill
+                      checked={closeToTray}
+                      label="关闭窗口时收进托盘"
+                      disabled={busy || savedPort === null}
+                      onChange={(next) => void toggleCloseToTray(next)}
+                    />
+                  </div>
+                  <span className="settings-row-note">
+                    关闭按钮不退出，仅从任务栏隐藏；退出请用托盘菜单
+                  </span>
                 </div>
               </div>
               {formError ? <InlineError message={formError} /> : null}

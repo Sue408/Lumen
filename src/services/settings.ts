@@ -3,9 +3,10 @@ import { isTauriRuntime } from "../components/tauriRuntime";
 
 export type Settings = {
   port: number;
+  closeToTray: boolean;
 };
 
-let mockSettings: Settings = { port: 8787 };
+let mockSettings: Settings = { port: 8787, closeToTray: true };
 
 export async function getSettings(): Promise<Settings> {
   if (!isTauriRuntime(window)) return { ...mockSettings };
@@ -18,6 +19,16 @@ export async function saveSettings(input: Settings): Promise<Settings> {
     return { ...mockSettings };
   }
   return invoke<Settings>("save_settings_cmd", { input });
+}
+
+export async function getAutostart(): Promise<boolean> {
+  if (!isTauriRuntime(window)) return false;
+  return invoke<boolean>("get_autostart_cmd");
+}
+
+export async function setAutostart(enabled: boolean): Promise<boolean> {
+  if (!isTauriRuntime(window)) return enabled;
+  return invoke<boolean>("set_autostart_cmd", { enabled });
 }
 
 export async function exportSeed(): Promise<string> {

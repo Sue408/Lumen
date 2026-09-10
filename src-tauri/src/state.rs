@@ -70,6 +70,7 @@ pub struct AppState {
     pub events: Arc<dyn EventSink>,
     pub gateway: Mutex<Option<GatewayHandle>>,
     port: Mutex<u16>,
+    close_to_tray: Mutex<bool>,
     data_dir: PathBuf,
 }
 
@@ -87,7 +88,21 @@ impl AppState {
             events,
             gateway: Mutex::new(None),
             port: Mutex::new(port),
+            close_to_tray: Mutex::new(true),
             data_dir,
+        }
+    }
+
+    pub fn close_to_tray(&self) -> bool {
+        self.close_to_tray
+            .lock()
+            .map(|guard| *guard)
+            .unwrap_or(true)
+    }
+
+    pub fn set_close_to_tray(&self, close_to_tray: bool) {
+        if let Ok(mut guard) = self.close_to_tray.lock() {
+            *guard = close_to_tray;
         }
     }
 

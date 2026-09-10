@@ -402,7 +402,14 @@ mod tests {
         seed(&db);
         {
             let conn = db.lock().unwrap();
-            save_settings(&conn, &Settings { port: 9999 }).unwrap();
+            save_settings(
+                &conn,
+                &Settings {
+                    port: 9999,
+                    close_to_tray: false,
+                },
+            )
+            .unwrap();
             clear_business_data(&conn).unwrap();
             let remaining: i64 = ["providers", "upstream_models", "routes", "route_targets"]
                 .iter()
@@ -414,7 +421,9 @@ mod tests {
                 })
                 .sum();
             assert_eq!(remaining, 0);
-            assert_eq!(get_settings(&conn).unwrap().port, 9999);
+            let settings = get_settings(&conn).unwrap();
+            assert_eq!(settings.port, 9999);
+            assert!(!settings.close_to_tray);
         }
     }
 }
