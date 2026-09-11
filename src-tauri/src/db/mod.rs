@@ -121,6 +121,9 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_status_occurred ON request_logs(stat
 -- 带上 cost 变成覆盖索引，既不用扫全表也不用回表；网关每请求查额度同走此路。
 CREATE INDEX IF NOT EXISTS idx_request_logs_key_status_occurred
     ON request_logs(virtual_key_id, status, occurred_at, cost);
+-- 用量口径的筛选与「待处理」的 OR 都按 usage_source 取行：有它，存疑计数走覆盖
+-- 索引、attention 的 OR 走 MULTI-INDEX OR，否则两者都是全表扫描。
+CREATE INDEX IF NOT EXISTS idx_request_logs_usage_source ON request_logs(usage_source);
 "#;
 
 /// 每次修改 `SCHEMA` 就 +1；启动时版本不符即重建空库（pre-launch 阶段不做逐列迁移）。

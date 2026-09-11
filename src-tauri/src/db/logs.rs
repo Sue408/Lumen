@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::models::RequestLog;
 use crate::error::AppError;
@@ -33,34 +33,6 @@ pub struct LogFilter {
     pub offset: Option<i64>,
 }
 
-/// 过滤条件共用的 WHERE 子句（?1..?7），list 与 count 必须保持一致。
-const FILTER_WHERE: &str = "WHERE (?1 IS NULL OR route_alias = ?1)
-           AND (?2 IS NULL OR status = ?2)
-           AND (?3 IS NULL OR (
-                COALESCE(route_alias, '') || ' ' ||
-                COALESCE(upstream_model_name, '') || ' ' ||
-                kind || ' ' ||
-                CAST(total_tokens AS TEXT)
-           ) LIKE '%' || ?3 || '%')
-           AND (?4 IS NULL OR occurred_at >= ?4)
-           AND (?5 IS NULL OR occurred_at < ?5)
-           AND (?6 IS NULL
-                OR (?6 = 'unreliable' AND usage_source IN ('missing', 'partial'))
-                OR (?6 <> 'unreliable' AND usage_source = ?6))
-           AND (?7 IS NULL OR ?7 = 0
-                OR status = 'error' OR usage_source IN ('missing', 'partial'))";
-
-/// 绑定到 FILTER_WHERE 的规范化参数：空串一律折算为 NULL。
-struct PreparedFilter {
-    route_alias: Option<String>,
-    status: Option<String>,
-    query: Option<String>,
-    from: Option<String>,
-    to: Option<String>,
-    usage_source: Option<String>,
-    attention_only: Option<bool>,
-}
-
 fn non_empty(value: &Option<String>) -> Option<String> {
     value
         .as_ref()
@@ -79,18 +51,55 @@ fn canonical_time(value: &Option<String>) -> Result<Option<String>, AppError> {
     }
 }
 
-impl PreparedFilter {
-    fn from_filter(filter: &LogFilter) -> Result<Self, AppError> {
-        Ok(Self {
-            route_alias: non_empty(&filter.route_alias),
-            status: non_empty(&filter.status),
-            query: non_empty(&filter.query),
-            from: canonical_time(&filter.from)?,
-            to: canonical_time(&filter.to)?,
-            usage_source: non_empty(&filter.usage_source),
-            attention_only: filter.attention_only.filter(|value| *value),
-        })
+/// 把过滤条件编译成「只含激活条件」的 WHERE 子句和绑定值。
+///
+/// 不能用 `?N IS NULL OR col = ?N` 的模板——那样规划器看不到常量的真实取值，
+/// 任何查询都选不了索引，连「无过滤的 COUNT」都会退化成全表扫描。
+/// 动态拼接后，无过滤的 COUNT 走 SQLite 的快路径，有过滤的按列走对应索引。
+fn build_where(filter: &LogFilter) -> Result<(String, Vec<Box<dyn rusqlite::ToSql>>), AppError> {
+    let mut clauses: Vec<&str> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(alias) = non_empty(&filter.route_alias) {
+        clauses.push("route_alias = ?");
+        params.push(Box::new(alias));
     }
+    if let Some(status) = non_empty(&filter.status) {
+        clauses.push("status = ?");
+        params.push(Box::new(status));
+    }
+    if let Some(query) = non_empty(&filter.query) {
+        clauses.push(
+            "(COALESCE(route_alias, '') || ' ' || COALESCE(upstream_model_name, '') || ' ' || kind || ' ' || CAST(total_tokens AS TEXT)) LIKE ?",
+        );
+        params.push(Box::new(format!("%{query}%")));
+    }
+    if let Some(from) = canonical_time(&filter.from)? {
+        clauses.push("occurred_at >= ?");
+        params.push(Box::new(from));
+    }
+    if let Some(to) = canonical_time(&filter.to)? {
+        clauses.push("occurred_at < ?");
+        params.push(Box::new(to));
+    }
+    if let Some(source) = non_empty(&filter.usage_source) {
+        if source == "unreliable" {
+            clauses.push("usage_source IN ('missing', 'partial')");
+        } else {
+            clauses.push("usage_source = ?");
+            params.push(Box::new(source));
+        }
+    }
+    if filter.attention_only == Some(true) {
+        clauses.push("(status = 'error' OR usage_source IN ('missing', 'partial'))");
+    }
+
+    let clause = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", clauses.join(" AND "))
+    };
+    Ok((clause, params))
 }
 
 pub fn insert_log(conn: &Connection, log: &RequestLog) -> Result<(), AppError> {
@@ -140,25 +149,24 @@ pub fn insert_log(conn: &Connection, log: &RequestLog) -> Result<(), AppError> {
 pub fn list_logs(conn: &Connection, filter: &LogFilter) -> Result<Vec<RequestLog>, AppError> {
     let limit = filter.limit.unwrap_or(200).clamp(1, 1000);
     let offset = filter.offset.unwrap_or(0).max(0);
-    let prepared = PreparedFilter::from_filter(filter)?;
+    let (where_sql, params) = build_where(filter)?;
+    // 「待处理」与用量口径是 OR / IN 谓词。规划器会为它们选 MULTI-INDEX OR，
+    // 代价是丢掉时间序、被迫排序；而列表本来就「按时间倒序、够数即停」，那更慢。
+    // 这两类显式钉在 occurred 索引上；status / 别名 / 时间范围仍交给规划器挑索引。
+    let index_hint = if filter.attention_only == Some(true) || non_empty(&filter.usage_source).is_some()
+    {
+        " INDEXED BY idx_request_logs_occurred"
+    } else {
+        ""
+    };
     let sql = format!(
-        "SELECT * FROM request_logs {FILTER_WHERE} ORDER BY occurred_at DESC LIMIT ?8 OFFSET ?9"
+        "SELECT * FROM request_logs{index_hint}{where_sql} ORDER BY occurred_at DESC LIMIT ? OFFSET ?"
     );
+    let mut bound: Vec<&dyn rusqlite::ToSql> = params.iter().map(|item| item.as_ref()).collect();
+    bound.push(&limit);
+    bound.push(&offset);
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(
-        params![
-            prepared.route_alias,
-            prepared.status,
-            prepared.query,
-            prepared.from,
-            prepared.to,
-            prepared.usage_source,
-            prepared.attention_only,
-            limit,
-            offset,
-        ],
-        RequestLog::from_row,
-    )?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bound), RequestLog::from_row)?;
     let mut logs = Vec::new();
     for row in rows {
         logs.push(row?);
@@ -167,22 +175,40 @@ pub fn list_logs(conn: &Connection, filter: &LogFilter) -> Result<Vec<RequestLog
 }
 
 pub fn count_logs(conn: &Connection, filter: &LogFilter) -> Result<i64, AppError> {
-    let prepared = PreparedFilter::from_filter(filter)?;
-    let sql = format!("SELECT COUNT(*) FROM request_logs {FILTER_WHERE}");
+    let (where_sql, params) = build_where(filter)?;
+    let sql = format!("SELECT COUNT(*) FROM request_logs{where_sql}");
     let count = conn.query_row(
         &sql,
-        params![
-            prepared.route_alias,
-            prepared.status,
-            prepared.query,
-            prepared.from,
-            prepared.to,
-            prepared.usage_source,
-            prepared.attention_only,
-        ],
+        rusqlite::params_from_iter(params.iter().map(|item| item.as_ref())),
         |row| row.get(0),
     )?;
     Ok(count)
+}
+
+/// 日志页顶部的三个口径计数（总 / 失败 / 用量存疑）。
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogSummary {
+    pub all: i64,
+    pub failed: i64,
+    pub unreliable: i64,
+}
+
+/// 三个口径各算一次 COUNT。三条都命中索引，比「一条 SUM 扫全表」快一个数量级。
+pub fn summarize_logs(conn: &Connection, filter: &LogFilter) -> Result<LogSummary, AppError> {
+    let failed = LogFilter {
+        status: Some("error".into()),
+        ..filter.clone()
+    };
+    let unreliable = LogFilter {
+        usage_source: Some("unreliable".into()),
+        ..filter.clone()
+    };
+    Ok(LogSummary {
+        all: count_logs(conn, filter)?,
+        failed: count_logs(conn, &failed)?,
+        unreliable: count_logs(conn, &unreliable)?,
+    })
 }
 
 /// 日志中出现过的别名，供筛选下拉使用。
@@ -297,5 +323,121 @@ mod tests {
         let rows = list_logs(&conn, &filter).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "log-2");
+    }
+
+    /// 手动跑的粗略基准：`cargo test bench_logs -- --nocapture --ignored`。
+    #[test]
+    #[ignore]
+    fn bench_logs() {
+        use crate::db::demo::{inject_demo, DemoScenario};
+
+        let path = std::env::temp_dir().join("lumen-bench-logs.db");
+        let _ = std::fs::remove_file(&path);
+        let db = crate::db::open(&path).unwrap();
+        {
+            let conn = db.lock().unwrap();
+            inject_demo(&conn, DemoScenario::Rich).unwrap();
+        }
+        let conn = db.lock().unwrap();
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM request_logs", [], |r| r.get(0))
+            .unwrap();
+        println!("TOTAL ROWS: {total}");
+
+        let cases: Vec<(&str, LogFilter)> = vec![
+            (
+                "list attention (limit 100)",
+                LogFilter {
+                    attention_only: Some(true),
+                    limit: Some(100),
+                    ..Default::default()
+                },
+            ),
+            (
+                "count attention",
+                LogFilter {
+                    attention_only: Some(true),
+                    ..Default::default()
+                },
+            ),
+            ("count all", LogFilter::default()),
+            (
+                "count failed",
+                LogFilter {
+                    status: Some("error".into()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "count unreliable",
+                LogFilter {
+                    usage_source: Some("unreliable".into()),
+                    ..Default::default()
+                },
+            ),
+        ];
+
+        for (name, filter) in &cases {
+            let t = std::time::Instant::now();
+            let rows = list_logs(&conn, filter).unwrap();
+            let list_ms = t.elapsed();
+
+            let t = std::time::Instant::now();
+            let count = count_logs(&conn, filter).unwrap();
+            let count_ms = t.elapsed();
+
+            println!(
+                "{name}: list {:?} ({} rows) / count {:?} ({count})",
+                list_ms,
+                rows.len(),
+                count_ms
+            );
+        }
+
+        let t = std::time::Instant::now();
+        let aliases = list_log_aliases(&conn).unwrap();
+        println!("list_aliases: {:?} ({} aliases)", t.elapsed(), aliases.len());
+
+        // 设计依据：
+        //  - 摘要用「3 条索引 COUNT」而非「一条 SUM 扫全表」——后者要全表扫；
+        //  - 列表在 OR / IN 谓词下显式钉时间索引，否则规划器选 MULTI-INDEX OR、
+        //    丢掉时间序被迫排序，反而更慢。
+        for (name, sql) in [
+            (
+                "summary one scan (rejected)",
+                "SELECT COUNT(*), SUM(status = 'error'), SUM(usage_source IN ('missing','partial')) FROM request_logs",
+            ),
+            (
+                "list attention (planner, rejected)",
+                "SELECT id FROM request_logs WHERE status = 'error' OR usage_source IN ('missing','partial') ORDER BY occurred_at DESC LIMIT 100",
+            ),
+            (
+                "list attention (pinned to occurred)",
+                "SELECT id FROM request_logs INDEXED BY idx_request_logs_occurred WHERE status = 'error' OR usage_source IN ('missing','partial') ORDER BY occurred_at DESC LIMIT 100",
+            ),
+        ] {
+            let t = std::time::Instant::now();
+            let n = conn
+                .prepare(sql)
+                .unwrap()
+                .query_map([], |_| Ok(()))
+                .unwrap()
+                .count();
+            println!("{name}: {:?} ({n} rows)", t.elapsed());
+        }
+
+        for sql in [
+            "SELECT COUNT(*) FROM request_logs WHERE status = 'error' OR usage_source IN ('missing','partial')",
+            "SELECT COUNT(*) FROM request_logs",
+        ] {
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let rows = stmt.query_map([], |row| row.get::<_, String>(3)).unwrap();
+            for row in rows {
+                println!("PLAN [{sql}]: {}", row.unwrap());
+            }
+        }
+
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
     }
 }

@@ -1,31 +1,42 @@
 use std::sync::Arc;
 
 use chrono::Local;
+use serde::Serialize;
 use tauri::State;
 
-use crate::db::logs::{count_logs, list_log_aliases, list_logs, LogFilter};
+use crate::db::logs::{count_logs, list_log_aliases, list_logs, summarize_logs, LogFilter, LogSummary};
 use crate::db::models::RequestLog;
 use crate::db::stats::{query_overview, KeyScope, Period, UsageOverview};
 use crate::db::with_db;
 use crate::error::AppError;
 use crate::state::AppState;
 
-#[tauri::command]
-pub async fn list_logs_cmd(
-    state: State<'_, Arc<AppState>>,
-    filter: Option<LogFilter>,
-) -> Result<Vec<RequestLog>, AppError> {
-    let filter = filter.unwrap_or_default();
-    with_db(&state.db, move |conn| list_logs(conn, &filter)).await
+/// 日志页一次取回：当前页记录、总条数与顶部三个口径计数。
+/// 逐条查询都在同一把锁内完成，前端只需一次 IPC。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogPageDto {
+    pub logs: Vec<RequestLog>,
+    pub total: i64,
+    pub summary: LogSummary,
 }
 
 #[tauri::command]
-pub async fn count_logs_cmd(
+pub async fn query_log_page_cmd(
     state: State<'_, Arc<AppState>>,
     filter: Option<LogFilter>,
-) -> Result<i64, AppError> {
+    summary_filter: Option<LogFilter>,
+) -> Result<LogPageDto, AppError> {
     let filter = filter.unwrap_or_default();
-    with_db(&state.db, move |conn| count_logs(conn, &filter)).await
+    let summary_filter = summary_filter.unwrap_or_else(|| filter.clone());
+    with_db(&state.db, move |conn| {
+        Ok(LogPageDto {
+            logs: list_logs(conn, &filter)?,
+            total: count_logs(conn, &filter)?,
+            summary: summarize_logs(conn, &summary_filter)?,
+        })
+    })
+    .await
 }
 
 #[tauri::command]
