@@ -133,20 +133,26 @@
 
 .cost-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 60px 32px;
+  grid-template-columns: minmax(0, 1fr) 3.75rem 2.75rem;
   align-items: center;
   gap: 7px;
   padding: 4px 0;
   font-size: var(--text-small);
 }
 
-.model-name {
+/* Scoped to the cost panel: `config.css` also defines an unscoped `.model-name`
+   for the providers list, and being imported later it would otherwise win here. */
+.cost-panel .model-name {
   overflow: hidden;
+  min-width: 0;
+  color: var(--ink);
+  font-size: var(--text-small);
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.model-name i {
+.cost-panel .model-name i {
   display: inline-block;
   width: 6px;
   height: 6px;
@@ -157,6 +163,7 @@
 .model-cost,
 .model-share {
   text-align: right;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
@@ -182,6 +189,15 @@
 
 .stack-area {
   stroke: none;
+  vector-effect: non-scaling-stroke;
+}
+
+/* no data: draw the flat 0 curve on the baseline instead of a blank plot */
+.stack-zero {
+  fill: none;
+  stroke: var(--ink-faint);
+  stroke-width: 2;
+  stroke-linecap: round;
   vector-effect: non-scaling-stroke;
 }
 

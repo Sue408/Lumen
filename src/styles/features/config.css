@@ -860,13 +860,13 @@
   min-width: 0;
 }
 
-.model-name {
+.providers-page .model-name {
   color: var(--ink);
   font-size: 0.9375rem;
   font-weight: 600;
 }
 
-.model-row.is-off .model-name {
+.providers-page .model-row.is-off .model-name {
   color: var(--ink-muted);
 }
 

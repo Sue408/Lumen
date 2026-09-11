@@ -74,7 +74,8 @@ export function ModelCostBreakdown({ period }: ModelCostBreakdownProps) {
 
         <div className="cost-ranking" role="list" aria-label="模型花费排名">
           {period.modelCosts.map((model) => {
-            const share = Math.round((model.cost / period.totalCost) * 100);
+            const share =
+              period.totalCost > 0 ? Math.round((model.cost / period.totalCost) * 100) : 0;
             return (
               <div className="cost-row" role="listitem" key={model.name}>
                 <span className="model-name" title={model.name}>

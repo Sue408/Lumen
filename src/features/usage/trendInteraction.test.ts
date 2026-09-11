@@ -4,6 +4,7 @@ import {
   buildPeriodAxisLabels,
   buildPeriodSampleLabels,
   buildTrendDetail,
+  getElapsedBucketCount,
   getNearestPointIndex,
   getVisiblePointCount,
   resampleSeries,
@@ -54,5 +55,16 @@ test("sample labels span the real period without dropping chart values", () => {
 test("resampling preserves the first and current endpoint values", () => {
   assert.deepEqual(resampleSeries([42, 118, 236, 292, 371, 404], 4), [42, 196.67, 318.33, 404]);
   assert.deepEqual(resampleSeries([42, 118], 4), [42, 67.33, 92.67, 118]);
+});
+
+test("elapsed buckets clip a series to the part of the period that happened", () => {
+  const dawn = new Date(2026, 8, 10, 0, 5);
+  const now = new Date(2026, 8, 10, 14, 37);
+  const late = new Date(2026, 8, 10, 23, 59);
+  assert.equal(getElapsedBucketCount("day", dawn), 1);
+  assert.equal(getElapsedBucketCount("day", now), 15);
+  assert.equal(getElapsedBucketCount("day", late), 24);
+  assert.equal(getElapsedBucketCount("week", now), 4);
+  assert.equal(getElapsedBucketCount("month", now), 10);
 });
 

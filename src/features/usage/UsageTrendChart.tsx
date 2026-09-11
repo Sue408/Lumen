@@ -1,7 +1,7 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { labelAnchors, stackedAreaPaths } from "./chartGeometry";
 import { toneFor } from "./chartTone";
-import { buildPeriodAxisLabels, getVisiblePointCount, resampleSeries } from "./trendInteraction";
+import { buildPeriodAxisLabels, getElapsedBucketCount, resampleSeries } from "./trendInteraction";
 import type { UsagePeriod } from "./usageData";
 import { isCurrentPeriod } from "./period";
 
@@ -65,14 +65,19 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
     return () => observer.disconnect();
   }, []);
 
-  const pointCount = getVisiblePointCount(period.periodKey, now);
+  // One point per elapsed hour, not a fixed five samples across the whole day:
+  // a late peak lands in its real hour and idle hours stay flat on the baseline.
+  const elapsedBuckets = getElapsedBucketCount(period.periodKey, now);
   const layers = useMemo(
     () =>
       period.layers.map((layer) => ({
         ...layer,
-        values: resampleSeries(layer.values, pointCount),
+        values: resampleSeries(
+          layer.values.slice(0, elapsedBuckets),
+          Math.max(elapsedBuckets, 2),
+        ),
       })),
-    [period.layers, pointCount],
+    [period.layers, elapsedBuckets],
   );
   const axisLabels = useMemo(
     () => buildPeriodAxisLabels(period.periodKey, now),
@@ -86,6 +91,11 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
   const yMax = niceMax(stackTotal > 0 ? stackTotal : period.totalCost);
   const areas = stackedAreaPaths(layers, chartSize.width, chartSize.height, yMax);
   const anchors = labelAnchors(layers, chartSize.height, yMax, 18);
+  // Visual compromise: a zero-value period still has layers, but their areas
+  // collapse onto the axis and vanish. Draw a flat 0 curve lifted a few px so
+  // the chart reads as "0" instead of blank.
+  const hasValue = stackTotal > 0;
+  const zeroY = Math.max(chartSize.height - 8, 0);
 
   return (
     <article className="chart-panel trend-panel">
@@ -94,7 +104,9 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
           花费构成
           <span className="chart-unit">元 · 累积</span>
         </h2>
-        <span className="chart-meta">{layers.length} 个分层</span>
+        <span className="chart-meta">
+          {layers.length > 0 ? `${layers.length} 个分层` : "暂无调用"}
+        </span>
       </header>
 
       <div className="trend-chart">
@@ -124,6 +136,13 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
                 clipPath={`url(#${clipId})`}
               />
             ))}
+            {hasValue ? null : (
+              <path
+                className="stack-zero"
+                d={`M 0 ${zeroY} L ${chartSize.width} ${zeroY}`}
+                clipPath={`url(#${clipId})`}
+              />
+            )}
           </svg>
           {anchors.map((anchor, index) => (
             <span

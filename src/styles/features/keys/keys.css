@@ -213,7 +213,7 @@
 .keys-page .quota-meter {
   display: block;
   flex: 0 0 auto;
-  width: clamp(5.5rem, 9vw, 9rem);
+  width: clamp(9rem, 14vw, 15rem);
   height: 6px;
   overflow: hidden;
   background: var(--line-faint);

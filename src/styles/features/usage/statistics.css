@@ -73,12 +73,12 @@
 .usage-summary {
   margin: 0;
   color: var(--ink-soft);
-  font-size: 1rem;
+  font-size: var(--text-body);
   line-height: 1.5;
 }
 
 .usage-summary strong {
-  font-size: 1.125rem;
+  font-size: 1.12em;
   font-weight: 600;
 }
 

@@ -92,6 +92,18 @@ export function getVisiblePointCount(period: TrendPeriodKey, now: Date): number 
   return Math.min(5, Math.max(2, Math.ceil(now.getDate() / 3)));
 }
 
+/**
+ * How many time buckets of the period have actually elapsed — one per hour for
+ * a day. A series is clipped to this before it is drawn, otherwise the full
+ * period (0→24h) gets stretched across an axis that only spans 0→now and every
+ * event is drawn hours too early.
+ */
+export function getElapsedBucketCount(period: TrendPeriodKey, now: Date): number {
+  if (period === "day") return Math.min(24, now.getHours() + 1);
+  if (period === "week") return Math.min(7, getMondayIndex(now) + 1);
+  return Math.max(1, now.getDate());
+}
+
 export function buildPeriodAxisLabels(period: TrendPeriodKey, now: Date): string[] {
   const count = getVisiblePointCount(period, now);
   if (period === "day") return getDayLabels(now, count);

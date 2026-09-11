@@ -25,6 +25,7 @@ import {
   quotaPeriodLabel,
   quotaPeriodOrder,
   quotaRatio,
+  quotaSummary,
   quotaTone,
   validateKeyDraft,
   type KeyDraft,
@@ -358,7 +359,9 @@ export function KeysPage() {
                         ) : (
                           <>
                             <span className="quota-meter is-unlimited" aria-hidden="true" />
-                            <span className="key-quota-text">不限额度</span>
+                            <span className="key-quota-text">
+                              {quotaSummary(usage.spent, null, key.quotaPeriod)}
+                            </span>
                           </>
                         )
                       ) : (

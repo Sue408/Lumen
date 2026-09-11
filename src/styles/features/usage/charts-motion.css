@@ -37,20 +37,33 @@
 }
 
 .cost-content {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
+/* flex (not grid) so a long model list shrinks and scrolls instead of
+   starving the donut stage to zero */
 .donut-stage {
   display: grid;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 9rem;
   place-items: center;
   container-type: size;
 }
 
+.cost-ranking {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden auto;
+}
+
+/* Scale with the stage on both axes — no fixed ceiling, so on a large window
+   the donut grows into the space instead of stalling at a small cap, while a
+   short stage (a long model list) still pulls it back down. */
 .cost-donut {
   position: relative;
-  width: min(100cqw, 72cqh, 12.48rem);
+  width: min(100cqw, 76cqh);
   aspect-ratio: 1;
   background: none;
 }
@@ -104,7 +117,7 @@
 
 .donut-total {
   font-family: var(--font-serif);
-  font-size: clamp(0.95rem, 0.8rem + 0.6vw, 1.15rem);
+  font-size: clamp(0.9rem, 9cqh, 1.9rem);
   font-weight: 600;
   line-height: 1.05;
   color: var(--ink);
