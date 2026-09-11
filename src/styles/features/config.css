@@ -741,6 +741,19 @@
   font-size: 0.75rem;
 }
 
+/* 只读字段值：表示创建后锁定的属性（如协议）。 */
+.field-static {
+  display: flex;
+  align-items: center;
+  height: 2rem;
+  padding: 0 0.5rem;
+  color: var(--ink-muted);
+  background: var(--paper);
+  border: 1px dashed var(--line-strong);
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
 .field input,
 .field select,
 .field textarea {

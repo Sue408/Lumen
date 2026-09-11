@@ -57,6 +57,16 @@ pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTarg
     if !is_known_protocol(&input.protocol) {
         return Err(AppError::message(format!("未知协议：{}", input.protocol)));
     }
+    // 协议创建后锁定：改协议等于换了对外契约，应删除重建而非原地修改。
+    if let Some(existing_id) = input.id.as_deref().filter(|value| !value.is_empty()) {
+        if let Some(existing) = get_route(conn, existing_id)? {
+            if existing.route.protocol != input.protocol {
+                return Err(AppError::message(
+                    "协议创建后不可修改：请删除该路由后重建".to_string(),
+                ));
+            }
+        }
+    }
     // 一个路由只允许一种协议：所有目标的上游提供商协议必须与路由声明一致。
     for target in &input.targets {
         match target_protocol(conn, &target.upstream_model_id)? {
@@ -235,5 +245,41 @@ mod tests {
         )
         .unwrap();
         assert_eq!(saved.route.protocol, "anthropic");
+    }
+
+    #[test]
+    fn rejects_protocol_change_on_existing_route() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let openai = seed_model(&conn, "openai", "gpt");
+        let saved = save_route(
+            &conn,
+            &RouteInput {
+                id: None,
+                alias: "r".into(),
+                display_name: "R".into(),
+                protocol: "openai".into(),
+                enabled: true,
+                targets: vec![RouteTargetInput {
+                    upstream_model_id: openai,
+                    priority: 0,
+                    enabled: true,
+                }],
+            },
+        )
+        .unwrap();
+
+        let result = save_route(
+            &conn,
+            &RouteInput {
+                id: Some(saved.route.id.clone()),
+                alias: "r".into(),
+                display_name: "R".into(),
+                protocol: "anthropic".into(),
+                enabled: true,
+                targets: Vec::new(),
+            },
+        );
+        assert!(result.is_err());
     }
 }

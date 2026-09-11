@@ -22,12 +22,42 @@ pub fn get_provider(conn: &Connection, id: &str) -> Result<Option<Provider>, App
     }
 }
 
+/// 引用该提供商名下模型的路由别名，用于协议变更前的冲突检测。
+fn routes_using_provider(conn: &Connection, provider_id: &str) -> Result<Vec<String>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT r.alias
+           FROM routes r
+           JOIN route_targets t   ON t.route_id = r.id
+           JOIN upstream_models m ON m.id = t.upstream_model_id
+          WHERE m.provider_id = ?1
+          ORDER BY r.alias ASC",
+    )?;
+    let rows = stmt.query_map([provider_id], |row| row.get(0))?;
+    let mut aliases = Vec::new();
+    for row in rows {
+        aliases.push(row?);
+    }
+    Ok(aliases)
+}
+
 pub fn save_provider(conn: &Connection, input: &ProviderInput) -> Result<Provider, AppError> {
     let id = input
         .id
         .clone()
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    // 协议创建后锁定：若改协议会让既有路由的目标失去协议同构，则阻断并报出受影响的路由。
+    if let Some(existing) = get_provider(conn, &id)? {
+        if existing.protocol != input.protocol {
+            let aliases = routes_using_provider(conn, &id)?;
+            if !aliases.is_empty() {
+                return Err(AppError::message(format!(
+                    "协议创建后不可修改：路由 {} 仍引用该提供商的模型，请先移除或重建这些路由",
+                    aliases.join("、")
+                )));
+            }
+        }
+    }
     let created_at = chrono::Utc::now().to_rfc3339();
     let extra_headers = serde_json::to_string(&input.extra_headers)?;
     conn.execute(
@@ -137,4 +167,103 @@ pub fn get_upstream_model(conn: &Connection, id: &str) -> Result<Option<Upstream
 pub fn delete_upstream_model(conn: &Connection, id: &str) -> Result<(), AppError> {
     conn.execute("DELETE FROM upstream_models WHERE id = ?1", [id])?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::models::{RouteInput, RouteTargetInput};
+    use crate::db::open_in_memory;
+    use crate::db::routes::save_route;
+    use std::collections::BTreeMap;
+
+    fn seed_provider(conn: &Connection, protocol: &str) -> Provider {
+        save_provider(
+            conn,
+            &ProviderInput {
+                id: None,
+                name: format!("p-{protocol}"),
+                base_url: "https://example.com/v1".into(),
+                api_key: "secret".into(),
+                auth_scheme: "bearer".into(),
+                protocol: protocol.into(),
+                extra_headers: BTreeMap::new(),
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+        .unwrap()
+    }
+
+    fn change_protocol(conn: &Connection, provider: &Provider, protocol: &str) -> Result<Provider, AppError> {
+        save_provider(
+            conn,
+            &ProviderInput {
+                id: Some(provider.id.clone()),
+                name: provider.name.clone(),
+                base_url: provider.base_url.clone(),
+                api_key: provider.api_key.clone(),
+                auth_scheme: provider.auth_scheme.clone(),
+                protocol: protocol.into(),
+                extra_headers: BTreeMap::new(),
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+    }
+
+    #[test]
+    fn rejects_protocol_change_when_routes_reference_provider() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = seed_provider(&conn, "openai");
+        let model = save_upstream_model(
+            &conn,
+            &UpstreamModelInput {
+                id: None,
+                provider_id: provider.id.clone(),
+                model_id: "gpt".into(),
+                display_name: "GPT".into(),
+                input_price: 0.0,
+                output_price: 0.0,
+                cache_read_price: 0.0,
+                cache_creation_price: 0.0,
+                context_window: 0,
+                capabilities: Vec::new(),
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+        .unwrap();
+        save_route(
+            &conn,
+            &RouteInput {
+                id: None,
+                alias: "r".into(),
+                display_name: "R".into(),
+                protocol: "openai".into(),
+                enabled: true,
+                targets: vec![RouteTargetInput {
+                    upstream_model_id: model.id,
+                    priority: 0,
+                    enabled: true,
+                }],
+            },
+        )
+        .unwrap();
+
+        assert!(change_protocol(&conn, &provider, "anthropic").is_err());
+    }
+
+    #[test]
+    fn allows_protocol_change_when_no_routes_reference_provider() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = seed_provider(&conn, "openai");
+        let saved = change_protocol(&conn, &provider, "anthropic").unwrap();
+        assert_eq!(saved.protocol, "anthropic");
+    }
 }

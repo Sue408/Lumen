@@ -143,10 +143,14 @@ function ProviderForm({
           </label>
           <label className="field">
             <span>协议</span>
-            <select value={draft.protocol} onChange={(event) => set({ protocol: event.target.value as ProviderDraft["protocol"] })}>
-              <option value="openai">{protocolLabel.openai}</option>
-              <option value="anthropic">{protocolLabel.anthropic}</option>
-            </select>
+            {draft.id === null ? (
+              <select value={draft.protocol} onChange={(event) => set({ protocol: event.target.value as ProviderDraft["protocol"] })}>
+                <option value="openai">{protocolLabel.openai}</option>
+                <option value="anthropic">{protocolLabel.anthropic}</option>
+              </select>
+            ) : (
+              <span className="field-static">{protocolLabel[draft.protocol]}</span>
+            )}
           </label>
           <label className="field field-wide">
             <span>额外请求头</span>

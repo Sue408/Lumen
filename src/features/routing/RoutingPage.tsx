@@ -83,7 +83,6 @@ function RouteForm({
   providers,
   models,
   brands,
-  modelProtocol,
   busy,
   error,
   onChange,
@@ -95,7 +94,6 @@ function RouteForm({
   providers: Provider[];
   models: UpstreamModel[];
   brands: Map<string, ModelMark>;
-  modelProtocol: Map<string, Protocol | undefined>;
   busy: boolean;
   error: string | null;
   onChange: (draft: RouteDraft) => void;
@@ -105,13 +103,9 @@ function RouteForm({
   const set = (patch: Partial<RouteDraft>) => onChange({ ...draft, ...patch });
   const setTarget = (index: number, patch: Partial<RouteDraft["targets"][number]>) =>
     set({ targets: draft.targets.map((target, itemIndex) => (itemIndex === index ? { ...target, ...patch } : target)) });
-  // 切换协议时丢弃不再兼容的目标：一个路由只服务一种协议。
+  // 协议创建后锁定；新建时切换协议会清空已选目标（先定协议，再选目标）。
   const setProtocol = (protocol: Protocol) => {
-    const targets = draft.targets.filter((target) => {
-      const current = modelProtocol.get(target.upstreamModelId);
-      return current === undefined || current === protocol;
-    });
-    onChange({ ...draft, protocol, targets });
+    onChange({ ...draft, protocol, targets: [] });
   };
   const groups = groupedModels(providers, models, draft.protocol);
   const firstCompatible = groups[0]?.models[0]?.id ?? "";
@@ -139,10 +133,14 @@ function RouteForm({
           </label>
           <label className="field">
             <span>协议</span>
-            <select value={draft.protocol} onChange={(event) => setProtocol(event.target.value as Protocol)}>
-              <option value="openai">{protocolLabel.openai}</option>
-              <option value="anthropic">{protocolLabel.anthropic}</option>
-            </select>
+            {draft.id === null ? (
+              <select value={draft.protocol} onChange={(event) => setProtocol(event.target.value as Protocol)}>
+                <option value="openai">{protocolLabel.openai}</option>
+                <option value="anthropic">{protocolLabel.anthropic}</option>
+              </select>
+            ) : (
+              <span className="field-static">{protocolLabel[draft.protocol]}</span>
+            )}
           </label>
         </div>
       </section>
@@ -532,7 +530,6 @@ export function RoutingPage() {
                     providers={providers}
                     models={models}
                     brands={brands}
-                    modelProtocol={modelProtocol}
                     busy={busy}
                     error={formError}
                     onChange={setDraft}
