@@ -1,9 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cumulativeToDistribution, buildMonthHeatmap } from "./usageVisualData.ts";
+import { cumulativeToDistribution, smoothSeries, buildMonthHeatmap } from "./usageVisualData.ts";
 
 test("weekly distribution converts cumulative totals into independent daily values", () => {
   assert.deepEqual(cumulativeToDistribution([42, 118, 236, 292]), [42, 76, 118, 56]);
+});
+
+test("smoothSeries spreads a spike into its neighbours", () => {
+  const smoothed = smoothSeries([0, 0, 10, 0, 0], 1);
+  assert.ok(smoothed[2] < 10);
+  assert.ok(smoothed[1] > 0);
+  assert.ok(smoothed[3] > 0);
+});
+
+test("smoothSeries leaves a constant series untouched", () => {
+  for (const value of smoothSeries([3, 3, 3, 3], 1)) {
+    assert.ok(Math.abs(value - 3) < 1e-9);
+  }
 });
 
 test("month heatmap keeps calendar offset and marks future dates", () => {

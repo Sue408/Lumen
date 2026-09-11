@@ -84,130 +84,9 @@ export type StackedLayer = {
   amount: number;
 };
 
-function xAt(index: number, count: number, width: number): number {
-  return count === 1 ? width / 2 : (index / (count - 1)) * width;
-}
-
 function yAt(value: number, height: number, maxValue: number): number {
   const safeMax = maxValue > 0 ? maxValue : 1;
   return height - (Math.min(Math.max(value, 0), safeMax) / safeMax) * height;
-}
-
-export type CurvePoint = {
-  x: number;
-  y: number;
-};
-
-export type CurveSegment = {
-  from: CurvePoint;
-  c1: CurvePoint;
-  c2: CurvePoint;
-  to: CurvePoint;
-};
-
-/**
- * Fritsch–Carlson 单调三次插值的切线：加权调和平均，保证曲线不过冲。
- * 堆叠面积的相邻层共用一条累积边界，普通样条会在平台段鼓起并穿层，必须用单调版。
- */
-export function monotoneSegments(points: CurvePoint[]): CurveSegment[] {
-  const count = points.length;
-  if (count < 2) return [];
-
-  const dx = points.slice(0, -1).map((point, index) => points[index + 1].x - point.x);
-  const slope = points.slice(0, -1).map((point, index) =>
-    dx[index] === 0 ? 0 : (points[index + 1].y - point.y) / dx[index],
-  );
-  const tangent = new Array<number>(count);
-  tangent[0] = slope[0];
-  tangent[count - 1] = slope[count - 2];
-  for (let index = 1; index < count - 1; index += 1) {
-    if (slope[index - 1] * slope[index] <= 0) {
-      tangent[index] = 0;
-      continue;
-    }
-    const before = 2 * dx[index] + dx[index - 1];
-    const after = dx[index] + 2 * dx[index - 1];
-    tangent[index] = (before + after) / (before / slope[index - 1] + after / slope[index]);
-  }
-
-  return points.slice(0, -1).map((point, index) => {
-    const h = dx[index];
-    return {
-      from: point,
-      c1: { x: point.x + h / 3, y: point.y + (h / 3) * tangent[index] },
-      c2: { x: points[index + 1].x - h / 3, y: points[index + 1].y - (h / 3) * tangent[index + 1] },
-      to: points[index + 1],
-    };
-  });
-}
-
-const fmt = (point: CurvePoint) => `${round(point.x)} ${round(point.y)}`;
-
-/** 单调插值折线，从首个点走到末个点。 */
-export function monotonePath(points: CurvePoint[]): string {
-  if (points.length === 0) return "";
-  if (points.length === 1) return `M ${fmt(points[0])}`;
-  return monotoneSegments(points).reduce(
-    (path, segment) => `${path} C ${fmt(segment.c1)}, ${fmt(segment.c2)}, ${fmt(segment.to)}`,
-    `M ${fmt(points[0])}`,
-  );
-}
-
-/** 同一条单调曲线的反向走法（控制点交换），用于堆叠面积的下边界。 */
-export function monotonePathReversed(points: CurvePoint[]): string {
-  if (points.length === 0) return "";
-  const last = points[points.length - 1];
-  if (points.length === 1) return `M ${fmt(last)}`;
-  return monotoneSegments(points).reduceRight(
-    (path, segment) => `${path} C ${fmt(segment.c2)}, ${fmt(segment.c1)}, ${fmt(segment.from)}`,
-    `M ${fmt(last)}`,
-  );
-}
-
-export type StackedArea = {
-  name: string;
-  tone: string;
-  amount: number;
-  /** 填色用的闭合面积。 */
-  path: string;
-  /** 上边界曲线，供顶边描线单独使用。 */
-  edge: string;
-};
-
-/** 累积堆叠面积：第 n 层的下边界即前 n-1 层的累积和，边界走单调插值。 */
-export function stackedAreaPaths(
-  layers: StackedLayer[],
-  width: number,
-  height: number,
-  maxValue: number,
-): StackedArea[] {
-  const count = layers[0]?.values.length ?? 0;
-  if (layers.length === 0 || count === 0) return [];
-
-  const lower = new Array<number>(count).fill(0);
-  const areas: StackedArea[] = [];
-  for (const layer of layers) {
-    const upper = lower.map((base, index) => base + (layer.values[index] ?? 0));
-    const upperPoints = upper.map((value, index) => ({
-      x: xAt(index, count, width),
-      y: yAt(value, height, maxValue),
-    }));
-    const lowerPoints = lower.map((value, index) => ({
-      x: xAt(index, count, width),
-      y: yAt(value, height, maxValue),
-    }));
-    const edge = monotonePath(upperPoints);
-    const floor = monotonePathReversed(lowerPoints).replace(/^M/, "L");
-    areas.push({
-      name: layer.name,
-      tone: layer.tone,
-      amount: layer.amount,
-      path: `${edge} ${floor} Z`,
-      edge,
-    });
-    for (let index = 0; index < count; index += 1) lower[index] = upper[index];
-  }
-  return areas;
 }
 
 export type StackedBarSegment = {
@@ -264,8 +143,11 @@ export type LabelAnchor = {
   y: number;
 };
 
-/** 直接标注锚点：取每层上边界的末端，向下推开并夹在图表高度内。 */
-export function labelAnchors(
+/**
+ * 直接标注锚点：每条独立曲线取自身末端的高度，再自上而下推开、夹在图表内——
+ * 多条线交叠时标签才不会叠在一起。
+ */
+export function seriesAnchors(
   layers: StackedLayer[],
   height: number,
   maxValue: number,
@@ -274,16 +156,12 @@ export function labelAnchors(
   const count = layers[0]?.values.length ?? 0;
   if (layers.length === 0 || count === 0) return [];
 
-  let running = 0;
-  const anchors: LabelAnchor[] = layers.map((layer) => {
-    running += layer.values[count - 1] ?? 0;
-    return {
-      name: layer.name,
-      tone: layer.tone,
-      amount: layer.amount,
-      y: yAt(running, height, maxValue),
-    };
-  });
+  const anchors: LabelAnchor[] = layers.map((layer) => ({
+    name: layer.name,
+    tone: layer.tone,
+    amount: layer.amount,
+    y: yAt(layer.values[count - 1] ?? 0, height, maxValue),
+  }));
 
   anchors.sort((a, b) => a.y - b.y);
   for (let index = 1; index < anchors.length; index += 1) {
@@ -302,4 +180,3 @@ export function labelAnchors(
     y: Math.min(Math.max(anchor.y, 0), height),
   }));
 }
-

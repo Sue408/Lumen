@@ -181,28 +181,39 @@
   }
 }
 
-/* ---- stacked area (day view): direct labels replace the legend ---- */
+/* ---- per-item trend curves (day view): direct labels replace the legend ---- */
 
-.stack-plot {
+.trend-plot {
   overflow: visible;
 }
 
-.stack-area {
+/* 极淡的体量影子：线是主信号，面积只暗示体量，交叠处也不糊 */
+.trend-area {
   stroke: none;
-  vector-effect: non-scaling-stroke;
+  fill-opacity: 0.15;
 }
 
-/* 每层上边界压一条满不透明的同色调线：身子的 alpha 变柔，地层边界仍然清晰 */
-.stack-edge {
+/* 每条线先垫一层纸色外壳，多条交叠时把线切开，彼此才看得清 */
+.trend-line-casing {
   fill: none;
-  stroke-width: 1;
+  stroke: var(--paper);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.trend-line {
+  fill: none;
+  stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
 
 /* no data: draw the flat 0 curve on the baseline instead of a blank plot */
-.stack-zero {
+.trend-zero {
   fill: none;
   stroke: var(--ink-faint);
   stroke-width: 2;
@@ -210,9 +221,9 @@
   vector-effect: non-scaling-stroke;
 }
 
-.stack-label {
+.trend-label {
   position: absolute;
-  top: calc(0.35rem + var(--label-index) * 1.45rem);
+  top: var(--label-y, 50%);
   right: 0.35rem;
   z-index: 2;
   display: inline-flex;
@@ -225,17 +236,18 @@
   text-align: right;
   white-space: nowrap;
   pointer-events: none;
+  transform: translateY(-50%);
   font-variant-numeric: tabular-nums;
 }
 
-.stack-label i {
+.trend-label i {
   width: 0.5rem;
   height: 0.5rem;
   flex: 0 0 auto;
   border-radius: 2px;
 }
 
-.stack-label b {
+.trend-label b {
   color: var(--ink);
   font-weight: 600;
 }

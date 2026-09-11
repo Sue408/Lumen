@@ -10,6 +10,30 @@ export function cumulativeToDistribution(values: number[]) {
   return values.map((value, index) => Math.max(0, Number((value - (values[index - 1] ?? 0)).toFixed(2))));
 }
 
+/**
+ * 轻核高斯平滑：逐小时用量是脉冲式的，先揉开再插值，尖峰才会连成起伏的波。
+ * 边缘用复制延拓，避免首尾被无端压低。仅用于画形，读数仍取原始值。
+ */
+export function smoothSeries(values: number[], sigma: number): number[] {
+  const count = values.length;
+  if (count === 0 || sigma <= 0) return values;
+
+  const radius = Math.max(1, Math.ceil(sigma * 3));
+  const weights = Array.from({ length: radius * 2 + 1 }, (_, index) =>
+    Math.exp(-((index - radius) ** 2) / (2 * sigma * sigma)),
+  );
+  const weightSum = weights.reduce((sum, weight) => sum + weight, 0);
+
+  return values.map((_, index) => {
+    let sum = 0;
+    for (let offset = -radius; offset <= radius; offset += 1) {
+      const sample = Math.min(Math.max(index + offset, 0), count - 1);
+      sum += values[sample] * weights[offset + radius];
+    }
+    return sum / weightSum;
+  });
+}
+
 export function buildMonthHeatmap(
   anchor: Date,
   values: number[] = [],

@@ -7,7 +7,7 @@ import {
   type CSSProperties,
   type PointerEvent,
 } from "react";
-import { labelAnchors, stackedAreaPaths } from "./chartGeometry";
+import { buildAreaPath, buildSmoothPath, seriesAnchors } from "./chartGeometry";
 import { toneFor } from "./chartTone";
 import {
   buildPeriodAxisLabels,
@@ -16,6 +16,7 @@ import {
   getNearestPointIndex,
   resampleSeries,
 } from "./trendInteraction";
+import { cumulativeToDistribution, smoothSeries } from "./usageVisualData";
 import type { UsagePeriod } from "./usageData";
 import { isCurrentPeriod } from "./period";
 
@@ -29,10 +30,8 @@ const fallbackChartSize: ChartSize = { width: 600, height: 210 };
 /** 前缘淡出宽度（占整宽比例）：数据还没走完时，右端渐隐到纸面而非一刀切。 */
 const LEADING_FADE = 0.07;
 
-/** 由底到顶递减的填色不透明度，让堆叠像沉积层而不是四条硬色带。 */
-function stackOpacity(index: number, total: number): number {
-  return total <= 1 ? 1 : 1 - (index / (total - 1)) * 0.5;
-}
+/** 逐小时值的平滑半径（小时）：把脉冲式调用揉成起伏的波，代价是峰高略降。 */
+const SMOOTH_SIGMA = 1;
 
 const money = new Intl.NumberFormat("zh-CN", {
   minimumFractionDigits: 2,
@@ -69,9 +68,9 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
       ? new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), 23, 59)
       : liveNow;
   const id = useId().replace(/:/g, "");
-  const clipId = `stack-clip-${id}`;
-  const fadeId = `stack-fade-${id}`;
-  const maskId = `stack-mask-${id}`;
+  const clipId = `trend-clip-${id}`;
+  const fadeId = `trend-fade-${id}`;
+  const maskId = `trend-mask-${id}`;
   const isLive = !anchor || isCurrentPeriod("day", anchor, liveNow);
 
   useLayoutEffect(() => {
@@ -92,17 +91,26 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
     return () => observer.disconnect();
   }, []);
 
-  // One point per elapsed hour, not a fixed five samples across the whole day:
-  // a late peak lands in its real hour and idle hours stay flat on the baseline.
+  // One point per elapsed hour. The backend reports cumulative cost per bucket,
+  // so差分成每小时用量后再画——这条曲线要的是涨落，不是一直往上爬的累计。
   const elapsedBuckets = getElapsedBucketCount(period.periodKey, now);
   const pointCount = Math.max(elapsedBuckets, 2);
-  const layers = useMemo(
+  const rawLayers = useMemo(
     () =>
       period.layers.map((layer) => ({
         ...layer,
-        values: resampleSeries(layer.values.slice(0, elapsedBuckets), pointCount),
+        values: resampleSeries(
+          cumulativeToDistribution(layer.values.slice(0, elapsedBuckets)),
+          pointCount,
+        ),
       })),
     [period.layers, elapsedBuckets, pointCount],
+  );
+  // 画形用平滑值（脉冲揉成波），浮窗读数仍用上面的原始值。
+  const layers = useMemo(
+    () =>
+      rawLayers.map((layer) => ({ ...layer, values: smoothSeries(layer.values, SMOOTH_SIGMA) })),
+    [rawLayers],
   );
   const axisLabels = useMemo(
     () => buildPeriodAxisLabels(period.periodKey, now),
@@ -113,24 +121,40 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
     [period.periodKey, now, pointCount],
   );
 
-  const stackTotal = layers.reduce(
-    (sum, layer) => sum + (layer.values[layer.values.length - 1] ?? 0),
-    0,
+  // 峰值取逐小时总量的最高点，而不是末点（末点只是最后一小时）。
+  const hourlyPeak = layers
+    .reduce<number[]>(
+      (totals, layer) =>
+        layer.values.map((value, index) => (totals[index] ?? 0) + value),
+      [],
+    )
+    .reduce((max, value) => Math.max(max, value), 0);
+  const yMax = niceMax(hourlyPeak);
+  const series = useMemo(
+    () =>
+      layers.map((layer) => ({
+        layer,
+        line: buildSmoothPath(layer.values, chartSize.width, chartSize.height, yMax),
+        area: buildAreaPath(layer.values, chartSize.width, chartSize.height, yMax),
+      })),
+    [layers, chartSize.width, chartSize.height, yMax],
   );
-  const yMax = niceMax(stackTotal > 0 ? stackTotal : period.totalCost);
-  const areas = stackedAreaPaths(layers, chartSize.width, chartSize.height, yMax);
-  const anchors = labelAnchors(layers, chartSize.height, yMax, 18);
-  // Visual compromise: a zero-value period still has layers, but their areas
-  // collapse onto the axis and vanish. Draw a flat 0 curve lifted a few px so
-  // the chart reads as "0" instead of blank.
-  const hasValue = stackTotal > 0;
+  const anchors = useMemo(
+    () => seriesAnchors(layers, chartSize.height, yMax, 18),
+    [layers, chartSize.height, yMax],
+  );
+  // Visual compromise: a zero-value period has no curve to draw. Lift a flat 0
+  // line a few px off the baseline so the chart reads as "0" instead of blank.
+  const hasValue = hourlyPeak > 0;
   const zeroY = Math.max(chartSize.height - 8, 0);
 
-  // Follow the pointer across the plot, but only while it is over the painted
-  // band: SVG hit-tests the irregular path shape for free, so the empty space
-  // above the curve falls through to the <svg> and reads as "off".
+  const toY = (value: number) =>
+    chartSize.height - (Math.min(Math.max(value, 0), yMax) / yMax) * chartSize.height;
+
+  // Follow the pointer across the plot, but only while it is over painted ink:
+  // SVG hit-tests the curve/area shapes for free, so empty space reads as "off".
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (!(event.target as Element).closest(".stack-area, .stack-edge, .stack-zero")) {
+    if (!(event.target as Element).closest(".trend-area, .trend-line, .trend-zero")) {
       setHoveredIndex(null);
       return;
     }
@@ -149,17 +173,16 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
   const hoverTotal =
     activeIndex === null
       ? 0
-      : layers.reduce((sum, layer) => sum + (layer.values[activeIndex] ?? 0), 0);
-  const hoverY = chartSize.height - (Math.min(hoverTotal, yMax) / yMax) * chartSize.height;
+      : rawLayers.reduce((sum, layer) => sum + (layer.values[activeIndex] ?? 0), 0);
+  const hoverY = toY(hoverTotal);
   const hoverLayers =
     activeIndex === null
       ? []
-      : layers.filter((layer) => (layer.values[activeIndex] ?? 0) > 0);
+      : rawLayers.filter((layer) => (layer.values[activeIndex] ?? 0) > 0);
   const hoverLabel =
     activeIndex === null ? "" : sampleLabels[activeIndex] ?? axisLabels[activeIndex] ?? "";
   const hoverStyle = {
     "--hover-x": `${(hoverX / chartSize.width) * 100}%`,
-    "--hover-y": `${(hoverY / chartSize.height) * 100}%`,
   } as CSSProperties;
   const tooltipStyle = {
     "--tooltip-x": `${(hoverX / chartSize.width) * 100}%`,
@@ -170,11 +193,11 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
     <article className="chart-panel trend-panel">
       <header className="chart-heading">
         <h2>
-          花费构成
-          <span className="chart-unit">元 · 累积</span>
+          花费趋势
+          <span className="chart-unit">元 · 每小时</span>
         </h2>
         <span className="chart-meta">
-          {layers.length > 0 ? `${layers.length} 个分层` : "暂无调用"}
+          {layers.length > 0 ? `${layers.length} 条曲线` : "暂无调用"}
         </span>
       </header>
 
@@ -185,7 +208,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
           <span>0</span>
         </div>
         <div
-          className={`plot-area stack-plot${activeIndex !== null ? " is-hovering" : ""}`}
+          className={`plot-area trend-plot${activeIndex !== null ? " is-hovering" : ""}`}
           ref={plotRef}
           style={hoverStyle}
           onPointerMove={handlePointerMove}
@@ -195,7 +218,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
             viewBox={`0 0 ${chartSize.width} ${chartSize.height}`}
             preserveAspectRatio="none"
             role="img"
-            aria-label={`${period.heading}按分层堆叠的花费构成`}
+            aria-label={`${period.heading}各分项花费趋势`}
           >
             <defs>
               <clipPath id={clipId}>
@@ -224,39 +247,42 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
               </mask>
             </defs>
             <g mask={isLive ? `url(#${maskId})` : undefined}>
-              {areas.map((area, index) => (
+              <g clipPath={`url(#${clipId})`}>
+                {series.map(({ layer, area }) => (
+                  <path key={`area-${layer.name}`} className="trend-area" d={area} fill={toneFor(layer.tone)} />
+                ))}
+              </g>
+              {series.map(({ layer, line }) => (
                 <path
-                  key={area.name}
-                  className="stack-area"
-                  d={area.path}
-                  fill={toneFor(area.tone)}
-                  fillOpacity={stackOpacity(index, areas.length)}
+                  key={`casing-${layer.name}`}
+                  className="trend-line-casing"
+                  d={line}
                   clipPath={`url(#${clipId})`}
                 />
               ))}
-              {areas.map((area) => (
+              {series.map(({ layer, line }) => (
                 <path
-                  key={`edge-${area.name}`}
-                  className="stack-edge"
-                  d={area.edge}
-                  stroke={toneFor(area.tone)}
+                  key={`line-${layer.name}`}
+                  className="trend-line"
+                  d={line}
+                  stroke={toneFor(layer.tone)}
                   clipPath={`url(#${clipId})`}
                 />
               ))}
             </g>
             {hasValue ? null : (
               <path
-                className="stack-zero"
+                className="trend-zero"
                 d={`M 0 ${zeroY} L ${chartSize.width} ${zeroY}`}
                 clipPath={`url(#${clipId})`}
               />
             )}
           </svg>
-          {anchors.map((anchor, index) => (
+          {anchors.map((anchor) => (
             <span
               key={anchor.name}
-              className="stack-label"
-              style={{ "--label-index": `${index}` } as CSSProperties}
+              className="trend-label"
+              style={{ "--label-y": `${(anchor.y / chartSize.height) * 100}%` } as CSSProperties}
             >
               <i style={{ background: toneFor(anchor.tone) }} />
               {anchor.name}
@@ -266,7 +292,18 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
           {activeIndex !== null ? (
             <>
               <span className="hover-guide" aria-hidden="true" />
-              <span className="hover-point" aria-hidden="true" />
+              {layers.map((layer) => (
+                <span
+                  key={`dot-${layer.name}`}
+                  className="hover-point"
+                  style={
+                    {
+                      "--hover-y": `${(toY(layer.values[activeIndex] ?? 0) / chartSize.height) * 100}%`,
+                    } as CSSProperties
+                  }
+                  aria-hidden="true"
+                />
+              ))}
               <div
                 className={`trend-tooltip${hoverX > chartSize.width * 0.66 ? " is-left" : ""}${hoverY < chartSize.height * 0.4 ? " is-below" : ""}`}
                 style={tooltipStyle}
@@ -290,7 +327,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
                   ) : null}
                 </dl>
                 <div className="trend-tooltip-total">
-                  <span>累计</span>
+                  <span>合计</span>
                   <b>${money.format(hoverTotal)}</b>
                 </div>
               </div>

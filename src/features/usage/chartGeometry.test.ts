@@ -5,10 +5,7 @@ import {
   buildCostGradient,
   buildDonutSegments,
   buildSmoothPath,
-  labelAnchors,
-  monotonePath,
-  monotoneSegments,
-  stackedAreaPaths,
+  seriesAnchors,
   stackedBarSegments,
 } from "./chartGeometry.ts";
 
@@ -44,57 +41,6 @@ test("donut segments preserve order and leave a visible gap", () => {
   assert.equal(segments.at(-1)?.offset, -91);
 });
 
-test("stacked area paths stack each layer on the previous ceiling", () => {
-  const areas = stackedAreaPaths(
-    [
-      { name: "a", tone: "ochre", values: [0, 10, 20], amount: 20 },
-      { name: "b", tone: "indigo", values: [0, 5, 10], amount: 10 },
-    ],
-    600,
-    210,
-    30,
-  );
-  assert.equal(areas.length, 2);
-  assert.match(areas[0].path, /^M 0 210 /);
-  assert.match(areas[0].path, /Z$/);
-  // 第二层的下边界必须落在第一层的上边界上（末端 x=600）。
-  assert.ok(areas[1].path.includes("L 600"));
-});
-
-test("stacked area paths close to empty for no layers", () => {
-  assert.deepEqual(stackedAreaPaths([], 600, 210, 30), []);
-});
-
-test("monotone interpolation keeps its endpoints and never overshoots", () => {
-  const points = [
-    { x: 0, y: 10 },
-    { x: 1, y: 10 },
-    { x: 2, y: 10 },
-    { x: 3, y: 2 },
-    { x: 4, y: 2 },
-  ];
-  const segments = monotoneSegments(points);
-  assert.equal(segments.length, 4);
-  for (const segment of segments) {
-    const low = Math.min(segment.from.y, segment.to.y) - 1e-9;
-    const high = Math.max(segment.from.y, segment.to.y) + 1e-9;
-    assert.ok(segment.c1.y >= low && segment.c1.y <= high);
-    assert.ok(segment.c2.y >= low && segment.c2.y <= high);
-  }
-  assert.match(monotonePath(points), /^M 0 10 /);
-});
-
-test("stacked area exposes a full top edge for the rim stroke", () => {
-  const areas = stackedAreaPaths(
-    [{ name: "a", tone: "ochre", values: [0, 10, 20], amount: 20 }],
-    600,
-    210,
-    20,
-  );
-  assert.match(areas[0].edge, /^M 0 210 /);
-  assert.ok(areas[0].path.startsWith(areas[0].edge));
-});
-
 test("stacked bars turn cumulative layers into per-bucket heights", () => {
   const segments = stackedBarSegments(
     [
@@ -125,12 +71,12 @@ test("stacked bars leave a gap between slots", () => {
   assert.ok(segment.width < 300);
 });
 
-test("label anchors push apart to keep the minimum gap", () => {
-  const anchors = labelAnchors(
+test("series anchors push apart to keep the minimum gap", () => {
+  const anchors = seriesAnchors(
     [
       { name: "a", tone: "ochre", values: [0, 0.5], amount: 0.5 },
-      { name: "b", tone: "indigo", values: [0, 0.5], amount: 0.5 },
-      { name: "c", tone: "moss", values: [0, 0.5], amount: 0.5 },
+      { name: "b", tone: "indigo", values: [0.5, 0], amount: 0.5 },
+      { name: "c", tone: "moss", values: [0.5, 0], amount: 0.5 },
     ],
     210,
     30,
@@ -142,8 +88,8 @@ test("label anchors push apart to keep the minimum gap", () => {
   }
 });
 
-test("label anchors clamp inside the chart box", () => {
-  const anchors = labelAnchors(
+test("series anchors clamp inside the chart box", () => {
+  const anchors = seriesAnchors(
     [
       { name: "a", tone: "ochre", values: [0, 30], amount: 30 },
       { name: "b", tone: "indigo", values: [0, 30], amount: 30 },
