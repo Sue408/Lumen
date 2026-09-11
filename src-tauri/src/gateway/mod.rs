@@ -1,5 +1,6 @@
 pub mod forward;
 pub mod handlers;
+pub mod quota;
 pub mod resolve;
 pub mod usage;
 

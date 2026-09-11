@@ -346,3 +346,127 @@ export async function deleteRoute(id: string): Promise<void> {
   if (!isTauriRuntime(window)) return mockDeleteRoute(id);
   return invoke<void>("delete_route_cmd", { id });
 }
+
+export type QuotaPeriod = "daily" | "weekly" | "monthly" | "total";
+
+export type VirtualKey = {
+  id: string;
+  key: string;
+  name: string;
+  enabled: boolean;
+  quotaLimit: number | null;
+  quotaPeriod: QuotaPeriod;
+  createdAt: string;
+};
+
+export type VirtualKeyInput = {
+  id?: string | null;
+  key?: string | null;
+  name: string;
+  enabled?: boolean;
+  quotaLimit?: number | null;
+  quotaPeriod?: QuotaPeriod;
+};
+
+export type KeyUsage = {
+  keyId: string;
+  spent: number;
+  calls: number;
+  limit: number | null;
+  period: QuotaPeriod;
+  periodStart: string;
+};
+
+let mockVirtualKeys: VirtualKey[] = [
+  {
+    id: "vk-claude",
+    key: "sk-lumen-claude0000desktop0000000000",
+    name: "Claude 桌面端",
+    enabled: true,
+    quotaLimit: 50,
+    quotaPeriod: "monthly",
+    createdAt: "2026-09-01T02:10:00+00:00",
+  },
+  {
+    id: "vk-gpt5",
+    key: "sk-lumen-gpt50000script000000000000",
+    name: "GPT-5 脚本",
+    enabled: true,
+    quotaLimit: null,
+    quotaPeriod: "monthly",
+    createdAt: "2026-09-03T06:00:00+00:00",
+  },
+  {
+    id: "vk-phone",
+    key: "sk-lumen-phone0000000000000000000000",
+    name: "手机端",
+    enabled: false,
+    quotaLimit: 20,
+    quotaPeriod: "weekly",
+    createdAt: "2026-09-05T08:00:00+00:00",
+  },
+];
+
+function mockSaveVirtualKey(input: VirtualKeyInput): VirtualKey {
+  const id = input.id ?? uuid();
+  const existing = mockVirtualKeys.find((item) => item.id === id);
+  const fallbackKey = existing?.key && existing.key.length > 0 ? existing.key : null;
+  const saved: VirtualKey = {
+    id,
+    key:
+      input.key && input.key.length > 0
+        ? input.key
+        : fallbackKey ?? `sk-lumen-${uuid().replace(/-/g, "")}`,
+    name: input.name,
+    enabled: input.enabled ?? existing?.enabled ?? true,
+    quotaLimit: input.quotaLimit ?? existing?.quotaLimit ?? null,
+    quotaPeriod: input.quotaPeriod ?? existing?.quotaPeriod ?? "monthly",
+    createdAt: existing?.createdAt ?? nowIso(),
+  };
+  if (existing) Object.assign(existing, saved);
+  else mockVirtualKeys.push(saved);
+  return { ...saved };
+}
+
+function mockDeleteVirtualKey(id: string): void {
+  mockVirtualKeys = mockVirtualKeys.filter((item) => item.id !== id);
+}
+
+function mockVirtualKeyUsage(keyId: string): KeyUsage {
+  const key = mockVirtualKeys.find((item) => item.id === keyId);
+  const totals: Record<string, { spent: number; calls: number }> = {
+    "vk-claude": { spent: 21.3, calls: 218 },
+    "vk-gpt5": { spent: 12.1, calls: 96 },
+    "vk-phone": { spent: 5.2, calls: 98 },
+  };
+  const entry = totals[keyId] ?? { spent: 0, calls: 0 };
+  const now = new Date();
+  return {
+    keyId,
+    spent: entry.spent,
+    calls: entry.calls,
+    limit: key?.quotaLimit ?? null,
+    period: key?.quotaPeriod ?? "monthly",
+    periodStart: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
+  };
+}
+
+export async function listVirtualKeys(): Promise<VirtualKey[]> {
+  if (!isTauriRuntime(window)) return mockVirtualKeys.map(clone);
+  return invoke<VirtualKey[]>("list_virtual_keys_cmd");
+}
+
+export async function saveVirtualKey(input: VirtualKeyInput): Promise<VirtualKey> {
+  if (!isTauriRuntime(window)) return mockSaveVirtualKey(input);
+  return invoke<VirtualKey>("save_virtual_key_cmd", { input });
+}
+
+export async function deleteVirtualKey(id: string): Promise<void> {
+  if (!isTauriRuntime(window)) return mockDeleteVirtualKey(id);
+  return invoke<void>("delete_virtual_key_cmd", { id });
+}
+
+export async function queryVirtualKeyUsage(keyId: string): Promise<KeyUsage> {
+  if (!isTauriRuntime(window)) return mockVirtualKeyUsage(keyId);
+  return invoke<KeyUsage>("query_virtual_key_usage_cmd", { keyId });
+}

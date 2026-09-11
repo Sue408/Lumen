@@ -2,12 +2,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::extract::State;
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use chrono::Local;
 use serde_json::{json, Value};
 
-use crate::db::models::{PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI};
+use crate::db::keys::{find_enabled_virtual_key, virtual_key_spend};
+use crate::db::models::{VirtualKey, PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI};
 use crate::db::routes::list_enabled_aliases;
 use crate::db::with_db;
 use crate::error::AppError;
@@ -15,6 +17,7 @@ use crate::gateway::forward::{
     contains_cache_read, ensure_include_usage, error_response, request_id, send, stream_response,
     upstream_path_for,
 };
+use crate::gateway::quota::{is_over_quota, period_start, QuotaPeriod};
 use crate::gateway::resolve::{resolve, ResolvedRoute};
 use crate::gateway::usage::{build_log, extract_usage, record, LogContext, UsageTotals};
 use crate::state::AppState;
@@ -50,22 +53,25 @@ pub async fn list_models(State(state): State<Arc<AppState>>) -> Response {
 
 pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    forward(state, body, PROTOCOL_OPENAI, CHAT_ENDPOINT).await
+    forward(state, headers, body, PROTOCOL_OPENAI, CHAT_ENDPOINT).await
 }
 
 /// Anthropic Messages 直通：交给协议为 anthropic 的上游处理，不做协议转换。
 pub async fn messages(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    forward(state, body, PROTOCOL_ANTHROPIC, MESSAGES_ENDPOINT).await
+    forward(state, headers, body, PROTOCOL_ANTHROPIC, MESSAGES_ENDPOINT).await
 }
 
 /// 端点协议与路由协议绑定：不匹配则在网关处拒绝，绝不把错误形状的 body 盲发上游。
 async fn forward(
     state: Arc<AppState>,
+    headers: HeaderMap,
     mut body: Value,
     required_protocol: &str,
     endpoint: &str,
@@ -76,11 +82,74 @@ async fn forward(
     };
     let is_stream = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
 
+    // 强制鉴权：无有效 key 直接拒绝，并落一条无归属的 error 日志。
+    let virtual_key = match authenticate(&state, &headers).await {
+        Ok(key) => key,
+        Err(error) => {
+            reject(&state, endpoint, &alias, is_stream, None, None, &error).await;
+            return error.into_response();
+        }
+    };
+    let key_id = virtual_key.id.clone();
+
+    // 额度闸门：建连前看「已累计花费」是否已达上限；未达即放行，最后一次可能略微超出。
+    let period = QuotaPeriod::parse(&virtual_key.quota_period);
+    let spend_start = period_start(period, Local::now());
+    let spend_key = key_id.clone();
+    let spent =
+        match with_db(&state.db, move |conn| virtual_key_spend(conn, &spend_key, spend_start)).await
+        {
+            Ok(spent) => spent,
+            Err(error) => {
+                reject(
+                    &state,
+                    endpoint,
+                    &alias,
+                    is_stream,
+                    None,
+                    Some(key_id.clone()),
+                    &error,
+                )
+                .await;
+                return error.into_response();
+            }
+        };
+    if let Some(limit) = virtual_key.quota_limit {
+        if is_over_quota(spent, virtual_key.quota_limit) {
+            let error = AppError::QuotaExceeded {
+                name: virtual_key.name.clone(),
+                spent,
+                limit,
+                period: period_label(period).to_string(),
+            };
+            reject(
+                &state,
+                endpoint,
+                &alias,
+                is_stream,
+                None,
+                Some(key_id.clone()),
+                &error,
+            )
+            .await;
+            return error.into_response();
+        }
+    }
+
     let route = match resolve(&state, &alias).await {
         Ok(Some(route)) => route,
         Ok(None) => {
             let error = AppError::ModelNotFound(alias.clone());
-            reject(&state, endpoint, &alias, is_stream, None, &error).await;
+            reject(
+                &state,
+                endpoint,
+                &alias,
+                is_stream,
+                None,
+                Some(key_id.clone()),
+                &error,
+            )
+            .await;
             return error.into_response();
         }
         Err(error) => return error.into_response(),
@@ -92,7 +161,16 @@ async fn forward(
             expected: required_protocol.to_string(),
             actual: route.route_protocol.clone(),
         };
-        reject(&state, endpoint, &alias, is_stream, Some(route), &error).await;
+        reject(
+            &state,
+            endpoint,
+            &alias,
+            is_stream,
+            Some(route),
+            Some(key_id.clone()),
+            &error,
+        )
+        .await;
         return error.into_response();
     }
     if route.route_protocol != route.upstream_protocol {
@@ -100,7 +178,16 @@ async fn forward(
             "配置不一致：路由 {alias} 声明为 {} 协议，但上游提供商为 {} 协议",
             route.route_protocol, route.upstream_protocol
         ));
-        reject(&state, endpoint, &alias, is_stream, Some(route), &error).await;
+        reject(
+            &state,
+            endpoint,
+            &alias,
+            is_stream,
+            Some(route),
+            Some(key_id.clone()),
+            &error,
+        )
+        .await;
         return error.into_response();
     }
 
@@ -125,6 +212,7 @@ async fn forward(
                 http_status: None,
                 error_message: Some(error.to_string()),
                 request_id: None,
+                virtual_key_id: Some(key_id.clone()),
                 usage: UsageTotals::missing(),
             });
             let _ = record(&state, log).await;
@@ -134,7 +222,7 @@ async fn forward(
     let request_id = request_id(response.headers());
 
     if is_stream {
-        return stream_response(state, route, alias, endpoint.to_string(), response);
+        return stream_response(state, route, alias, endpoint.to_string(), Some(key_id), response);
     }
 
     let status = response.status();
@@ -166,6 +254,7 @@ async fn forward(
             Some(error_message(&value, &text))
         },
         request_id,
+        virtual_key_id: Some(key_id),
         usage,
     });
     let _ = record(&state, log).await;
@@ -196,17 +285,62 @@ fn reject_status(error: &AppError) -> i64 {
     match error {
         AppError::ModelNotFound(_) => 404,
         AppError::ProtocolMismatch { .. } => 400,
+        AppError::Unauthorized => 401,
+        AppError::QuotaExceeded { .. } => 429,
         _ => 500,
     }
 }
 
-/// 在进入转发前拒绝请求（未找到模型 / 协议不匹配 / 配置不一致），并落一条 error 日志。
+/// 从 `Authorization: Bearer` 或 `x-api-key` 中取出密钥原文。
+fn extract_key(headers: &HeaderMap) -> Option<String> {
+    if let Some(value) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+    {
+        let value = value.trim();
+        if let Some(token) = value
+            .strip_prefix("Bearer ")
+            .or_else(|| value.strip_prefix("bearer "))
+        {
+            let token = token.trim();
+            if !token.is_empty() {
+                return Some(token.to_string());
+            }
+        }
+    }
+    headers
+        .get("x-api-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+/// 解析并校验虚拟密钥；缺失、未知或已停用一律视为未授权。
+async fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<VirtualKey, AppError> {
+    let key = extract_key(headers).ok_or(AppError::Unauthorized)?;
+    with_db(&state.db, move |conn| find_enabled_virtual_key(conn, &key))
+        .await?
+        .ok_or(AppError::Unauthorized)
+}
+
+fn period_label(period: QuotaPeriod) -> &'static str {
+    match period {
+        QuotaPeriod::Daily => "每日",
+        QuotaPeriod::Weekly => "每周",
+        QuotaPeriod::Monthly => "每月",
+        QuotaPeriod::Total => "一次性总额",
+    }
+}
+
+/// 在进入转发前拒绝请求（未授权 / 超限 / 未找到模型 / 协议不匹配 / 配置不一致），并落一条 error 日志。
 async fn reject(
     state: &AppState,
     endpoint: &str,
     alias: &str,
     is_stream: bool,
     route: Option<ResolvedRoute>,
+    virtual_key_id: Option<String>,
     error: &AppError,
 ) {
     let log = build_log(LogContext {
@@ -221,6 +355,7 @@ async fn reject(
         http_status: Some(reject_status(error)),
         error_message: Some(error.to_string()),
         request_id: None,
+        virtual_key_id,
         usage: UsageTotals::missing(),
     });
     let _ = record(state, log).await;
@@ -235,9 +370,11 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::db::keys::save_virtual_key;
     use crate::db::logs::{list_logs, LogFilter};
     use crate::db::models::{
         ProviderInput, RequestLog, RouteInput, RouteTargetInput, UpstreamModelInput,
+        VirtualKeyInput,
     };
     use crate::db::{open_in_memory, providers, routes, Db};
     use crate::state::{EventSink, GatewayStatus};
@@ -355,7 +492,41 @@ mod tests {
         .unwrap();
     }
 
+    const TEST_KEY: &str = "sk-lumen-test";
+
+    fn seed_virtual_key(
+        db: &Db,
+        key: &str,
+        enabled: bool,
+        quota_limit: Option<f64>,
+        quota_period: &str,
+    ) -> VirtualKey {
+        let conn = db.lock().unwrap();
+        save_virtual_key(
+            &conn,
+            &VirtualKeyInput {
+                id: None,
+                key: Some(key.to_string()),
+                name: "测试密钥".to_string(),
+                enabled,
+                quota_limit,
+                quota_period: quota_period.to_string(),
+            },
+        )
+        .unwrap()
+    }
+
     fn post(uri: &str, body: Value) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {TEST_KEY}"))
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    fn post_without_key(uri: &str, body: Value) -> Request<Body> {
         Request::builder()
             .method("POST")
             .uri(uri)
@@ -369,6 +540,7 @@ mod tests {
         let base_url = start_mock_upstream().await;
         let db = open_in_memory().unwrap();
         seed_upstream(&db, &base_url, "openai", "lumen/mock");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
         let state = Arc::new(AppState::new(
             db.clone(),
@@ -405,6 +577,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_model_returns_404_and_records_failure() {
         let db = open_in_memory().unwrap();
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
         let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
         let router = crate::gateway::build_router(state);
@@ -433,6 +606,7 @@ mod tests {
         let base_url = serve(app).await;
         let db = open_in_memory().unwrap();
         seed_upstream(&db, &base_url, "anthropic", "lumen/claude");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
         let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
         let router = crate::gateway::build_router(state);
@@ -465,6 +639,7 @@ mod tests {
     async fn chat_endpoint_rejects_anthropic_route() {
         let db = open_in_memory().unwrap();
         seed_upstream(&db, "http://127.0.0.1:1", "anthropic", "lumen/claude");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
         let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
         let router = crate::gateway::build_router(state);
@@ -494,6 +669,7 @@ mod tests {
     async fn messages_endpoint_rejects_openai_route() {
         let db = open_in_memory().unwrap();
         seed_upstream(&db, "http://127.0.0.1:1", "openai", "lumen/gpt");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
         let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
         let router = crate::gateway::build_router(state);
@@ -513,5 +689,103 @@ mod tests {
         };
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].http_status, Some(400));
+    }
+
+    #[tokio::test]
+    async fn missing_key_is_rejected_with_401() {
+        let db = open_in_memory().unwrap();
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post_without_key(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].status, "error");
+        assert_eq!(logs[0].http_status, Some(401));
+        assert!(logs[0].virtual_key_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn disabled_key_is_rejected_with_401() {
+        let db = open_in_memory().unwrap();
+        seed_virtual_key(&db, TEST_KEY, false, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn over_quota_key_is_rejected_with_429() {
+        let db = open_in_memory().unwrap();
+        seed_virtual_key(&db, TEST_KEY, true, Some(0.0), "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].status, "error");
+        assert_eq!(logs[0].http_status, Some(429));
+    }
+
+    #[tokio::test]
+    async fn forwards_chat_and_records_virtual_key() {
+        let base_url = start_mock_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "openai", "lumen/mock");
+        let key = seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].virtual_key_id.as_deref(), Some(key.id.as_str()));
     }
 }

@@ -180,6 +180,7 @@ pub fn stream_response(
     route: ResolvedRoute,
     alias: String,
     endpoint: String,
+    virtual_key_id: Option<String>,
     response: reqwest::Response,
 ) -> Response {
     let status = response.status();
@@ -224,6 +225,7 @@ pub fn stream_response(
             http_status: Some(status.as_u16() as i64),
             error_message: None,
             request_id,
+            virtual_key_id,
             usage: scanner.totals(cache_in_input),
         });
         let _ = record(&state, log).await;

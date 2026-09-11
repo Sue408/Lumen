@@ -1,0 +1,85 @@
+/*
+ * Virtual keys register. Same operating grammar as providers / routing,
+ * plus the key display and quota meter that only this page owns.
+ */
+
+.keys-page {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100vh;
+  padding: 2.5rem var(--page-gutter-x) var(--page-gutter-y);
+  overflow: hidden;
+}
+
+.keys-page h1 {
+  margin: 0;
+  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+  font-size: 1.875rem;
+  font-weight: 600;
+  line-height: 1.12;
+}
+
+/* ---- key display (masked, with copy / rotate) ---- */
+
+.keys-page .key-value-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 0.75rem;
+}
+
+.keys-page .key-value {
+  flex: 1 1 16rem;
+  min-width: 0;
+  height: 2rem;
+  padding: 0 0.5rem;
+  overflow: hidden;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line-control);
+  border-radius: 4px;
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 2rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- quota state + meter (vermilion is reserved for the warning) ---- */
+
+.keys-page .quota-state.is-normal {
+  color: var(--ink-muted);
+}
+
+.keys-page .quota-state.is-near,
+.keys-page .quota-state.is-over {
+  color: var(--danger);
+}
+
+.keys-page .quota-meter {
+  height: 4px;
+  margin-top: 0.5rem;
+  background: var(--line-faint);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.keys-page .quota-meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--ochre);
+  border-radius: inherit;
+  transition: width 150ms ease;
+}
+
+.keys-page .quota-meter.is-near .quota-meter-fill,
+.keys-page .quota-meter.is-over .quota-meter-fill {
+  background: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .keys-page .quota-meter-fill {
+    transition: none;
+  }
+}

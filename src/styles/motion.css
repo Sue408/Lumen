@@ -1,6 +1,7 @@
 .usage-page,
 .providers-page,
 .routing-page,
+.keys-page,
 .settings-page,
 .logs-page {
   animation: page-enter 150ms ease-out both;
@@ -22,6 +23,7 @@
   .usage-page,
   .providers-page,
   .routing-page,
+  .keys-page,
   .settings-page,
   .logs-page {
     animation: none;

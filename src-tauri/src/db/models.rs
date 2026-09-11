@@ -5,6 +5,10 @@ pub const AUTH_BEARER: &str = "bearer";
 pub const PROTOCOL_OPENAI: &str = "openai";
 pub const PROTOCOL_ANTHROPIC: &str = "anthropic";
 pub const ICON_TINT_INK: &str = "ink";
+pub const QUOTA_PERIOD_DAILY: &str = "daily";
+pub const QUOTA_PERIOD_WEEKLY: &str = "weekly";
+pub const QUOTA_PERIOD_MONTHLY: &str = "monthly";
+pub const QUOTA_PERIOD_TOTAL: &str = "total";
 
 /// 入站协议是否受网关支持。路由保存与种子导入时据此校验。
 pub fn is_known_protocol(protocol: &str) -> bool {
@@ -241,6 +245,8 @@ pub struct VirtualKey {
     pub key: String,
     pub name: String,
     pub enabled: bool,
+    pub quota_limit: Option<f64>,
+    pub quota_period: String,
     pub created_at: String,
 }
 
@@ -252,6 +258,14 @@ pub struct VirtualKeyInput {
     pub name: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default)]
+    pub quota_limit: Option<f64>,
+    #[serde(default = "default_quota_period")]
+    pub quota_period: String,
+}
+
+fn default_quota_period() -> String {
+    QUOTA_PERIOD_MONTHLY.to_string()
 }
 
 impl VirtualKey {
@@ -261,6 +275,8 @@ impl VirtualKey {
             key: row.get("key")?,
             name: row.get("name")?,
             enabled: row.get::<_, i64>("enabled")? != 0,
+            quota_limit: row.get("quota_limit")?,
+            quota_period: row.get("quota_period")?,
             created_at: row.get("created_at")?,
         })
     }

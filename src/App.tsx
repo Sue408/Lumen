@@ -7,6 +7,7 @@ import { useTheme } from "./app/useTheme";
 import { WindowChrome } from "./components/WindowChrome";
 import { UsagePage } from "./features/usage/UsagePage";
 import { LogsPage } from "./features/logs/LogsPage";
+import { KeysPage } from "./features/keys/KeysPage";
 import { ProvidersPage } from "./features/providers/ProvidersPage";
 import { RoutingPage } from "./features/routing/RoutingPage";
 import { SettingsPage } from "./features/settings/SettingsPage";
@@ -26,6 +27,8 @@ function App() {
         return <ProvidersPage />;
       case "routing":
         return <RoutingPage />;
+      case "keys":
+        return <KeysPage />;
       case "settings":
         return <SettingsPage theme={theme} onToggleTheme={toggle} />;
       default:

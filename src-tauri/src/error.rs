@@ -26,6 +26,15 @@ pub enum AppError {
         expected: String,
         actual: String,
     },
+    #[error("缺少或无效的虚拟密钥")]
+    Unauthorized,
+    #[error("虚拟密钥「{name}」已超出额度：已用 ¥{spent:.2} / 上限 ¥{limit:.2}（{period}）")]
+    QuotaExceeded {
+        name: String,
+        spent: f64,
+        limit: f64,
+        period: String,
+    },
     #[error("{0}")]
     Message(String),
 }
@@ -50,6 +59,8 @@ impl IntoResponse for AppError {
         let status = match &self {
             AppError::ModelNotFound(_) => StatusCode::NOT_FOUND,
             AppError::ProtocolMismatch { .. } => StatusCode::BAD_REQUEST,
+            AppError::Unauthorized => StatusCode::UNAUTHORIZED,
+            AppError::QuotaExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
             AppError::NotRunning | AppError::AlreadyRunning => StatusCode::CONFLICT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -68,6 +79,8 @@ fn error_code(error: &AppError) -> &'static str {
     match error {
         AppError::ModelNotFound(_) => "model_not_found",
         AppError::ProtocolMismatch { .. } => "protocol_mismatch",
+        AppError::Unauthorized => "unauthorized",
+        AppError::QuotaExceeded { .. } => "quota_exceeded",
         AppError::AlreadyRunning => "already_running",
         AppError::NotRunning => "not_running",
         _ => "internal_error",

@@ -220,6 +220,7 @@ pub struct LogContext {
     pub http_status: Option<i64>,
     pub error_message: Option<String>,
     pub request_id: Option<String>,
+    pub virtual_key_id: Option<String>,
     pub usage: UsageTotals,
 }
 
@@ -236,6 +237,7 @@ pub fn build_log(context: LogContext) -> RequestLog {
         http_status,
         error_message,
         request_id,
+        virtual_key_id,
         usage,
     } = context;
 
@@ -264,7 +266,7 @@ pub fn build_log(context: LogContext) -> RequestLog {
         upstream_model_name: route.as_ref().map(|route| route.display_name.clone()),
         model_real: route.as_ref().map(|route| route.model_id.clone()),
         provider_id: route.as_ref().map(|route| route.provider_id.clone()),
-        virtual_key_id: None,
+        virtual_key_id,
         kind,
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,

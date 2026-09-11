@@ -65,11 +65,13 @@ CREATE TABLE IF NOT EXISTS route_targets (
 );
 
 CREATE TABLE IF NOT EXISTS virtual_keys (
-    id          TEXT PRIMARY KEY,
-    key         TEXT NOT NULL UNIQUE,
-    name        TEXT NOT NULL,
-    enabled     INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT NOT NULL
+    id           TEXT PRIMARY KEY,
+    key          TEXT NOT NULL UNIQUE,
+    name         TEXT NOT NULL,
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    quota_limit  REAL,
+    quota_period TEXT NOT NULL DEFAULT 'monthly',
+    created_at   TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -112,7 +114,7 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(status);
 "#;
 
 /// 每次修改 `SCHEMA` 就 +1；启动时版本不符即重建空库（pre-launch 阶段不做逐列迁移）。
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// 依赖外键的表按子表在前顺序清空，避免重建时的外键约束。
 const DROP_ALL: &str = "
