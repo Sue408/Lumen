@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Database, Download, Palette, RotateCcw, Server, Upload } from "lucide-react";
+import { Database, Download, FlaskConical, Palette, RotateCcw, Server, Upload } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   InlineError,
@@ -21,6 +21,7 @@ import {
   setAutostart as setAutostartEnabled,
   type ImportSummary,
 } from "../../services/settings";
+import { demoScenarios, injectDemo, type DemoScenario } from "../../services/demo";
 
 type SettingsPageProps = {
   theme: Theme;
@@ -40,6 +41,7 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [pendingImport, setPendingImport] = useState<{
@@ -210,6 +212,24 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
       setError(String(err));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const runDemo = async (scenario: DemoScenario) => {
+    setDemoBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const summary = await injectDemo(scenario);
+      setNotice(
+        summary
+          ? `演示数据已替换：${summary.providers} 家上游 · ${summary.models} 个模型 · ${summary.routes} 条路由 · ${summary.virtualKeys} 个密钥 · ${summary.logs} 条流水（切换页面查看）`
+          : "浏览器环境不支持注入",
+      );
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setDemoBusy(false);
     }
   };
 
@@ -429,6 +449,34 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
                 ) : null}
               </div>
             </section>
+
+            {import.meta.env.DEV ? (
+              <section className="settings-section">
+                <SectionTitle icon={<FlaskConical aria-hidden="true" />}>开发工具</SectionTitle>
+                <div className="settings-list">
+                  <div className="settings-row">
+                    <span className="settings-row-label">演示数据</span>
+                    <div className="settings-row-control demo-scenarios">
+                      {demoScenarios.map((item) => (
+                        <button
+                          className="quiet-button"
+                          key={item.key}
+                          type="button"
+                          title={item.hint}
+                          disabled={demoBusy}
+                          onClick={() => void runDemo(item.key)}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="settings-row-note">
+                      完全替换全部业务与用量数据，仅开发构建可见；注入后切换页面即可查看
+                    </span>
+                  </div>
+                </div>
+              </section>
+            ) : null}
           </>
         )}
         </div>

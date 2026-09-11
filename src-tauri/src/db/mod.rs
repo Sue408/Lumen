@@ -1,4 +1,6 @@
 pub mod attribution;
+#[cfg(debug_assertions)]
+pub mod demo;
 pub mod keys;
 pub mod logs;
 pub mod models;

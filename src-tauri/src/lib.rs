@@ -30,6 +30,43 @@ impl EventSink for TauriEventSink {
     }
 }
 
+/// 公共命令注册。`$extra` 仅在 debug 构建下用于追加开发命令，
+/// release 构建不编译对应模块，因此不会出现在二进制里。
+macro_rules! register_handlers {
+    ($($extra:path),* $(,)?) => {
+        tauri::generate_handler![
+            commands::gateway_status,
+            commands::start_gateway,
+            commands::stop_gateway,
+            commands::list_providers_cmd,
+            commands::save_provider_cmd,
+            commands::delete_provider_cmd,
+            commands::list_upstream_models_cmd,
+            commands::save_upstream_model_cmd,
+            commands::delete_upstream_model_cmd,
+            commands::list_routes_cmd,
+            commands::save_route_cmd,
+            commands::delete_route_cmd,
+            commands::list_virtual_keys_cmd,
+            commands::save_virtual_key_cmd,
+            commands::delete_virtual_key_cmd,
+            commands::query_virtual_key_usage_cmd,
+            commands::list_logs_cmd,
+            commands::count_logs_cmd,
+            commands::list_log_aliases_cmd,
+            commands::query_usage_overview_cmd,
+            commands::get_settings_cmd,
+            commands::save_settings_cmd,
+            commands::export_seed_cmd,
+            commands::import_seed_cmd,
+            commands::reset_data_cmd,
+            commands::get_autostart_cmd,
+            commands::set_autostart_cmd
+            $(, $extra)*
+        ]
+    };
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -110,35 +147,16 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![
-            commands::gateway_status,
-            commands::start_gateway,
-            commands::stop_gateway,
-            commands::list_providers_cmd,
-            commands::save_provider_cmd,
-            commands::delete_provider_cmd,
-            commands::list_upstream_models_cmd,
-            commands::save_upstream_model_cmd,
-            commands::delete_upstream_model_cmd,
-            commands::list_routes_cmd,
-            commands::save_route_cmd,
-            commands::delete_route_cmd,
-            commands::list_virtual_keys_cmd,
-            commands::save_virtual_key_cmd,
-            commands::delete_virtual_key_cmd,
-            commands::query_virtual_key_usage_cmd,
-            commands::list_logs_cmd,
-            commands::count_logs_cmd,
-            commands::list_log_aliases_cmd,
-            commands::query_usage_overview_cmd,
-            commands::get_settings_cmd,
-            commands::save_settings_cmd,
-            commands::export_seed_cmd,
-            commands::import_seed_cmd,
-            commands::reset_data_cmd,
-            commands::get_autostart_cmd,
-            commands::set_autostart_cmd,
-        ])
+        .invoke_handler({
+            #[cfg(debug_assertions)]
+            {
+                register_handlers![commands::inject_demo_cmd]
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                register_handlers![]
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {

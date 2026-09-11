@@ -175,6 +175,13 @@
   border: 1px solid var(--ink-faint);
 }
 
+.settings-page .demo-scenarios {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .settings-page .settings-segment button {
     transition: none;
