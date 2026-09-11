@@ -58,7 +58,6 @@ export type UsagePeriod = {
     current: string;
     previous: string;
     currentValues: number[];
-    previousValues: number[];
   };
   layers: UsageLayer[];
   attribution: Attribution;
@@ -91,7 +90,6 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
       current: "今天",
       previous: "昨天同期",
       currentValues: [2, 13, 36, 47, 51],
-      previousValues: [6, 22, 31, 42, 47],
     },
     layers: [
       { name: "Claude 桌面端", tone: "ochre", values: [0.8, 1.3, 1.8, 2.1, 2.31], amount: 2.31 },
@@ -133,7 +131,6 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
       current: "本周",
       previous: "上周同期",
       currentValues: [42, 118, 236, 292, 371, 404],
-      previousValues: [58, 146, 214, 268, 329, 362],
     },
     layers: [
       { name: "Claude 桌面端", tone: "ochre", values: [2.1, 4.8, 7.9, 10.6, 13.2, 15.1], amount: 15.1 },
@@ -175,7 +172,6 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
       current: "九月",
       previous: "八月同期",
       currentValues: [84, 247, 524, 713, 842],
-      previousValues: [122, 318, 486, 662, 751],
     },
     layers: [
       { name: "Claude 桌面端", tone: "ochre", values: [6.2, 14.1, 23.0, 30.5, 36.68], amount: 36.68 },

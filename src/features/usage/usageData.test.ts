@@ -19,6 +19,5 @@ test("model costs add up to the displayed total", () => {
 test("trend series match their axis granularity", () => {
   for (const period of Object.values(usagePeriods)) {
     assert.equal(period.series.currentValues.length, period.axisLabels.length);
-    assert.equal(period.series.previousValues.length, period.axisLabels.length);
   }
 });

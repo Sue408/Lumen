@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, Months, Timelike, Utc};
+use chrono::{DateTime, Datelike, Duration, Local, Months, Utc};
 use rusqlite::Connection;
 use serde::Serialize;
 
@@ -49,9 +49,9 @@ struct Totals {
     input: i64,
     output: i64,
     cost: f64,
+    cache_read: i64,
+    cache_denom: i64,
 }
-
-type LogRow = (DateTime<FixedOffset>, i64, i64, f64);
 
 /// 日志过滤范围：全部 / 未归属（历史 NULL）/ 指定密钥。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,7 +112,6 @@ pub struct SeriesDto {
     pub current: String,
     pub previous: String,
     pub current_values: Vec<f64>,
-    pub previous_values: Vec<f64>,
 }
 
 /// 堆叠图的一层：某密钥或某模型在本期的累积花费（美元）。
@@ -218,140 +217,37 @@ fn previous_start(period: Period, start: DateTime<Local>) -> DateTime<Local> {
     }
 }
 
-fn fetch_rows(
-    conn: &Connection,
+/// SQL 侧分桶：把 UTC 的 `occurred_at` 折算到本地时区后取桶号，
+/// 聚合在 SQLite 里完成，整表行不再回 Rust 逐行解析。
+fn bucket_expr(period: Period) -> &'static str {
+    match period {
+        Period::Day => "CAST(strftime('%H', occurred_at, 'localtime') AS INTEGER)",
+        Period::Week => "(CAST(strftime('%w', occurred_at, 'localtime') AS INTEGER) + 6) % 7",
+        Period::Month => "CAST(strftime('%d', occurred_at, 'localtime') AS INTEGER) - 1",
+    }
+}
+
+/// 时间范围 + 可选 key 的绑定参数，供各条统计查询共用。
+fn bind_range(
     start: DateTime<Local>,
     end: DateTime<Local>,
     scope: &KeyScope,
-) -> Result<Vec<LogRow>, AppError> {
-    let sql = format!(
-        "SELECT occurred_at, input_tokens, output_tokens, cost
-         FROM request_logs
-         WHERE status = 'success' AND occurred_at >= ?1 AND occurred_at < ?2{}",
-        scope.clause()
-    );
-    let start = start.with_timezone(&Utc).to_rfc3339();
-    let end = end.with_timezone(&Utc).to_rfc3339();
-    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(start), Box::new(end)];
+) -> Vec<Box<dyn rusqlite::ToSql>> {
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![
+        Box::new(start.with_timezone(&Utc).to_rfc3339()),
+        Box::new(end.with_timezone(&Utc).to_rfc3339()),
+    ];
     if let Some(key) = scope.param() {
         values.push(Box::new(key.to_string()));
     }
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(
-        rusqlite::params_from_iter(values.iter().map(|value| value.as_ref())),
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, f64>(3)?,
-            ))
-        },
-    )?;
-    let mut parsed = Vec::new();
-    for row in rows {
-        let (raw, input, output, cost) = row?;
-        if let Ok(occurred) = DateTime::parse_from_rfc3339(&raw) {
-            parsed.push((occurred, input, output, cost));
-        }
-    }
-    Ok(parsed)
+    values
 }
-
-fn totals(rows: &[LogRow]) -> Totals {
-    rows.iter().fold(Totals::default(), |acc, (_, input, output, cost)| Totals {
-        calls: acc.calls + 1,
-        input: acc.input + input,
-        output: acc.output + output,
-        cost: acc.cost + cost,
-    })
-}
-
-fn bucket_index(period: Period, start: DateTime<Local>, moment: DateTime<Local>) -> Option<usize> {
-    match period {
-        Period::Day => Some(moment.hour() as usize),
-        Period::Week => {
-            let days = (moment.date_naive() - start.date_naive()).num_days();
-            (days >= 0).then_some(days as usize)
-        }
-        Period::Month => Some((moment.day() as usize).saturating_sub(1)),
-    }
-}
-
-fn cumulative_series(
-    period: Period,
-    start: DateTime<Local>,
-    rows: &[LogRow],
-) -> Vec<f64> {
-    let count = period.bucket_count(start);
-    let mut buckets = vec![0f64; count];
-    for (occurred, input, output, _) in rows {
-        let moment = occurred.with_timezone(&Local);
-        if let Some(index) = bucket_index(period, start, moment) {
-            if index < count {
-                buckets[index] += (input + output) as f64 / 10_000.0;
-            }
-        }
-    }
-    let mut running = 0.0;
-    buckets
-        .into_iter()
-        .map(|value| {
-            running += value;
-            round2(running)
-        })
-        .collect()
-}
-
-type LayerRow = (DateTime<FixedOffset>, f64, String);
 
 fn layer_expr(scope: &KeyScope) -> &'static str {
     match scope {
         KeyScope::All => "COALESCE(k.name, '未归属')",
         _ => "COALESCE(upstream_model_name, route_alias, '未知')",
     }
-}
-
-fn fetch_layered_rows(
-    conn: &Connection,
-    start: DateTime<Local>,
-    end: DateTime<Local>,
-    scope: &KeyScope,
-) -> Result<Vec<LayerRow>, AppError> {
-    let sql = format!(
-        "SELECT request_logs.occurred_at, request_logs.cost, {} AS layer
-         FROM request_logs
-         LEFT JOIN virtual_keys k ON k.id = request_logs.virtual_key_id
-         WHERE request_logs.status = 'success'
-           AND request_logs.occurred_at >= ?1 AND request_logs.occurred_at < ?2{}",
-        layer_expr(scope),
-        scope.clause()
-    );
-    let start = start.with_timezone(&Utc).to_rfc3339();
-    let end = end.with_timezone(&Utc).to_rfc3339();
-    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(start), Box::new(end)];
-    if let Some(key) = scope.param() {
-        values.push(Box::new(key.to_string()));
-    }
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(
-        rusqlite::params_from_iter(values.iter().map(|value| value.as_ref())),
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, f64>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        },
-    )?;
-    let mut parsed = Vec::new();
-    for row in rows {
-        let (raw, cost, layer) = row?;
-        if let Ok(occurred) = DateTime::parse_from_rfc3339(&raw) {
-            parsed.push((occurred, cost, layer));
-        }
-    }
-    Ok(parsed)
 }
 
 fn accumulate(buckets: Vec<f64>) -> Vec<f64> {
@@ -365,57 +261,114 @@ fn accumulate(buckets: Vec<f64>) -> Vec<f64> {
         .collect()
 }
 
-fn layer_buckets(
-    period: Period,
-    start: DateTime<Local>,
-    rows: &[LayerRow],
-    count: usize,
-    include: impl Fn(&str) -> bool,
-) -> Vec<f64> {
-    let mut buckets = vec![0f64; count];
-    for (occurred, cost, layer) in rows {
-        if include(layer) {
-            let moment = occurred.with_timezone(&Local);
-            if let Some(bucket) = bucket_index(period, start, moment) {
-                if bucket < count {
-                    buckets[bucket] += cost;
-                }
-            }
-        }
-    }
-    accumulate(buckets)
+/// 单个周期的全部「成功请求」口径：合计、逐桶 token 累积序列、分层、
+/// 分层合计（不截断，供归因）、按模型花费。一次 (桶, 层, 模型) 的
+/// GROUP BY 扫描即可全部导出，避免同一周期被反复整表读。
+struct PeriodStats {
+    totals: Totals,
+    series: Vec<f64>,
+    layers: Vec<UsageLayer>,
+    layer_totals: Vec<(String, f64)>,
+    model_costs: Vec<ModelCostDto>,
 }
 
-/// 按 scope 决定堆叠维度：全部 → 按密钥；单 key / 未归属 → 按模型。
-/// 取花费前 4 层 + 「其他」；「未归属」与「其他」走墨阶，不占矿物颜料。
-fn build_layers(
+fn period_stats(
     conn: &Connection,
     period: Period,
     start: DateTime<Local>,
     scope: &KeyScope,
-) -> Result<Vec<UsageLayer>, AppError> {
-    let rows = fetch_layered_rows(conn, start, period_end(period, start), scope)?;
+) -> Result<PeriodStats, AppError> {
+    let count = period.bucket_count(start);
+    let sql = format!(
+        "SELECT {},
+                {} AS layer,
+                COALESCE(upstream_model_name, route_alias, '未知') AS model,
+                SUM(cost),
+                SUM(input_tokens),
+                SUM(output_tokens),
+                COUNT(*),
+                SUM(cache_read_tokens),
+                SUM(cache_read_tokens + cache_creation_tokens + input_tokens)
+         FROM request_logs
+         LEFT JOIN virtual_keys k ON k.id = request_logs.virtual_key_id
+         WHERE request_logs.status = 'success'
+           AND request_logs.occurred_at >= ?1 AND request_logs.occurred_at < ?2{}
+         GROUP BY 1, 2, 3",
+        bucket_expr(period),
+        layer_expr(scope),
+        scope.clause()
+    );
+    let values = bind_range(start, period_end(period, start), scope);
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(
+        rusqlite::params_from_iter(values.iter().map(|value| value.as_ref())),
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, f64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
+            ))
+        },
+    )?;
 
-    let mut totals: BTreeMap<String, f64> = BTreeMap::new();
-    for (_, cost, layer) in &rows {
-        *totals.entry(layer.clone()).or_insert(0.0) += cost;
+    let mut totals = Totals::default();
+    let mut tokens = vec![0f64; count];
+    let mut layer_totals: BTreeMap<String, f64> = BTreeMap::new();
+    let mut layer_buckets: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    let mut model_totals: BTreeMap<String, f64> = BTreeMap::new();
+
+    for row in rows {
+        let (bucket, layer, model, cost, input, output, calls, cache_read, cache_denom) = row?;
+        totals.calls += calls;
+        totals.input += input;
+        totals.output += output;
+        totals.cost += cost;
+        totals.cache_read += cache_read;
+        totals.cache_denom += cache_denom;
+        if bucket >= 0 && (bucket as usize) < count {
+            tokens[bucket as usize] += (input + output) as f64 / 10_000.0;
+            layer_buckets
+                .entry(layer.clone())
+                .or_insert_with(|| vec![0f64; count])[bucket as usize] += cost;
+        }
+        *layer_totals.entry(layer).or_insert(0.0) += cost;
+        *model_totals.entry(model).or_insert(0.0) += cost;
     }
-    let mut ranked: Vec<(String, f64)> = totals.into_iter().collect();
+
+    let mut ranked: Vec<(String, f64)> = layer_totals.into_iter().collect();
     ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
+    Ok(PeriodStats {
+        totals,
+        series: accumulate(tokens),
+        layers: assemble_layers(&ranked, &mut layer_buckets, count),
+        layer_totals: ranked,
+        model_costs: assemble_model_costs(model_totals),
+    })
+}
+
+/// 取花费前 4 层 + 「其他」；「未归属」与「其他」走墨阶，不占矿物颜料。
+fn assemble_layers(
+    ranked: &[(String, f64)],
+    buckets: &mut BTreeMap<String, Vec<f64>>,
+    count: usize,
+) -> Vec<UsageLayer> {
     let keep = if ranked.len() <= MAX_MODEL_SLICES {
         ranked.len()
     } else {
         MAX_MODEL_SLICES - 1
     };
-    let head: Vec<(String, f64)> = ranked.iter().take(keep).cloned().collect();
-    let has_rest = ranked.len() > keep;
     let rest_total: f64 = ranked.iter().skip(keep).map(|(_, cost)| cost).sum();
-    let count = period.bucket_count(start);
 
     let mut layers: Vec<UsageLayer> = Vec::new();
     let mut tone_index = 0usize;
-    for (name, amount) in &head {
+    for (name, amount) in ranked.iter().take(keep) {
         let tone = if name == "未归属" {
             "ink".to_string()
         } else {
@@ -423,67 +376,70 @@ fn build_layers(
             tone_index += 1;
             tone
         };
-        let name_owned = name.clone();
         layers.push(UsageLayer {
             name: name.clone(),
             tone,
-            values: layer_buckets(period, start, &rows, count, |layer| layer == name_owned),
+            values: accumulate(buckets.remove(name).unwrap_or_else(|| vec![0f64; count])),
             amount: round2(*amount),
         });
     }
-    if has_rest {
-        let in_head = |layer: &str| head.iter().any(|(name, _)| name == layer);
+    if ranked.len() > keep {
+        let mut rest = vec![0f64; count];
+        for values in buckets.values() {
+            for (index, value) in values.iter().enumerate() {
+                rest[index] += value;
+            }
+        }
         layers.push(UsageLayer {
             name: "其他".to_string(),
             tone: "ink".to_string(),
-            values: layer_buckets(period, start, &rows, count, |layer| !in_head(layer)),
+            values: accumulate(rest),
             amount: round2(rest_total),
         });
     }
-    Ok(layers)
+    layers
 }
 
-fn layer_totals(
-    conn: &Connection,
-    start: DateTime<Local>,
-    end: DateTime<Local>,
-    scope: &KeyScope,
-) -> Result<Vec<(String, f64)>, AppError> {
-    let rows = fetch_layered_rows(conn, start, end, scope)?;
-    let mut totals: BTreeMap<String, f64> = BTreeMap::new();
-    for (_, cost, layer) in rows {
-        *totals.entry(layer).or_insert(0.0) += cost;
-    }
-    Ok(totals.into_iter().collect())
-}
+/// 按模型花费排序，取前 4 + 「其他」。
+fn assemble_model_costs(totals: BTreeMap<String, f64>) -> Vec<ModelCostDto> {
+    let mut collected: Vec<(String, f64)> = totals
+        .into_iter()
+        .filter(|(_, cost)| *cost > 0.0)
+        .collect();
+    collected.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-/// 返回 `(缓存读取, 输入侧总量)`。输入侧近似为「缓存读取 + 缓存写入 + 输入」：
-/// Anthropic 语义精确，OpenAI 语义下输入已含缓存读取、分母偏大，仅作趋势参考。
-fn cache_totals(
-    conn: &Connection,
-    start: DateTime<Local>,
-    end: DateTime<Local>,
-    scope: &KeyScope,
-) -> Result<(i64, i64), AppError> {
-    let sql = format!(
-        "SELECT COALESCE(SUM(cache_read_tokens), 0),
-                COALESCE(SUM(cache_read_tokens + cache_creation_tokens + input_tokens), 0)
-         FROM request_logs
-         WHERE status = 'success' AND occurred_at >= ?1 AND occurred_at < ?2{}",
-        scope.clause()
-    );
-    let start = start.with_timezone(&Utc).to_rfc3339();
-    let end = end.with_timezone(&Utc).to_rfc3339();
-    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(start), Box::new(end)];
-    if let Some(key) = scope.param() {
-        values.push(Box::new(key.to_string()));
+    if collected.len() <= MAX_MODEL_SLICES {
+        return collected
+            .into_iter()
+            .enumerate()
+            .map(|(index, (name, cost))| ModelCostDto {
+                name,
+                cost: round2(cost),
+                tone: TONES[index % TONES.len()].to_string(),
+            })
+            .collect();
     }
-    let mut stmt = conn.prepare(&sql)?;
-    let totals = stmt.query_row(
-        rusqlite::params_from_iter(values.iter().map(|value| value.as_ref())),
-        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-    )?;
-    Ok(totals)
+
+    let keep = MAX_MODEL_SLICES - 1;
+    let mut costs: Vec<ModelCostDto> = Vec::new();
+    let mut rest = 0.0;
+    for (index, (name, cost)) in collected.into_iter().enumerate() {
+        if index < keep {
+            costs.push(ModelCostDto {
+                name,
+                cost: round2(cost),
+                tone: TONES[index % TONES.len()].to_string(),
+            });
+        } else {
+            rest += cost;
+        }
+    }
+    costs.push(ModelCostDto {
+        name: "其他".to_string(),
+        cost: round2(rest),
+        tone: TONES[keep % TONES.len()].to_string(),
+    });
+    costs
 }
 
 fn quality_totals(
@@ -641,70 +597,71 @@ fn unit_word(period: Period) -> &'static str {
     }
 }
 
-fn model_costs(
+struct LayerTotals {
+    totals: Totals,
+    layer_totals: Vec<(String, f64)>,
+}
+
+/// 上期只需要合计与分层合计（供指标对比与归因），不需要分桶、不需要按模型，
+/// 因此单独走一条只 `GROUP BY 层` 的轻查询——连 `strftime` 都不必逐行算。
+fn period_layer_totals(
     conn: &Connection,
     start: DateTime<Local>,
     end: DateTime<Local>,
     scope: &KeyScope,
-) -> Result<Vec<ModelCostDto>, AppError> {
+) -> Result<LayerTotals, AppError> {
     let sql = format!(
-        "SELECT COALESCE(upstream_model_name, route_alias, '未知') AS name, SUM(cost) AS cost
+        "SELECT {} AS layer,
+                SUM(cost),
+                SUM(input_tokens),
+                SUM(output_tokens),
+                COUNT(*),
+                SUM(cache_read_tokens),
+                SUM(cache_read_tokens + cache_creation_tokens + input_tokens)
          FROM request_logs
-         WHERE status = 'success' AND occurred_at >= ?1 AND occurred_at < ?2{}
-         GROUP BY name
-         ORDER BY cost DESC",
+         LEFT JOIN virtual_keys k ON k.id = request_logs.virtual_key_id
+         WHERE request_logs.status = 'success'
+           AND request_logs.occurred_at >= ?1 AND request_logs.occurred_at < ?2{}
+         GROUP BY 1",
+        layer_expr(scope),
         scope.clause()
     );
-    let start = start.with_timezone(&Utc).to_rfc3339();
-    let end = end.with_timezone(&Utc).to_rfc3339();
-    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(start), Box::new(end)];
-    if let Some(key) = scope.param() {
-        values.push(Box::new(key.to_string()));
-    }
+    let values = bind_range(start, end, scope);
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(
         rusqlite::params_from_iter(values.iter().map(|value| value.as_ref())),
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?)),
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, f64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        },
     )?;
-    let mut collected: Vec<(String, f64)> = Vec::new();
+
+    let mut totals = Totals::default();
+    let mut layer_totals: BTreeMap<String, f64> = BTreeMap::new();
     for row in rows {
-        let (name, cost) = row?;
-        if cost > 0.0 {
-            collected.push((name, cost));
-        }
+        let (layer, cost, input, output, calls, cache_read, cache_denom) = row?;
+        totals.calls += calls;
+        totals.input += input;
+        totals.output += output;
+        totals.cost += cost;
+        totals.cache_read += cache_read;
+        totals.cache_denom += cache_denom;
+        *layer_totals.entry(layer).or_insert(0.0) += cost;
     }
 
-    let mut costs: Vec<ModelCostDto> = Vec::new();
-    if collected.len() <= MAX_MODEL_SLICES {
-        for (index, (name, cost)) in collected.into_iter().enumerate() {
-            costs.push(ModelCostDto {
-                name,
-                cost: round2(cost),
-                tone: TONES[index % TONES.len()].to_string(),
-            });
-        }
-        return Ok(costs);
-    }
-
-    let keep = MAX_MODEL_SLICES - 1;
-    let mut rest = 0.0;
-    for (index, (name, cost)) in collected.into_iter().enumerate() {
-        if index < keep {
-            costs.push(ModelCostDto {
-                name,
-                cost: round2(cost),
-                tone: TONES[index % TONES.len()].to_string(),
-            });
-        } else {
-            rest += cost;
-        }
-    }
-    costs.push(ModelCostDto {
-        name: "其他".to_string(),
-        cost: round2(rest),
-        tone: TONES[keep % TONES.len()].to_string(),
-    });
-    Ok(costs)
+    let mut ranked: Vec<(String, f64)> = layer_totals.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(LayerTotals {
+        totals,
+        layer_totals: ranked,
+    })
 }
 
 pub fn build_overview(
@@ -717,10 +674,17 @@ pub fn build_overview(
     let end = period_end(period, start);
     let prev_start = previous_start(period, start);
 
-    let current_rows = fetch_rows(conn, start, end, scope)?;
-    let previous_rows = fetch_rows(conn, prev_start, start, scope)?;
-    let current = totals(&current_rows);
-    let previous = totals(&previous_rows);
+    let PeriodStats {
+        totals: current,
+        series: current_series,
+        layers,
+        layer_totals: current_layers,
+        model_costs,
+    } = period_stats(conn, period, start, scope)?;
+    let LayerTotals {
+        totals: previous,
+        layer_totals: previous_layers,
+    } = period_layer_totals(conn, prev_start, start, scope)?;
 
     let unit = unit_word(period);
     let metrics = vec![
@@ -746,13 +710,7 @@ pub fn build_overview(
         },
     ];
 
-    let current_series = cumulative_series(period, start, &current_rows);
-    let previous_series = cumulative_series(period, prev_start, &previous_rows);
-    let max = current_series
-        .iter()
-        .chain(previous_series.iter())
-        .copied()
-        .fold(0.0f64, f64::max);
+    let max = current_series.iter().copied().fold(0.0f64, f64::max);
 
     let cost_pct = if previous.cost > 0.0 {
         Some((current.cost - previous.cost) / previous.cost * 100.0)
@@ -771,15 +729,11 @@ pub fn build_overview(
     };
 
     let (current_label, previous_label) = series_labels(period, start);
-    let model_costs = model_costs(conn, start, end, scope)?;
-    let layers = build_layers(conn, period, start, scope)?;
-    let previous_layers = layer_totals(conn, prev_start, start, scope)?;
-    let current_layers = layer_totals(conn, start, end, scope)?;
     let attribution = build_attribution(
         &previous_layers,
         &current_layers,
-        cache_totals(conn, prev_start, start, scope)?,
-        cache_totals(conn, start, end, scope)?,
+        (previous.cache_read, previous.cache_denom),
+        (current.cache_read, current.cache_denom),
     );
     let quality = quality_totals(conn, start, end, scope)?;
 
@@ -796,7 +750,6 @@ pub fn build_overview(
             current: current_label,
             previous: previous_label,
             current_values: current_series,
-            previous_values: previous_series,
         },
         layers,
         attribution,
@@ -1019,5 +972,101 @@ mod tests {
         assert!((overview.quality.cache_hit_rate - 0.6).abs() < 1e-9);
         assert!((overview.quality.error_rate - 0.5).abs() < 1e-9);
         assert!((overview.quality.reasoning_share - 0.2).abs() < 1e-9);
+    }
+
+    /// 手动跑的粗略基准：`cargo test bench_overview -- --nocapture --ignored`。
+    #[test]
+    #[ignore]
+    fn bench_overview() {
+        use crate::db::demo::{inject_demo, DemoScenario};
+        let path = std::env::temp_dir().join("lumen-bench-overview.db");
+        let _ = std::fs::remove_file(&path);
+        let db = crate::db::open(&path).unwrap();
+        {
+            let conn = db.lock().unwrap();
+            inject_demo(&conn, DemoScenario::Rich).unwrap();
+        }
+        let conn = db.lock().unwrap();
+        let now = Local::now();
+        let plan_sql = "SELECT COUNT(*) FROM request_logs
+             WHERE status = 'success' AND occurred_at >= ?1 AND occurred_at < ?2";
+        {
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {plan_sql}")).unwrap();
+            let rows = stmt
+                .query_map([now.to_rfc3339(), (now + Duration::days(1)).to_rfc3339()], |row| {
+                    row.get::<_, String>(3)
+                })
+                .unwrap();
+            for row in rows {
+                println!("PLAN: {}", row.unwrap());
+            }
+            let cnt: i64 = conn
+                .query_row("SELECT COUNT(*) FROM request_logs", [], |r| r.get(0))
+                .unwrap();
+            println!("TOTAL ROWS: {cnt}");
+        }
+        for _ in 0..2 {
+            for period in [Period::Day, Period::Week, Period::Month] {
+                let t = std::time::Instant::now();
+                let overview = build_overview(&conn, period, now, &KeyScope::All).unwrap();
+                println!("{:?}: {:?} (layers={})", period, t.elapsed(), overview.layers.len());
+            }
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn week_buckets_follow_local_weekdays() {
+        let db = open_in_memory().unwrap();
+        let now = Local::now();
+        let week_start = period_start(Period::Week, now);
+        {
+            let conn = db.lock().unwrap();
+            // 周一 10:00 → 桶 0，周三 10:00 → 桶 2
+            insert_log(
+                &conn,
+                &sample_log(week_start + Duration::hours(10), 100, 50, 1.0, "alpha"),
+            )
+            .unwrap();
+            insert_log(
+                &conn,
+                &sample_log(week_start + Duration::days(2) + Duration::hours(10), 100, 50, 3.0, "alpha"),
+            )
+            .unwrap();
+        }
+        let conn = db.lock().unwrap();
+        let overview = build_overview(&conn, Period::Week, now, &KeyScope::All).unwrap();
+        let values = &overview.layers[0].values;
+        assert!((values[0] - 1.0).abs() < 1e-9, "周一应落在桶 0，实际 {:?}", values);
+        assert!((values[1] - 1.0).abs() < 1e-9);
+        assert!((values[2] - 4.0).abs() < 1e-9, "周三应落在桶 2，实际 {:?}", values);
+        assert!((values[6] - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn month_buckets_follow_local_days() {
+        let db = open_in_memory().unwrap();
+        let now = Local::now();
+        let month_start = period_start(Period::Month, now);
+        {
+            let conn = db.lock().unwrap();
+            // 1 日 → 桶 0，3 日 → 桶 2
+            insert_log(
+                &conn,
+                &sample_log(month_start + Duration::hours(10), 100, 50, 1.0, "alpha"),
+            )
+            .unwrap();
+            insert_log(
+                &conn,
+                &sample_log(month_start + Duration::days(2) + Duration::hours(10), 100, 50, 3.0, "alpha"),
+            )
+            .unwrap();
+        }
+        let conn = db.lock().unwrap();
+        let overview = build_overview(&conn, Period::Month, now, &KeyScope::All).unwrap();
+        let values = &overview.layers[0].values;
+        assert!((values[0] - 1.0).abs() < 1e-9, "1 日应落在桶 0，实际 {:?}", values);
+        assert!((values[1] - 1.0).abs() < 1e-9);
+        assert!((values[2] - 4.0).abs() < 1e-9, "3 日应落在桶 2，实际 {:?}", values);
     }
 }

@@ -114,6 +114,9 @@ CREATE TABLE IF NOT EXISTS request_logs (
 CREATE INDEX IF NOT EXISTS idx_request_logs_occurred ON request_logs(occurred_at);
 CREATE INDEX IF NOT EXISTS idx_request_logs_alias ON request_logs(route_alias);
 CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(status);
+-- 统计查询几乎都是「status = 'success' + occurred_at 区间」：复合索引让规划器
+-- 在 status 上定位后直接走时间范围，而不是先扫完所有成功行再逐行比时间。
+CREATE INDEX IF NOT EXISTS idx_request_logs_status_occurred ON request_logs(status, occurred_at);
 "#;
 
 /// 每次修改 `SCHEMA` 就 +1；启动时版本不符即重建空库（pre-launch 阶段不做逐列迁移）。
