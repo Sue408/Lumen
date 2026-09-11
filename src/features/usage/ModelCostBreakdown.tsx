@@ -76,7 +76,7 @@ export function ModelCostBreakdown({ period }: ModelCostBreakdownProps) {
             const share = Math.round((model.cost / period.totalCost) * 100);
             return (
               <div className="cost-row" role="listitem" key={model.name}>
-                <span className="model-name">
+                <span className="model-name" title={model.name}>
                   <i style={{ backgroundColor: toneColor(model.tone) }} aria-hidden="true" />
                   {model.name}
                 </span>

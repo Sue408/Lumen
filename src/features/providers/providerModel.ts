@@ -110,6 +110,20 @@ export function validateProviderDraft(draft: ProviderDraft): string | null {
   return null;
 }
 
+export type CapabilityId = "vision" | "tools" | "reasoning";
+
+export const capabilityOrder: CapabilityId[] = ["vision", "tools", "reasoning"];
+
+export const capabilityLabel: Record<CapabilityId, string> = {
+  vision: "视觉",
+  tools: "工具",
+  reasoning: "推理",
+};
+
+export function isCapabilityId(value: string): value is CapabilityId {
+  return value === "vision" || value === "tools" || value === "reasoning";
+}
+
 export type ModelDraft = {
   id: string | null;
   providerId: string;
@@ -117,6 +131,10 @@ export type ModelDraft = {
   displayName: string;
   inputPrice: string;
   outputPrice: string;
+  cacheReadPrice: string;
+  cacheCreationPrice: string;
+  contextWindow: string;
+  capabilities: CapabilityId[];
   enabled: boolean;
 };
 
@@ -128,6 +146,10 @@ export function emptyModelDraft(providerId: string): ModelDraft {
     displayName: "",
     inputPrice: "0",
     outputPrice: "0",
+    cacheReadPrice: "0",
+    cacheCreationPrice: "0",
+    contextWindow: "",
+    capabilities: [],
     enabled: true,
   };
 }
@@ -140,6 +162,10 @@ export function modelToDraft(model: UpstreamModel): ModelDraft {
     displayName: model.displayName,
     inputPrice: formatPrice(model.inputPrice),
     outputPrice: formatPrice(model.outputPrice),
+    cacheReadPrice: formatPrice(model.cacheReadPrice),
+    cacheCreationPrice: formatPrice(model.cacheCreationPrice),
+    contextWindow: model.contextWindow > 0 ? String(model.contextWindow) : "",
+    capabilities: model.capabilities.filter(isCapabilityId),
     enabled: model.enabled,
   };
 }
@@ -148,6 +174,9 @@ export function validateModelDraft(draft: ModelDraft): string | null {
   if (draft.modelId.trim().length === 0) return "请填写上游模型名。";
   if (!isNonNegativeNumber(draft.inputPrice)) return "输入单价需为不小于 0 的数字。";
   if (!isNonNegativeNumber(draft.outputPrice)) return "输出单价需为不小于 0 的数字。";
+  if (!isNonNegativeNumber(draft.cacheReadPrice)) return "缓存读单价需为不小于 0 的数字。";
+  if (!isNonNegativeNumber(draft.cacheCreationPrice)) return "缓存写单价需为不小于 0 的数字。";
+  if (!isOptionalNonNegativeInteger(draft.contextWindow)) return "上下文长度需为不小于 0 的整数。";
   return null;
 }
 
@@ -158,13 +187,36 @@ function isNonNegativeNumber(value: string): boolean {
   return Number.isFinite(parsed) && parsed >= 0;
 }
 
+function isOptionalNonNegativeInteger(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return true;
+  const parsed = Number(trimmed);
+  return Number.isInteger(parsed) && parsed >= 0;
+}
+
 export function priceToNumber(value: string): number {
   const parsed = Number(value.trim());
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
+export function contextWindowToNumber(value: string): number {
+  const parsed = Number(value.trim());
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
+}
+
 export function formatPrice(value: number): string {
   return String(value);
+}
+
+function trimDecimal(value: number): string {
+  return String(Number(value.toFixed(1)));
+}
+
+export function formatContextWindow(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) return "—";
+  if (tokens >= 1_000_000) return `${trimDecimal(tokens / 1_000_000)}M`;
+  if (tokens >= 1_000) return `${trimDecimal(tokens / 1_000)}K`;
+  return String(tokens);
 }
 
 export function modelsForProvider(

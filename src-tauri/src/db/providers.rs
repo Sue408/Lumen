@@ -85,11 +85,13 @@ pub fn save_upstream_model(
         .clone()
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let capabilities = serde_json::to_string(&input.capabilities)?;
     conn.execute(
         "INSERT INTO upstream_models
             (id, provider_id, model_id, display_name, input_price, output_price,
-             cache_read_price, cache_creation_price, icon, icon_tint, enabled)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             cache_read_price, cache_creation_price, context_window, capabilities,
+             icon, icon_tint, enabled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(id) DO UPDATE SET
             provider_id = excluded.provider_id,
             model_id = excluded.model_id,
@@ -98,6 +100,8 @@ pub fn save_upstream_model(
             output_price = excluded.output_price,
             cache_read_price = excluded.cache_read_price,
             cache_creation_price = excluded.cache_creation_price,
+            context_window = excluded.context_window,
+            capabilities = excluded.capabilities,
             icon = excluded.icon,
             icon_tint = excluded.icon_tint,
             enabled = excluded.enabled",
@@ -110,6 +114,8 @@ pub fn save_upstream_model(
             input.output_price,
             input.cache_read_price,
             input.cache_creation_price,
+            input.context_window,
+            capabilities,
             input.icon,
             input.icon_tint,
             input.enabled as i64,

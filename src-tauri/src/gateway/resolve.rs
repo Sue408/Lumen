@@ -117,6 +117,8 @@ mod tests {
                 output_price: 2.0,
                 cache_read_price: 0.0,
                 cache_creation_price: 0.0,
+                context_window: 0,
+                capabilities: Vec::new(),
                 icon: None,
                 icon_tint: "ink".into(),
                 enabled: true,

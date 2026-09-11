@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  contextWindowToNumber,
   emptyModelDraft,
+  formatContextWindow,
   formatExtraHeaders,
   isProviderDraftDirty,
   parseExtraHeaders,
@@ -85,4 +87,37 @@ test("priceToNumber coerces safely for the backend", () => {
   assert.equal(priceToNumber(" 2 "), 2);
   assert.equal(priceToNumber("abc"), 0);
   assert.equal(priceToNumber("-3"), 0);
+});
+
+test("validateModelDraft checks cache prices and context window", () => {
+  const draft = { ...emptyModelDraft("p1"), modelId: "gpt-4o" };
+  assert.equal(validateModelDraft(draft), null);
+  assert.equal(
+    validateModelDraft({ ...draft, cacheReadPrice: "-1" }),
+    "缓存读单价需为不小于 0 的数字。",
+  );
+  assert.equal(
+    validateModelDraft({ ...draft, cacheCreationPrice: "x" }),
+    "缓存写单价需为不小于 0 的数字。",
+  );
+  assert.equal(
+    validateModelDraft({ ...draft, contextWindow: "1.5" }),
+    "上下文长度需为不小于 0 的整数。",
+  );
+  assert.equal(validateModelDraft({ ...draft, contextWindow: "" }), null);
+});
+
+test("contextWindowToNumber keeps integers and drops noise", () => {
+  assert.equal(contextWindowToNumber("128000"), 128000);
+  assert.equal(contextWindowToNumber("  "), 0);
+  assert.equal(contextWindowToNumber("1.5"), 0);
+  assert.equal(contextWindowToNumber("-8"), 0);
+});
+
+test("formatContextWindow renders compact token sizes", () => {
+  assert.equal(formatContextWindow(0), "—");
+  assert.equal(formatContextWindow(128000), "128K");
+  assert.equal(formatContextWindow(1_000_000), "1M");
+  assert.equal(formatContextWindow(1_500_000), "1.5M");
+  assert.equal(formatContextWindow(512), "512");
 });

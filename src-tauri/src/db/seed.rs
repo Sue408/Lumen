@@ -56,6 +56,10 @@ struct SeedModel {
     #[serde(default)]
     cache_creation_price: f64,
     #[serde(default)]
+    context_window: i64,
+    #[serde(default)]
+    capabilities: Vec<String>,
+    #[serde(default)]
     icon: Option<String>,
     #[serde(default = "default_icon_tint")]
     icon_tint: String,
@@ -158,11 +162,13 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
         } else {
             model.display_name.clone()
         };
+        let capabilities = serde_json::to_string(&model.capabilities)?;
         tx.execute(
             "INSERT INTO upstream_models
                 (id, provider_id, model_id, display_name, input_price, output_price,
-                 cache_read_price, cache_creation_price, icon, icon_tint, enabled)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                 cache_read_price, cache_creation_price, context_window, capabilities,
+                 icon, icon_tint, enabled)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 id,
                 provider_id,
@@ -172,6 +178,8 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
                 model.output_price,
                 model.cache_read_price,
                 model.cache_creation_price,
+                model.context_window,
+                capabilities,
                 model.icon,
                 model.icon_tint,
                 model.enabled as i64,
@@ -251,7 +259,8 @@ pub fn export_seed(conn: &Connection) -> Result<String, AppError> {
     {
         let mut stmt = conn.prepare(
             "SELECT m.id, p.name, m.model_id, m.display_name, m.input_price, m.output_price,
-                    m.cache_read_price, m.cache_creation_price, m.icon, m.icon_tint, m.enabled
+                    m.cache_read_price, m.cache_creation_price, m.context_window, m.capabilities,
+                    m.icon, m.icon_tint, m.enabled
              FROM upstream_models m JOIN providers p ON p.id = m.provider_id
              ORDER BY p.name, m.model_id",
         )?;
@@ -266,9 +275,12 @@ pub fn export_seed(conn: &Connection) -> Result<String, AppError> {
                     output_price: row.get(5)?,
                     cache_read_price: row.get(6)?,
                     cache_creation_price: row.get(7)?,
-                    icon: row.get(8)?,
-                    icon_tint: row.get(9)?,
-                    enabled: row.get::<_, i64>(10)? != 0,
+                    context_window: row.get(8)?,
+                    capabilities: serde_json::from_str(&row.get::<_, String>(9)?)
+                        .unwrap_or_default(),
+                    icon: row.get(10)?,
+                    icon_tint: row.get(11)?,
+                    enabled: row.get::<_, i64>(12)? != 0,
                 },
             ))
         })?;

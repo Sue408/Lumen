@@ -10,13 +10,23 @@ type SidebarProps = {
 export function Sidebar({ activeView, onNavigate }: SidebarProps) {
   const gateway = useGatewayStatus();
   const running = gateway.status?.running ?? false;
+  const baseUrl = gateway.status?.baseUrl ?? "http://127.0.0.1:8787";
+  const address = baseUrl.replace(/^https?:\/\//, "");
   const statusLabel = gateway.error
     ? "启动失败"
     : gateway.busy
       ? "切换中"
       : running
-        ? "网关运行中"
+        ? "本机运行"
         : "网关已停止";
+  const statusDetail = gateway.error
+    ? gateway.error
+    : gateway.busy
+      ? "请稍候"
+      : running
+        ? address
+        : "点击启动";
+  const statusClass = gateway.error ? "is-error" : running ? "is-running" : "is-stopped";
 
   return (
     <aside className="sidebar" aria-label="主导航">
@@ -43,12 +53,12 @@ export function Sidebar({ activeView, onNavigate }: SidebarProps) {
       </nav>
       <div className="sidebar-footer">
         <button
-          className={`runtime-status${gateway.error ? " is-error" : ""}`}
+          className={`runtime-status ${statusClass}`}
           type="button"
           role="switch"
           aria-checked={running}
           aria-label={`${statusLabel}，点击${running ? "停止" : "启动"}网关`}
-          title={`${statusLabel} · ${gateway.status?.baseUrl ?? "127.0.0.1:8787"}`}
+          title={gateway.error ? `${statusLabel} · ${gateway.error}` : `${statusLabel} · ${baseUrl}`}
           disabled={gateway.busy}
           onClick={gateway.toggle}
         >
@@ -56,7 +66,10 @@ export function Sidebar({ activeView, onNavigate }: SidebarProps) {
             className={`runtime-dot ${running ? "is-running" : "is-stopped"}${gateway.error ? " is-error" : ""}`}
             aria-hidden="true"
           />
-          {statusLabel}
+          <span className="runtime-text">
+            <span className="runtime-label">{statusLabel}</span>
+            <span className="runtime-detail">{statusDetail}</span>
+          </span>
         </button>
       </div>
     </aside>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -155,49 +155,58 @@ function RouteForm({
         ) : (
           <ol className="target-list" ref={containerRef}>
             {draft.targets.map((target, index) => (
-              <li
-                className={target.enabled ? "target-row" : "target-row is-off"}
-                key={target.uid}
-                data-flip-key={target.uid}
-              >
-                <span className="target-rank">{index + 1}</span>
-                <BrandGlyph
-                  brand={brands.get(target.upstreamModelId)?.brand ?? null}
-                  tint={markTint(brands.get(target.upstreamModelId))}
-                  size={18}
-                  fallback={<Route aria-hidden="true" />}
-                />
-                <select value={target.upstreamModelId} onChange={(event) => setTarget(index, { upstreamModelId: event.target.value })}>
-                  <option value="">选择上游模型…</option>
-                  {groups.map((group) => (
-                    <optgroup label={group.name} key={group.id}>
-                      {group.models.map((model) => (
-                        <option value={model.id} key={model.id}>
-                          {model.displayName} · {model.modelId}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                <TogglePill
-                  small
-                  checked={target.enabled}
-                  label={target.enabled ? "停用该目标" : "启用该目标"}
-                  disabled={busy}
-                  onChange={(next) => setTarget(index, { enabled: next })}
-                />
-                <div className="target-move">
-                  <GlyphButton label="上移" disabled={busy || index === 0} onClick={() => { capture(); set({ targets: moveTarget(draft.targets, index, -1) }); }}>
-                    <ChevronUp aria-hidden="true" />
-                  </GlyphButton>
-                  <GlyphButton label="下移" disabled={busy || index === draft.targets.length - 1} onClick={() => { capture(); set({ targets: moveTarget(draft.targets, index, 1) }); }}>
-                    <ChevronDown aria-hidden="true" />
-                  </GlyphButton>
-                  <GlyphButton label="移除目标" danger disabled={busy} onClick={() => { capture(); set({ targets: draft.targets.filter((_, itemIndex) => itemIndex !== index) }); }}>
-                    <Trash aria-hidden="true" />
-                  </GlyphButton>
-                </div>
-              </li>
+              <Fragment key={target.uid}>
+                {index > 0 ? (
+                  <li className="target-connector" aria-hidden="true">
+                    ↓
+                  </li>
+                ) : null}
+                <li
+                  className={target.enabled ? "target-row" : "target-row is-off"}
+                  data-flip-key={target.uid}
+                >
+                  <span className="target-rank">{index + 1}</span>
+                  <span className="target-role">
+                    {index === 0 ? "首选" : `备用 ${index + 1}`}
+                  </span>
+                  <BrandGlyph
+                    brand={brands.get(target.upstreamModelId)?.brand ?? null}
+                    tint={markTint(brands.get(target.upstreamModelId))}
+                    size={18}
+                    fallback={<Route aria-hidden="true" />}
+                  />
+                  <select value={target.upstreamModelId} onChange={(event) => setTarget(index, { upstreamModelId: event.target.value })}>
+                    <option value="">选择上游模型…</option>
+                    {groups.map((group) => (
+                      <optgroup label={group.name} key={group.id}>
+                        {group.models.map((model) => (
+                          <option value={model.id} key={model.id}>
+                            {model.displayName} · {model.modelId}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <TogglePill
+                    small
+                    checked={target.enabled}
+                    label={target.enabled ? "停用该目标" : "启用该目标"}
+                    disabled={busy}
+                    onChange={(next) => setTarget(index, { enabled: next })}
+                  />
+                  <div className="target-move">
+                    <GlyphButton label="上移" disabled={busy || index === 0} onClick={() => { capture(); set({ targets: moveTarget(draft.targets, index, -1) }); }}>
+                      <ChevronUp aria-hidden="true" />
+                    </GlyphButton>
+                    <GlyphButton label="下移" disabled={busy || index === draft.targets.length - 1} onClick={() => { capture(); set({ targets: moveTarget(draft.targets, index, 1) }); }}>
+                      <ChevronDown aria-hidden="true" />
+                    </GlyphButton>
+                    <GlyphButton label="移除目标" danger disabled={busy} onClick={() => { capture(); set({ targets: draft.targets.filter((_, itemIndex) => itemIndex !== index) }); }}>
+                      <Trash aria-hidden="true" />
+                    </GlyphButton>
+                  </div>
+                </li>
+              </Fragment>
             ))}
           </ol>
         )}
@@ -418,7 +427,7 @@ export function RoutingPage() {
                       >
                         <BrandGlyph brand={mark?.brand ?? null} tint={markTint(mark)} size={20} fallback={<Route aria-hidden="true" />} />
                         <span className="register-body">
-                          <span className="register-name">{route.alias}</span>
+                          <span className="register-name" title={route.alias}>{route.alias}</span>
                           <span className="register-meta">
                             {route.enabled
                               ? `${route.targets.length} 条目标`

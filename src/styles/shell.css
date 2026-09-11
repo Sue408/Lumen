@@ -57,7 +57,7 @@
   min-height: 2.25rem;
   padding: 8px 10px;
   text-align: left;
-  color: var(--ink-muted);
+  color: var(--ink-soft);
   background: transparent;
   border: 0;
   border-radius: 4px;
@@ -90,9 +90,11 @@
 .runtime-status {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0.6rem;
+  width: 100%;
+  min-width: 0;
   margin-top: auto;
-  padding: 10px;
+  padding: 0.5rem 0.625rem;
   border: 0;
   border-radius: 4px;
   background: none;
@@ -102,6 +104,15 @@
   text-align: left;
   cursor: pointer;
   transition: background 150ms ease, color 150ms ease;
+}
+
+.runtime-status.is-running {
+  color: var(--ink);
+  background: var(--surface-live);
+}
+
+.runtime-status.is-running .runtime-label {
+  font-weight: 500;
 }
 
 .runtime-status:hover {
@@ -139,21 +150,97 @@
   margin-top: 0;
 }
 
+.runtime-text {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.runtime-label {
+  color: inherit;
+  line-height: 1.25;
+}
+
+.runtime-detail {
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: 0.6875rem;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.runtime-status.is-running .runtime-detail,
+.runtime-status.is-error .runtime-detail {
+  color: var(--ink-muted);
+}
+
 .runtime-dot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   flex: 0 0 auto;
   border-radius: 50%;
   background: var(--ink-faint);
 }
 
+/* stopped is the normal default — a hollow quiet mark, never vermilion */
+.runtime-dot.is-stopped {
+  background: transparent;
+  border: 1px solid var(--ink-faint);
+}
+
+/*
+ * Running is the app's single sanctioned "alive" moment, so it carries the
+ * heaviest motion in the product: a solid moss core with a lit glow, wrapped
+ * in an organic halo that breathes out and fades. Never vermilion, never a
+ * notification-style ripple.
+ */
 .runtime-dot.is-running {
-  background: var(--moss);
-  animation: breathe 2500ms ease-in-out infinite;
+  position: relative;
+  background: var(--live);
+  box-shadow: 0 0 0.5rem var(--live-halo);
+}
+
+.runtime-dot.is-running::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: var(--live-halo);
+  animation: runtime-halo 2600ms ease-in-out infinite;
 }
 
 .runtime-dot.is-error {
   background: var(--danger);
+  border: 0;
+  box-shadow: none;
   animation: none;
+}
+
+@keyframes runtime-halo {
+  0%,
+  100% {
+    opacity: 0.85;
+    transform: scale(0.7);
+  }
+
+  50% {
+    opacity: 0;
+    transform: scale(1.8);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runtime-dot.is-running,
+  .runtime-dot.is-running::after {
+    animation: none;
+  }
+
+  .runtime-dot.is-running::after {
+    display: none;
+  }
 }
 

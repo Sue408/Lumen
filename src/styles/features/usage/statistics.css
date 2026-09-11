@@ -37,11 +37,14 @@
 
 .period-switcher button {
   position: relative;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
   padding: 7px 1px 8px;
   color: var(--ink-muted);
   background: transparent;
   border: 0;
   cursor: pointer;
+  text-align: center;
 }
 
 .period-switcher button::after {

@@ -270,6 +270,9 @@ fn format_thousands(value: i64) -> String {
 }
 
 fn format_tokens_wan(value: i64) -> String {
+    if value == 0 {
+        return "0".to_string();
+    }
     format!("{:.1} 万", value as f64 / 10_000.0)
 }
 
@@ -522,6 +525,13 @@ mod tests {
         assert_eq!(nice_axis_max(3.0), 5.0);
         assert_eq!(nice_axis_max(47.0), 50.0);
         assert_eq!(nice_axis_max(404.0), 500.0);
+    }
+
+    #[test]
+    fn zero_tokens_render_without_a_spurious_unit() {
+        assert_eq!(format_tokens_wan(0), "0");
+        assert_eq!(format_tokens_wan(5_000), "0.5 万");
+        assert_eq!(format_tokens_wan(482_000), "48.2 万");
     }
 
     #[test]

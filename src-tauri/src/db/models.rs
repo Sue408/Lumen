@@ -93,6 +93,8 @@ pub struct UpstreamModel {
     pub output_price: f64,
     pub cache_read_price: f64,
     pub cache_creation_price: f64,
+    pub context_window: i64,
+    pub capabilities: Vec<String>,
     pub icon: Option<String>,
     pub icon_tint: String,
     pub enabled: bool,
@@ -114,11 +116,19 @@ pub struct UpstreamModelInput {
     #[serde(default)]
     pub cache_creation_price: f64,
     #[serde(default)]
+    pub context_window: i64,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default)]
     pub icon: Option<String>,
     #[serde(default = "default_icon_tint")]
     pub icon_tint: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+}
+
+fn parse_capabilities(raw: &str) -> Vec<String> {
+    serde_json::from_str(raw).unwrap_or_default()
 }
 
 impl UpstreamModel {
@@ -132,6 +142,8 @@ impl UpstreamModel {
             output_price: row.get("output_price")?,
             cache_read_price: row.get("cache_read_price")?,
             cache_creation_price: row.get("cache_creation_price")?,
+            context_window: row.get("context_window")?,
+            capabilities: parse_capabilities(&row.get::<_, String>("capabilities")?),
             icon: row.get("icon")?,
             icon_tint: row.get("icon_tint")?,
             enabled: row.get::<_, i64>("enabled")? != 0,

@@ -60,6 +60,7 @@
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
 }
 
 .register-empty {
@@ -158,6 +159,7 @@
   font-size: 0.6875rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .register-select.is-off .register-meta {
@@ -197,6 +199,28 @@
   font-size: 1.5rem;
   font-weight: 600;
   line-height: 1.15;
+}
+
+.sheet-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: -0.75rem 0 1.15rem;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet-summary-sep {
+  color: var(--line-strong);
+}
+
+.sheet-summary-host {
+  overflow: hidden;
+  max-width: 22rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sheet-actions {
@@ -491,7 +515,7 @@
 
 .toggle-pill.is-small {
   gap: 0.32rem;
-  height: 1.4rem;
+  height: 1.5rem;
   padding: 0 0.5rem;
   font-size: 0.6875rem;
 }
@@ -557,6 +581,9 @@
 }
 
 .text-action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
   padding: 0;
   color: var(--ink-muted);
   background: transparent;
@@ -722,7 +749,7 @@
   padding: 0 0.5rem;
   color: var(--ink);
   background: var(--paper);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 4px;
   font: inherit;
   font-size: 0.875rem;
@@ -741,7 +768,7 @@
 
 .field input::placeholder,
 .field textarea::placeholder {
-  color: var(--ink-faint);
+  color: var(--ink-muted);
 }
 
 .field input:focus-visible,
@@ -782,26 +809,48 @@
 }
 
 .model-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 0.75rem;
+  row-gap: 0.3rem;
   align-items: center;
-  gap: 0.35rem 0.75rem;
   min-width: 0;
-  padding: 0.5rem 0;
+  padding: 0.65rem 0;
   border-bottom: 1px solid var(--line-faint);
-  font-size: 0.875rem;
+}
+
+.model-mark {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+}
+
+.model-mark .brand-mark {
+  color: var(--ink-soft);
+}
+
+.model-row.is-off .model-mark .brand-mark {
+  color: var(--ink-faint);
+}
+
+.model-body {
+  display: grid;
+  grid-column: 2;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.model-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
 }
 
 .model-name {
   color: var(--ink);
-}
-
-.model-row .brand-mark {
-  color: var(--ink-soft);
-}
-
-.model-row.is-off .brand-mark {
-  color: var(--ink-faint);
+  font-size: 0.9375rem;
+  font-weight: 600;
 }
 
 .model-row.is-off .model-name {
@@ -812,25 +861,142 @@
   overflow: hidden;
   color: var(--ink-muted);
   font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.model-price {
-  color: var(--ink-muted);
-  font-size: 0.75rem;
+.model-specs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.7rem;
+  min-width: 0;
+}
+
+.model-context {
+  padding: 0.05rem 0.4rem;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
+}
+
+.model-price-group {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.7rem;
+}
+
+.price-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.22rem;
+  font-size: 0.6875rem;
+}
+
+.price-cell em {
+  color: var(--ink-muted);
+  font-style: normal;
+}
+
+.price-cell b {
+  color: var(--ink-soft);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.model-row.is-off .price-cell b,
+.model-row.is-off .model-context {
+  color: var(--ink-faint);
+}
+
+.model-caps {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.model-cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+}
+
+/*
+ * Keep these at 1rem: Chromium drops complex Lucide paths entirely below
+ * ~15.5px (simple shapes survive), and the UA `overflow: hidden` viewport
+ * clip is what triggers the culling — `overflow: visible` makes them paint.
+ */
+.model-cap svg,
+.capability-pill svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+/* ---- capability toggles (upstream model form) ---- */
+
+.capability-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.capability-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.75rem;
+  padding: 0 0.6rem;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.capability-pill:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ochre);
+}
+
+.capability-pill.is-on {
+  color: var(--ink);
+  border-color: var(--ochre);
+  background: var(--surface-hover-soft);
+}
+
+.capability-pill:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.capability-pill:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
 }
 
 .model-row-actions {
   display: inline-flex;
   align-items: center;
+  align-self: center;
   gap: 0.3rem;
-  margin-left: auto;
 }
 
 .model-row.is-empty {
+  grid-template-columns: 1fr;
   border-bottom: 0;
 }
 
@@ -878,6 +1044,25 @@
   place-items: center;
 }
 
+.target-role {
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+}
+
+.target-row.is-off .target-role {
+  color: var(--ink-faint);
+}
+
+.target-connector {
+  padding: 0.1rem 0 0.1rem 0.45rem;
+  color: var(--line-strong);
+  font-size: 0.8rem;
+  line-height: 1;
+  list-style: none;
+}
+
 .target-row select {
   flex: 1 1 14rem;
   min-width: 0;
@@ -885,7 +1070,7 @@
   padding: 0 0.5rem;
   color: var(--ink);
   background: var(--paper);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 4px;
   font: inherit;
   font-size: 0.875rem;

@@ -16,12 +16,18 @@
   --paper-deep: light-dark(#f0ece5, #24221f);
   --ink: light-dark(#1c1a17, #ece8e1);
   --ink-soft: light-dark(#403b35, #cfc9c0);
-  --ink-muted: light-dark(#777168, #9f988d);
+  --ink-muted: light-dark(#6f6960, #9f988d);
   --ink-faint: light-dark(#9a9389, #736d64);
 
   /* lines & rules */
   --line: light-dark(#ded9d0, #35322d);
   --line-strong: light-dark(#b9b4ab, #4a463f);
+  /*
+   * Control boundary: form fields only, held to WCAG 1.4.11 (>=3:1 against
+   * paper). `--line` stays decorative; this darker warm grey is what actually
+   * outlines inputs so the box remains perceivable without colour.
+   */
+  --line-control: light-dark(#868074, #6e685e);
   --line-faint: light-dark(rgb(222 217 208 / 70%), rgb(255 255 255 / 8%));
   --guide-line: light-dark(#b7afa3, #524d45);
   --point-hollow: light-dark(#9e978d, #8a8378);
@@ -34,6 +40,8 @@
   --surface-hover: light-dark(rgb(238 234 227 / 55%), rgb(255 255 255 / 6%));
   --surface-hover-soft: light-dark(rgb(238 234 227 / 45%), rgb(255 255 255 / 5%));
   --surface-hover-strong: light-dark(rgb(238 234 227 / 70%), rgb(255 255 255 / 8%));
+  /* running gateway: a faint moss wash so "live" reads even without motion */
+  --surface-live: light-dark(rgb(113 128 106 / 10%), rgb(143 158 134 / 9%));
   --tooltip-bg: light-dark(rgb(251 250 248 / 97%), rgb(32 31 28 / 98%));
   --bar-previous: light-dark(#d2cdc4, #4a463f);
 
@@ -47,6 +55,8 @@
   /* liveness: the only non-chart use of moss, an online status dot */
   --live: light-dark(#71806a, #8f9e86);
   --live-ring: light-dark(rgb(113 128 106 / 45%), rgb(143 158 134 / 45%));
+  /* the sidebar heartbeat is the app's heaviest motion — give it a solid halo */
+  --live-halo: light-dark(rgb(113 128 106 / 55%), rgb(143 158 134 / 55%));
 
   /* chart mineral palette: ochre / indigo / moss / yellow, never vermilion */
   --chart-ochre: light-dark(#9b7854, #b98f66);

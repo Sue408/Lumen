@@ -39,6 +39,10 @@ export type UpstreamModel = {
   displayName: string;
   inputPrice: number;
   outputPrice: number;
+  cacheReadPrice: number;
+  cacheCreationPrice: number;
+  contextWindow: number;
+  capabilities: string[];
   icon: string | null;
   iconTint: IconTint;
   enabled: boolean;
@@ -51,6 +55,10 @@ export type UpstreamModelInput = {
   displayName: string;
   inputPrice?: number;
   outputPrice?: number;
+  cacheReadPrice?: number;
+  cacheCreationPrice?: number;
+  contextWindow?: number;
+  capabilities?: string[];
   icon?: string | null;
   iconTint?: IconTint;
   enabled?: boolean;
@@ -128,6 +136,10 @@ const mockModels: UpstreamModel[] = [
     displayName: "DeepSeek V4 Flash",
     inputPrice: 0.15,
     outputPrice: 0.6,
+    cacheReadPrice: 0.02,
+    cacheCreationPrice: 0.15,
+    contextWindow: 128000,
+    capabilities: ["tools", "reasoning"],
     icon: null,
     iconTint: "ink",
     enabled: true,
@@ -139,6 +151,10 @@ const mockModels: UpstreamModel[] = [
     displayName: "DeepSeek V4 Reasoner",
     inputPrice: 0.55,
     outputPrice: 2.2,
+    cacheReadPrice: 0.14,
+    cacheCreationPrice: 0.55,
+    contextWindow: 128000,
+    capabilities: ["reasoning"],
     icon: null,
     iconTint: "ink",
     enabled: true,
@@ -150,6 +166,10 @@ const mockModels: UpstreamModel[] = [
     displayName: "GPT-4o",
     inputPrice: 2.5,
     outputPrice: 10,
+    cacheReadPrice: 1.25,
+    cacheCreationPrice: 2.5,
+    contextWindow: 128000,
+    capabilities: ["vision", "tools"],
     icon: null,
     iconTint: "ink",
     enabled: false,
@@ -224,6 +244,10 @@ function mockSaveUpstreamModel(input: UpstreamModelInput): UpstreamModel {
     displayName: input.displayName || input.modelId,
     inputPrice: input.inputPrice ?? 0,
     outputPrice: input.outputPrice ?? 0,
+    cacheReadPrice: input.cacheReadPrice ?? existing?.cacheReadPrice ?? 0,
+    cacheCreationPrice: input.cacheCreationPrice ?? existing?.cacheCreationPrice ?? 0,
+    contextWindow: input.contextWindow ?? existing?.contextWindow ?? 0,
+    capabilities: input.capabilities ?? existing?.capabilities ?? [],
     icon: input.icon ?? existing?.icon ?? null,
     iconTint: input.iconTint ?? existing?.iconTint ?? "ink",
     enabled: input.enabled ?? true,

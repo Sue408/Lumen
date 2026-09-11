@@ -51,6 +51,7 @@
 }
 
 .logs-scope button {
+  min-height: 1.5rem;
   padding: 0.28rem 0.7rem;
   color: var(--ink-muted);
   background: transparent;
@@ -134,7 +135,7 @@
   padding: 0.25rem 0.5rem;
   color: var(--ink);
   background: var(--paper);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 4px;
   font-size: 0.8125rem;
 }
@@ -179,7 +180,7 @@
   padding: 0.2rem 0.5rem;
   color: var(--ink);
   background: var(--paper);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 4px;
   font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;

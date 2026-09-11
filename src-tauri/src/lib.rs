@@ -96,11 +96,7 @@ pub fn run() {
                     .lock()
                     .map_err(|_| error::AppError::message("数据库锁已中毒"))?;
                 let settings = db::settings::get_settings(&conn)?;
-                let port = std::env::var("LUMEN_PORT")
-                    .ok()
-                    .and_then(|value| value.parse().ok())
-                    .unwrap_or(settings.port);
-                (port, settings.close_to_tray)
+                (settings.port, settings.close_to_tray)
             };
             let state = Arc::new(AppState::new(db, http, events, port, data_dir));
             state.set_close_to_tray(close_to_tray);

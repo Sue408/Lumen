@@ -309,7 +309,7 @@ function LogRow({
       <button className="logs-row-main" type="button" aria-expanded={expanded} onClick={onToggle}>
         <time dateTime={log.occurredAt}>{formatLogClock(new Date(log.occurredAt))}</time>
         <span className="logs-model">
-          <strong>{logModelName(log)}</strong>
+          <strong title={logModelName(log)}>{logModelName(log)}</strong>
           <span className="logs-sub">
             {logKindLabel(log.kind)}
             {mark ? <em className={`logs-mark is-${mark.tone}`}>{mark.label}</em> : null}

@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import {
   Boxes,
+  Brain,
+  Eye,
   FlaskConical,
   Pencil,
   Plus,
   Server,
   SlidersHorizontal,
   Trash,
+  Wrench,
+  type LucideIcon,
 } from "lucide-react";
 import {
   EmptyNote,
@@ -37,8 +41,13 @@ import {
 } from "../../services/config";
 import {
   authSchemeLabel,
+  capabilityLabel,
+  capabilityOrder,
+  contextWindowToNumber,
   emptyModelDraft,
   emptyProviderDraft,
+  formatContextWindow,
+  isCapabilityId,
   isProviderDraftDirty,
   modelToDraft,
   modelsForProvider,
@@ -48,9 +57,24 @@ import {
   providerToDraft,
   validateModelDraft,
   validateProviderDraft,
+  type CapabilityId,
   type ModelDraft,
   type ProviderDraft,
 } from "./providerModel";
+
+const capabilityIcons: Record<CapabilityId, LucideIcon> = {
+  vision: Eye,
+  tools: Wrench,
+  reasoning: Brain,
+};
+
+function hostLabel(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl;
+  }
+}
 
 type Pending = { kind: "existing"; id: string } | { kind: "new" };
 
@@ -185,6 +209,47 @@ function ModelForm({
           <span>输出单价 · 元 / 百万</span>
           <input inputMode="decimal" value={draft.outputPrice} onChange={(event) => set({ outputPrice: event.target.value })} />
         </label>
+        <label className="field">
+          <span>缓存读单价 · 元 / 百万</span>
+          <input inputMode="decimal" value={draft.cacheReadPrice} onChange={(event) => set({ cacheReadPrice: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>缓存写单价 · 元 / 百万</span>
+          <input inputMode="decimal" value={draft.cacheCreationPrice} onChange={(event) => set({ cacheCreationPrice: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>上下文长度 · Tokens</span>
+          <input inputMode="numeric" value={draft.contextWindow} placeholder="128000" onChange={(event) => set({ contextWindow: event.target.value })} />
+        </label>
+        <div className="field field-wide">
+          <span>能力标签</span>
+          <div className="capability-group" role="group" aria-label="模型能力">
+            {capabilityOrder.map((id) => {
+              const Icon = capabilityIcons[id];
+              const active = draft.capabilities.includes(id);
+              return (
+                <button
+                  key={id}
+                  className={active ? "capability-pill is-on" : "capability-pill"}
+                  type="button"
+                  role="switch"
+                  aria-checked={active}
+                  disabled={busy}
+                  onClick={() =>
+                    set({
+                      capabilities: active
+                        ? draft.capabilities.filter((item) => item !== id)
+                        : [...draft.capabilities, id],
+                    })
+                  }
+                >
+                  <Icon aria-hidden="true" />
+                  {capabilityLabel[id]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <div className="field-inline">
           <TogglePill checked={draft.enabled} label="启用该模型" disabled={busy} onChange={(next) => set({ enabled: next })} />
         </div>
@@ -418,6 +483,10 @@ export function ProvidersPage() {
         displayName: modelDraft.displayName.trim() || modelDraft.modelId.trim(),
         inputPrice: priceToNumber(modelDraft.inputPrice),
         outputPrice: priceToNumber(modelDraft.outputPrice),
+        cacheReadPrice: priceToNumber(modelDraft.cacheReadPrice),
+        cacheCreationPrice: priceToNumber(modelDraft.cacheCreationPrice),
+        contextWindow: contextWindowToNumber(modelDraft.contextWindow),
+        capabilities: modelDraft.capabilities,
         enabled: modelDraft.enabled,
       });
       setModelDraft(null);
@@ -440,6 +509,10 @@ export function ProvidersPage() {
         displayName: model.displayName,
         inputPrice: model.inputPrice,
         outputPrice: model.outputPrice,
+        cacheReadPrice: model.cacheReadPrice,
+        cacheCreationPrice: model.cacheCreationPrice,
+        contextWindow: model.contextWindow,
+        capabilities: model.capabilities,
         enabled: !model.enabled,
       });
       await refreshLists();
@@ -464,6 +537,10 @@ export function ProvidersPage() {
         displayName: model.displayName,
         inputPrice: model.inputPrice,
         outputPrice: model.outputPrice,
+        cacheReadPrice: model.cacheReadPrice,
+        cacheCreationPrice: model.cacheCreationPrice,
+        contextWindow: model.contextWindow,
+        capabilities: model.capabilities,
         icon: patch.icon !== undefined ? patch.icon : model.icon,
         iconTint: patch.iconTint ?? model.iconTint,
         enabled: model.enabled,
@@ -545,7 +622,7 @@ export function ProvidersPage() {
                       >
                         <BrandGlyph brand={brand} size={20} tint={provider.enabled ? provider.iconTint : "ink"} fallback={<Server aria-hidden="true" />} />
                         <span className="register-body">
-                          <span className="register-name">{provider.name}</span>
+                          <span className="register-name" title={provider.name}>{provider.name}</span>
                           <span className="register-meta">
                             {provider.enabled ? `${providerModels.length} 个模型` : `已停用 · ${providerModels.length} 个模型`}
                           </span>
@@ -594,6 +671,20 @@ export function ProvidersPage() {
                       ) : null}
                     </div>
                   </div>
+
+                  {selectedId !== "new" ? (
+                    <p className="sheet-summary">
+                      <span>{protocolLabel[draft.protocol]} 协议</span>
+                      <span className="sheet-summary-sep" aria-hidden="true">·</span>
+                      <span>{authSchemeLabel[draft.authScheme]}</span>
+                      <span className="sheet-summary-sep" aria-hidden="true">·</span>
+                      <span className="sheet-summary-host" title={draft.baseUrl}>
+                        {hostLabel(draft.baseUrl)}
+                      </span>
+                      <span className="sheet-summary-sep" aria-hidden="true">·</span>
+                      <span>{selectedModels.length} 个模型</span>
+                    </p>
+                  ) : null}
 
                   {pending ? (
                     <div className="pending-bar">
@@ -659,20 +750,62 @@ export function ProvidersPage() {
                       <ul className="model-list">
                         {selectedModels.map((model) => (
                           <li className={model.enabled ? "model-row" : "model-row is-off"} key={model.id}>
-                            <IconPicker
-                              icon={model.icon}
-                              auto={detectBrand([selectedProvider.name, model.modelId])}
-                              tint={model.iconTint}
-                              size={18}
-                              enabled={model.enabled}
-                              fallback={<Boxes aria-hidden="true" />}
-                              disabled={busy}
-                              onChange={(value) => void setModelAppearance(model, { icon: value })}
-                              onTintChange={(value) => void setModelAppearance(model, { iconTint: value })}
-                            />
-                            <span className="model-name">{model.displayName}</span>
-                            <code className="model-id">{model.modelId}</code>
-                            <span className="model-price">入 ¥{model.inputPrice} / 出 ¥{model.outputPrice}</span>
+                            <span className="model-mark">
+                              <IconPicker
+                                icon={model.icon}
+                                auto={detectBrand([selectedProvider.name, model.modelId])}
+                                tint={model.iconTint}
+                                size={20}
+                                enabled={model.enabled}
+                                fallback={<Boxes aria-hidden="true" />}
+                                disabled={busy}
+                                onChange={(value) => void setModelAppearance(model, { icon: value })}
+                                onTintChange={(value) => void setModelAppearance(model, { iconTint: value })}
+                              />
+                            </span>
+                            <div className="model-body">
+                              <div className="model-line">
+                                <span className="model-name">{model.displayName}</span>
+                                <code className="model-id" title={model.modelId}>{model.modelId}</code>
+                              </div>
+                              <div className="model-specs">
+                                {model.contextWindow > 0 ? (
+                                  <span
+                                    className="model-context"
+                                    title={`上下文 ${model.contextWindow.toLocaleString("zh-CN")} tokens`}
+                                  >
+                                    {formatContextWindow(model.contextWindow)}
+                                  </span>
+                                ) : null}
+                                <span className="model-price-group">
+                                  <span className="price-cell">
+                                    <em>入</em>
+                                    <b>¥{model.inputPrice}</b>
+                                  </span>
+                                  <span className="price-cell">
+                                    <em>出</em>
+                                    <b>¥{model.outputPrice}</b>
+                                  </span>
+                                  <span className="price-cell" title="缓存读单价 · 元 / 百万 token">
+                                    <em>缓存读</em>
+                                    <b>¥{model.cacheReadPrice}</b>
+                                  </span>
+                                </span>
+                                {model.capabilities.filter(isCapabilityId).length > 0 ? (
+                                  <span className="model-caps">
+                                    {model.capabilities.filter(isCapabilityId).map((id) => {
+                                      const Icon = capabilityIcons[id];
+                                      return (
+                                        <span className="model-cap" key={id} title={capabilityLabel[id]}>
+                                          <Icon aria-hidden="true" />
+                                          {capabilityLabel[id]}
+                                        </span>
+                                      );
+                                    })}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
                             <div className="model-row-actions">
                               <TogglePill
                                 small

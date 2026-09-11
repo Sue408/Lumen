@@ -75,7 +75,7 @@
   color: var(--ink);
   text-align: right;
   background: var(--paper);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 4px;
   font: inherit;
   font-size: 0.875rem;
