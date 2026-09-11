@@ -2,13 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   emptyKeyDraft,
-  isKeyDraftDirty,
   keyToDraft,
   maskKey,
-  quotaConfigSummary,
+  quotaAmount,
   quotaLimitToNumber,
   quotaRatio,
-  quotaSummary,
+  quotaResetSummary,
   quotaTone,
   validateKeyDraft,
 } from "./keyModel.ts";
@@ -38,17 +37,14 @@ test("maskKey hides short keys entirely", () => {
   assert.equal(maskKey(""), "");
 });
 
+test("maskKey keeps a fixed dot run so rows line up", () => {
+  assert.equal(maskKey("sk-lumen-abcdef1234567890"), "sk-lumen-abcd••••••7890");
+  assert.equal(maskKey("sk-lumen-abcdef1234567890aaaa"), "sk-lumen-abcd••••••aaaa");
+});
+
 test("keyToDraft maps null limit to empty string", () => {
   assert.equal(keyToDraft(key).quotaLimit, "50");
   assert.equal(keyToDraft({ ...key, quotaLimit: null }).quotaLimit, "");
-});
-
-test("dirty detects quota and enabled changes", () => {
-  const base = keyToDraft(key);
-  assert.equal(isKeyDraftDirty(base, { ...base }), false);
-  assert.equal(isKeyDraftDirty({ ...base, quotaLimit: "60" }, base), true);
-  assert.equal(isKeyDraftDirty({ ...base, quotaLimit: " 50 " }, base), false);
-  assert.equal(isKeyDraftDirty({ ...base, enabled: false }, base), true);
 });
 
 test("validate requires a name and a non-negative quota", () => {
@@ -74,14 +70,29 @@ test("quotaLimitToNumber maps blank to null", () => {
   assert.equal(quotaLimitToNumber("abc"), null);
 });
 
-test("quotaSummary shows the limit or unlimited", () => {
-  assert.equal(quotaSummary(21.3, 50, "monthly"), "$21.30 / $50.00 · 每月");
-  assert.equal(quotaSummary(12.1, null, "monthly"), "$12.10 / 不限");
+test("quotaAmount shows the limit or unlimited", () => {
+  assert.equal(quotaAmount(21.3, 50), "$21.30 / $50.00");
+  assert.equal(quotaAmount(12.1, null), "$12.10 / 不限");
 });
 
-test("quotaConfigSummary describes the configured cap only", () => {
-  assert.equal(quotaConfigSummary(null, "monthly"), "不限额度");
-  assert.equal(quotaConfigSummary(50, "weekly"), "上限 $50.00 · 每周");
+test("quotaResetSummary names the next reset and the wait", () => {
+  const now = new Date(2026, 8, 12, 12, 0, 0);
+  assert.equal(
+    quotaResetSummary("monthly", new Date(2026, 8, 1).toISOString(), now),
+    "每月 · 10 月 1 日重置（剩 18 天）",
+  );
+  assert.equal(
+    quotaResetSummary("weekly", new Date(2026, 8, 7).toISOString(), now),
+    "每周 · 9 月 14 日重置（剩 1 天）",
+  );
+  assert.equal(
+    quotaResetSummary("daily", new Date(2026, 8, 12).toISOString(), now),
+    "每日 · 9 月 13 日重置（剩 12 小时）",
+  );
+  assert.equal(
+    quotaResetSummary("total", new Date(1970, 0, 1).toISOString(), now),
+    "一次性总额 · 不重置",
+  );
 });
 
 test("quotaTone switches at 80 percent and the limit", () => {

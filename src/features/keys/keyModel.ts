@@ -40,16 +40,6 @@ export function keyToDraft(key: VirtualKey): KeyDraft {
   };
 }
 
-export function isKeyDraftDirty(draft: KeyDraft, original: KeyDraft): boolean {
-  return (
-    draft.name !== original.name ||
-    draft.key !== original.key ||
-    draft.enabled !== original.enabled ||
-    draft.quotaLimit.trim() !== original.quotaLimit.trim() ||
-    draft.quotaPeriod !== original.quotaPeriod
-  );
-}
-
 function isOptionalNonNegativeNumber(value: string): boolean {
   const trimmed = value.trim();
   if (trimmed.length === 0) return true;
@@ -74,34 +64,77 @@ export function quotaLimitToNumber(value: string): number | null {
 
 const KEY_PREFIX = "sk-lumen-";
 
-/** 掩码：保留 sk-lumen- 前缀与首尾各 4 位，中间以圆点填充。 */
+/** 中段圆点定长，不随密钥长度撑开——登记簿里每行掩码等宽才好对齐。 */
+const MASK_DOTS = 6;
+
+/** 掩码：保留 sk-lumen- 前缀与首尾各 4 位，中间以定长圆点填充。 */
 export function maskKey(key: string): string {
   if (key.length === 0) return "";
   const prefix = key.startsWith(KEY_PREFIX) ? KEY_PREFIX : "";
   const rest = key.slice(prefix.length);
   if (rest.length <= 8) return `${prefix}${"•".repeat(rest.length)}`;
-  const hidden = Math.max(4, rest.length - 8);
-  return `${prefix}${rest.slice(0, 4)}${"•".repeat(hidden)}${rest.slice(-4)}`;
+  return `${prefix}${rest.slice(0, 4)}${"•".repeat(MASK_DOTS)}${rest.slice(-4)}`;
 }
 
 function formatAmount(value: number): string {
   return value.toFixed(2);
 }
 
-export function quotaSummary(
-  spent: number,
-  limit: number | null,
-  period: QuotaPeriod,
-): string {
+export function quotaAmount(spent: number, limit: number | null): string {
   const spentText = `$${formatAmount(spent)}`;
   if (limit === null) return `${spentText} / 不限`;
-  return `${spentText} / $${formatAmount(limit)} · ${quotaPeriodLabel[period]}`;
+  return `${spentText} / $${formatAmount(limit)}`;
 }
 
-/** 登记簿摘要：只描述额度配置，不涉及实际花费。 */
-export function quotaConfigSummary(limit: number | null, period: QuotaPeriod): string {
-  if (limit === null) return "不限额度";
-  return `上限 $${formatAmount(limit)} · ${quotaPeriodLabel[period]}`;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 下一次周期刷新的本地零点。
+ * 后端给的 `periodStart` 是「本地零点 → UTC」，`new Date` 还原后按周期加一段即可；
+ * 「一次性总额」不刷新，返回 null。
+ */
+function nextQuotaReset(period: QuotaPeriod, periodStartIso: string): Date | null {
+  const start = new Date(periodStartIso);
+  if (Number.isNaN(start.getTime())) return null;
+  const year = start.getFullYear();
+  const month = start.getMonth();
+  const day = start.getDate();
+  switch (period) {
+    case "daily":
+      return new Date(year, month, day + 1);
+    case "weekly":
+      return new Date(year, month, day + 7);
+    case "monthly":
+      return new Date(year, month + 1, 1);
+    case "total":
+      return null;
+  }
+}
+
+function formatMonthDay(date: Date): string {
+  return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+}
+
+function remainingText(diffMs: number): string {
+  if (diffMs <= 0) return "即将重置";
+  const days = Math.floor(diffMs / DAY_MS);
+  if (days >= 1) return `剩 ${days} 天`;
+  const hours = Math.floor(diffMs / (60 * 60 * 1000));
+  if (hours >= 1) return `剩 ${hours} 小时`;
+  return `剩 ${Math.max(0, Math.floor(diffMs / (60 * 1000)))} 分钟`;
+}
+
+/** 周期与刷新说明：「每月 · 10 月 1 日重置（剩 19 天）」；总额写「不重置」。 */
+export function quotaResetSummary(
+  period: QuotaPeriod,
+  periodStartIso: string,
+  now: Date,
+): string {
+  const label = quotaPeriodLabel[period];
+  if (period === "total") return `${label} · 不重置`;
+  const at = nextQuotaReset(period, periodStartIso);
+  if (!at) return label;
+  return `${label} · ${formatMonthDay(at)}重置（${remainingText(at.getTime() - now.getTime())}）`;
 }
 
 export type QuotaTone = "normal" | "near" | "over";

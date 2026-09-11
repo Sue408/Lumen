@@ -2,8 +2,12 @@
  * Virtual keys — an entry register, not a master/detail workbench.
  *
  * The job here is to read how much quota is left, create keys and copy them —
- * not to edit or read key internals. So each key is a single row: name, an
- * asterisk mask with a copy icon, a remaining-quota bar, and the actions.
+ * not to edit or read key internals. So each key is a single row: name, a
+ * masked key with a copy icon, the quota (bar + amount over one small line
+ * saying when the period resets), and the actions.
+ *
+ * Every row shares one column template, so names, masks, meters and actions
+ * line up down the register instead of drifting with each row's content.
  * Vermilion stays reserved for over-budget / disabled.
  */
 
@@ -108,10 +112,14 @@
 
 .keys-page .key-card {
   display: grid;
-  grid-template-columns: minmax(6rem, 1fr) auto minmax(16rem, auto);
+  grid-template-columns:
+    minmax(9rem, 1.1fr)
+    minmax(11rem, 0.9fr)
+    minmax(17rem, 1.2fr)
+    auto;
   align-items: center;
-  gap: 2.5rem;
-  padding: 0.95rem 0;
+  gap: 1.5rem;
+  padding: 0.9rem 0;
   border-top: 1px solid var(--line-faint);
 }
 
@@ -200,20 +208,25 @@
   outline-offset: 2px;
 }
 
-/* ---- quota: how much is left is the headline ---- */
+/* ---- quota: how much is left is the headline, when it resets is the fine print ---- */
 
 .keys-page .key-part-quota {
-  gap: 0.7rem;
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
 }
 
-.keys-page .key-part-quota .key-card-actions {
-  margin-left: 0.35rem;
+.keys-page .quota-line {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
 }
 
 .keys-page .quota-meter {
   display: block;
   flex: 0 0 auto;
-  width: clamp(9rem, 14vw, 15rem);
+  width: clamp(7rem, 11vw, 12rem);
   height: 6px;
   overflow: hidden;
   background: var(--line-faint);
@@ -227,6 +240,11 @@
     var(--line-faint) 0 6px,
     transparent 6px 12px
   );
+}
+
+/* before usage lands the meter reads as a pending track, not a zeroed one */
+.keys-page .quota-meter.is-pending {
+  background: var(--surface-hover);
 }
 
 .keys-page .quota-meter-fill {
@@ -255,9 +273,22 @@
   color: var(--danger);
 }
 
-.keys-page .key-card-actions {
-  display: inline-flex;
-  align-items: center;
+.keys-page .key-quota-text.is-pending {
+  color: var(--ink-faint);
+}
+
+/* when the period rolls over — fine print, never a headline */
+.keys-page .key-quota-reset {
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keys-page .key-part-actions {
+  justify-content: flex-end;
   gap: 0.3rem;
 }
 

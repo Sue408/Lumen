@@ -432,6 +432,21 @@ function mockDeleteVirtualKey(id: string): void {
   mockVirtualKeys = mockVirtualKeys.filter((item) => item.id !== id);
 }
 
+function mockPeriodStart(period: QuotaPeriod, now: Date): Date {
+  switch (period) {
+    case "daily":
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    case "weekly": {
+      const offset = (now.getDay() + 6) % 7; // 周一为 0，与后端周口径一致
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset);
+    }
+    case "monthly":
+      return new Date(now.getFullYear(), now.getMonth(), 1);
+    case "total":
+      return new Date(1970, 0, 1);
+  }
+}
+
 function mockVirtualKeyUsage(keyId: string): KeyUsage {
   const key = mockVirtualKeys.find((item) => item.id === keyId);
   const totals: Record<string, { spent: number; calls: number }> = {
@@ -441,13 +456,14 @@ function mockVirtualKeyUsage(keyId: string): KeyUsage {
   };
   const entry = totals[keyId] ?? { spent: 0, calls: 0 };
   const now = new Date();
+  const period = key?.quotaPeriod ?? "monthly";
   return {
     keyId,
     spent: entry.spent,
     calls: entry.calls,
     limit: key?.quotaLimit ?? null,
-    period: key?.quotaPeriod ?? "monthly",
-    periodStart: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
+    period,
+    periodStart: mockPeriodStart(period, now).toISOString(),
   };
 }
 
@@ -466,7 +482,7 @@ export async function deleteVirtualKey(id: string): Promise<void> {
   return invoke<void>("delete_virtual_key_cmd", { id });
 }
 
-export async function queryVirtualKeyUsage(keyId: string): Promise<KeyUsage> {
-  if (!isTauriRuntime(window)) return mockVirtualKeyUsage(keyId);
-  return invoke<KeyUsage>("query_virtual_key_usage_cmd", { keyId });
+export async function queryVirtualKeysUsage(): Promise<KeyUsage[]> {
+  if (!isTauriRuntime(window)) return mockVirtualKeys.map((key) => mockVirtualKeyUsage(key.id));
+  return invoke<KeyUsage[]>("query_virtual_keys_usage_cmd");
 }

@@ -12,7 +12,7 @@ import { Modal } from "../../components/Modal";
 import {
   deleteVirtualKey,
   listVirtualKeys,
-  queryVirtualKeyUsage,
+  queryVirtualKeysUsage,
   saveVirtualKey,
   type KeyUsage,
   type QuotaPeriod,
@@ -21,11 +21,13 @@ import {
 import {
   emptyKeyDraft,
   keyToDraft,
+  maskKey,
+  quotaAmount,
   quotaLimitToNumber,
   quotaPeriodLabel,
   quotaPeriodOrder,
   quotaRatio,
-  quotaSummary,
+  quotaResetSummary,
   quotaTone,
   validateKeyDraft,
   type KeyDraft,
@@ -40,8 +42,6 @@ function KeyMark({ enabled }: { enabled: boolean }) {
     </span>
   );
 }
-
-const KEY_MASK = "sk-lumen-****************";
 
 function KeyEditor({
   title,
@@ -136,24 +136,19 @@ export function KeysPage() {
 
   const { revision } = useLiveRevision();
 
-  const loadUsage = async (list: VirtualKey[]) => {
-    const entries = await Promise.all(
-      list.map(async (key) => {
-        try {
-          return [key.id, await queryVirtualKeyUsage(key.id)] as const;
-        } catch {
-          return null;
-        }
-      }),
-    );
+  const fetchUsages = async (): Promise<Record<string, KeyUsage>> => {
+    const list = await queryVirtualKeysUsage();
     const map: Record<string, KeyUsage> = {};
-    for (const entry of entries) if (entry) map[entry[0]] = entry[1];
-    setUsages(map);
+    for (const usage of list) map[usage.keyId] = usage;
+    return map;
   };
 
-  const refresh = async () => {
-    const next = await listVirtualKeys();
+  // 密钥与用量一起取回、一起落状态，登记簿首帧就是完整的——否则先画空壳、
+  // 用量随后补进来，行会在进入页面的一瞬间跳一下。
+  const reload = async (): Promise<VirtualKey[]> => {
+    const [next, usageMap] = await Promise.all([listVirtualKeys(), fetchUsages()]);
     setKeys(next);
+    setUsages(usageMap);
     return next;
   };
 
@@ -163,10 +158,10 @@ export function KeysPage() {
       setLoading(true);
       setError(null);
       try {
-        const next = await listVirtualKeys();
+        const [next, usageMap] = await Promise.all([listVirtualKeys(), fetchUsages()]);
         if (!alive) return;
         setKeys(next);
-        void loadUsage(next);
+        setUsages(usageMap);
       } catch (err) {
         if (alive) setError(String(err));
       } finally {
@@ -180,7 +175,7 @@ export function KeysPage() {
 
   useEffect(() => {
     if (revision === 0) return;
-    void loadUsage(keys);
+    void fetchUsages().then(setUsages);
     // live usage should refresh with each new gateway request
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revision]);
@@ -222,8 +217,7 @@ export function KeysPage() {
         quotaLimit: quotaLimitToNumber(draft.quotaLimit),
         quotaPeriod: draft.quotaPeriod,
       });
-      const next = await refresh();
-      void loadUsage(next);
+      await reload();
       closeEditor();
     } catch (err) {
       setFormError(String(err));
@@ -243,8 +237,7 @@ export function KeysPage() {
         quotaLimit: key.quotaLimit,
         quotaPeriod: key.quotaPeriod,
       });
-      const next = await refresh();
-      void loadUsage(next);
+      await reload();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -258,8 +251,7 @@ export function KeysPage() {
     try {
       await deleteVirtualKey(id);
       setConfirmDelete(null);
-      const next = await refresh();
-      void loadUsage(next);
+      await reload();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -278,6 +270,7 @@ export function KeysPage() {
   };
 
   const enabledCount = keys.filter((key) => key.enabled).length;
+  const now = new Date();
 
   return (
     <main className="keys-page">
@@ -328,7 +321,7 @@ export function KeysPage() {
 
                     <span className="key-part key-part-key">
                       <span className="key-mask" aria-hidden="true">
-                        {KEY_MASK}
+                        {maskKey(key.key)}
                       </span>
                       <button
                         className="key-copy"
@@ -344,50 +337,65 @@ export function KeysPage() {
 
                     <span className="key-part key-part-quota">
                       {usage ? (
-                        usage.limit !== null ? (
-                          <>
-                            <span className={`quota-meter is-${tone}`} aria-hidden="true">
-                              <span
-                                className="quota-meter-fill"
-                                style={{ width: `${quotaRatio(usage.spent, usage.limit) * 100}%` }}
-                              />
-                            </span>
-                            <span className={`key-quota-text is-${tone}`}>
-                              ${usage.spent.toFixed(2)} / ${usage.limit.toFixed(2)}
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <span className="quota-meter is-unlimited" aria-hidden="true" />
-                            <span className="key-quota-text">
-                              {quotaSummary(usage.spent, null, key.quotaPeriod)}
-                            </span>
-                          </>
-                        )
+                        <>
+                          <span className="quota-line">
+                            {usage.limit !== null ? (
+                              <>
+                                <span className={`quota-meter is-${tone}`} aria-hidden="true">
+                                  <span
+                                    className="quota-meter-fill"
+                                    style={{
+                                      width: `${quotaRatio(usage.spent, usage.limit) * 100}%`,
+                                    }}
+                                  />
+                                </span>
+                                <span className={`key-quota-text is-${tone}`}>
+                                  {quotaAmount(usage.spent, usage.limit)}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="quota-meter is-unlimited" aria-hidden="true" />
+                                <span className="key-quota-text">
+                                  {quotaAmount(usage.spent, null)}
+                                </span>
+                              </>
+                            )}
+                          </span>
+                          <span className="key-quota-reset">
+                            {quotaResetSummary(usage.period, usage.periodStart, now)}
+                          </span>
+                        </>
                       ) : (
-                        <span className="key-quota-text">读取中…</span>
+                        <>
+                          <span className="quota-line">
+                            <span className="quota-meter is-pending" aria-hidden="true" />
+                            <span className="key-quota-text is-pending">--</span>
+                          </span>
+                          <span className="key-quota-reset">读取中…</span>
+                        </>
                       )}
+                    </span>
 
-                      <span className="key-card-actions">
-                        <TogglePill
-                          checked={key.enabled}
-                          label={key.enabled ? "停用该密钥" : "启用该密钥"}
-                          small
-                          disabled={busy}
-                          onChange={() => void toggleEnabled(key)}
-                        />
-                        <GlyphButton label="编辑密钥" disabled={busy} onClick={() => openEdit(key)}>
-                          <Pencil aria-hidden="true" />
-                        </GlyphButton>
-                        <GlyphButton
-                          label="删除密钥"
-                          danger
-                          disabled={busy}
-                          onClick={() => setConfirmDelete(key.id)}
-                        >
-                          <Trash aria-hidden="true" />
-                        </GlyphButton>
-                      </span>
+                    <span className="key-part key-part-actions">
+                      <TogglePill
+                        checked={key.enabled}
+                        label={key.enabled ? "停用该密钥" : "启用该密钥"}
+                        small
+                        disabled={busy}
+                        onChange={() => void toggleEnabled(key)}
+                      />
+                      <GlyphButton label="编辑密钥" disabled={busy} onClick={() => openEdit(key)}>
+                        <Pencil aria-hidden="true" />
+                      </GlyphButton>
+                      <GlyphButton
+                        label="删除密钥"
+                        danger
+                        disabled={busy}
+                        onClick={() => setConfirmDelete(key.id)}
+                      >
+                        <Trash aria-hidden="true" />
+                      </GlyphButton>
                     </span>
 
                     {confirmDelete === key.id ? (
