@@ -1,7 +1,21 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent,
+} from "react";
 import { labelAnchors, stackedAreaPaths } from "./chartGeometry";
 import { toneFor } from "./chartTone";
-import { buildPeriodAxisLabels, getElapsedBucketCount, resampleSeries } from "./trendInteraction";
+import {
+  buildPeriodAxisLabels,
+  buildPeriodSampleLabels,
+  getElapsedBucketCount,
+  getNearestPointIndex,
+  resampleSeries,
+} from "./trendInteraction";
 import type { UsagePeriod } from "./usageData";
 import { isCurrentPeriod } from "./period";
 
@@ -11,6 +25,15 @@ type ChartSize = {
 };
 
 const fallbackChartSize: ChartSize = { width: 600, height: 210 };
+
+/** 前缘淡出宽度（占整宽比例）：数据还没走完时，右端渐隐到纸面而非一刀切。 */
+const LEADING_FADE = 0.07;
+
+/** 由底到顶递减的填色不透明度，让堆叠像沉积层而不是四条硬色带。 */
+function stackOpacity(index: number, total: number): number {
+  return total <= 1 ? 1 : 1 - (index / (total - 1)) * 0.5;
+}
+
 const money = new Intl.NumberFormat("zh-CN", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -39,6 +62,7 @@ function useCurrentMinute() {
 export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; anchor?: Date }) {
   const plotRef = useRef<HTMLDivElement>(null);
   const [chartSize, setChartSize] = useState<ChartSize>(fallbackChartSize);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const liveNow = useCurrentMinute();
   const now =
     anchor && !isCurrentPeriod("day", anchor, liveNow)
@@ -46,6 +70,9 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
       : liveNow;
   const id = useId().replace(/:/g, "");
   const clipId = `stack-clip-${id}`;
+  const fadeId = `stack-fade-${id}`;
+  const maskId = `stack-mask-${id}`;
+  const isLive = !anchor || isCurrentPeriod("day", anchor, liveNow);
 
   useLayoutEffect(() => {
     const plot = plotRef.current;
@@ -68,20 +95,22 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
   // One point per elapsed hour, not a fixed five samples across the whole day:
   // a late peak lands in its real hour and idle hours stay flat on the baseline.
   const elapsedBuckets = getElapsedBucketCount(period.periodKey, now);
+  const pointCount = Math.max(elapsedBuckets, 2);
   const layers = useMemo(
     () =>
       period.layers.map((layer) => ({
         ...layer,
-        values: resampleSeries(
-          layer.values.slice(0, elapsedBuckets),
-          Math.max(elapsedBuckets, 2),
-        ),
+        values: resampleSeries(layer.values.slice(0, elapsedBuckets), pointCount),
       })),
-    [period.layers, elapsedBuckets],
+    [period.layers, elapsedBuckets, pointCount],
   );
   const axisLabels = useMemo(
     () => buildPeriodAxisLabels(period.periodKey, now),
     [period.periodKey, now],
+  );
+  const sampleLabels = useMemo(
+    () => buildPeriodSampleLabels(period.periodKey, now, pointCount),
+    [period.periodKey, now, pointCount],
   );
 
   const stackTotal = layers.reduce(
@@ -96,6 +125,46 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
   // the chart reads as "0" instead of blank.
   const hasValue = stackTotal > 0;
   const zeroY = Math.max(chartSize.height - 8, 0);
+
+  // Follow the pointer across the plot, but only while it is over the painted
+  // band: SVG hit-tests the irregular path shape for free, so the empty space
+  // above the curve falls through to the <svg> and reads as "off".
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (!(event.target as Element).closest(".stack-area, .stack-edge, .stack-zero")) {
+      setHoveredIndex(null);
+      return;
+    }
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setHoveredIndex(
+      getNearestPointIndex(event.clientX, bounds.left, bounds.width, pointCount),
+    );
+  };
+
+  const activeIndex =
+    hoveredIndex !== null && hoveredIndex >= 0 && hoveredIndex < pointCount
+      ? hoveredIndex
+      : null;
+  const hoverX =
+    activeIndex === null ? 0 : (activeIndex / Math.max(pointCount - 1, 1)) * chartSize.width;
+  const hoverTotal =
+    activeIndex === null
+      ? 0
+      : layers.reduce((sum, layer) => sum + (layer.values[activeIndex] ?? 0), 0);
+  const hoverY = chartSize.height - (Math.min(hoverTotal, yMax) / yMax) * chartSize.height;
+  const hoverLayers =
+    activeIndex === null
+      ? []
+      : layers.filter((layer) => (layer.values[activeIndex] ?? 0) > 0);
+  const hoverLabel =
+    activeIndex === null ? "" : sampleLabels[activeIndex] ?? axisLabels[activeIndex] ?? "";
+  const hoverStyle = {
+    "--hover-x": `${(hoverX / chartSize.width) * 100}%`,
+    "--hover-y": `${(hoverY / chartSize.height) * 100}%`,
+  } as CSSProperties;
+  const tooltipStyle = {
+    "--tooltip-x": `${(hoverX / chartSize.width) * 100}%`,
+    "--tooltip-y": `${(hoverY / chartSize.height) * 100}%`,
+  } as CSSProperties;
 
   return (
     <article className="chart-panel trend-panel">
@@ -115,7 +184,13 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
           <span>{yMax / 2}</span>
           <span>0</span>
         </div>
-        <div className="plot-area stack-plot" ref={plotRef}>
+        <div
+          className={`plot-area stack-plot${activeIndex !== null ? " is-hovering" : ""}`}
+          ref={plotRef}
+          style={hoverStyle}
+          onPointerMove={handlePointerMove}
+          onPointerLeave={() => setHoveredIndex(null)}
+        >
           <svg
             viewBox={`0 0 ${chartSize.width} ${chartSize.height}`}
             preserveAspectRatio="none"
@@ -126,16 +201,49 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
               <clipPath id={clipId}>
                 <rect x="0" y="0" width={chartSize.width} height={chartSize.height} />
               </clipPath>
+              <linearGradient
+                id={fadeId}
+                gradientUnits="userSpaceOnUse"
+                x1="0"
+                y1="0"
+                x2={chartSize.width}
+                y2="0"
+              >
+                <stop offset={`${(1 - LEADING_FADE) * 100}%`} stopColor="white" />
+                <stop offset="100%" stopColor="white" stopOpacity="0" />
+              </linearGradient>
+              <mask
+                id={maskId}
+                maskUnits="userSpaceOnUse"
+                x="0"
+                y="0"
+                width={chartSize.width}
+                height={chartSize.height}
+              >
+                <rect x="0" y="0" width={chartSize.width} height={chartSize.height} fill={`url(#${fadeId})`} />
+              </mask>
             </defs>
-            {areas.map((area) => (
-              <path
-                key={area.name}
-                className="stack-area"
-                d={area.path}
-                fill={toneFor(area.tone)}
-                clipPath={`url(#${clipId})`}
-              />
-            ))}
+            <g mask={isLive ? `url(#${maskId})` : undefined}>
+              {areas.map((area, index) => (
+                <path
+                  key={area.name}
+                  className="stack-area"
+                  d={area.path}
+                  fill={toneFor(area.tone)}
+                  fillOpacity={stackOpacity(index, areas.length)}
+                  clipPath={`url(#${clipId})`}
+                />
+              ))}
+              {areas.map((area) => (
+                <path
+                  key={`edge-${area.name}`}
+                  className="stack-edge"
+                  d={area.edge}
+                  stroke={toneFor(area.tone)}
+                  clipPath={`url(#${clipId})`}
+                />
+              ))}
+            </g>
             {hasValue ? null : (
               <path
                 className="stack-zero"
@@ -155,6 +263,39 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
               <b>${money.format(anchor.amount)}</b>
             </span>
           ))}
+          {activeIndex !== null ? (
+            <>
+              <span className="hover-guide" aria-hidden="true" />
+              <span className="hover-point" aria-hidden="true" />
+              <div
+                className={`trend-tooltip${hoverX > chartSize.width * 0.66 ? " is-left" : ""}${hoverY < chartSize.height * 0.4 ? " is-below" : ""}`}
+                style={tooltipStyle}
+                role="status"
+              >
+                <strong>{hoverLabel}</strong>
+                <dl>
+                  {hoverLayers.map((layer) => (
+                    <div key={layer.name}>
+                      <dt>
+                        <i style={{ background: toneFor(layer.tone) }} />
+                        {layer.name}
+                      </dt>
+                      <dd>${money.format(layer.values[activeIndex] ?? 0)}</dd>
+                    </div>
+                  ))}
+                  {hoverLayers.length === 0 ? (
+                    <div>
+                      <dt>该时刻暂无花费</dt>
+                    </div>
+                  ) : null}
+                </dl>
+                <div className="trend-tooltip-total">
+                  <span>累计</span>
+                  <b>${money.format(hoverTotal)}</b>
+                </div>
+              </div>
+            </>
+          ) : null}
         </div>
         <div className="x-axis" aria-hidden="true">
           {axisLabels.map((label, index) => (

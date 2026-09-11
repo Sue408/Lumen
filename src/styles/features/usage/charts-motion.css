@@ -132,6 +132,142 @@
   overflow: visible;
 }
 
+/* ---- day chart hover: guide line, marker dot, tooltip ---- */
+
+.hover-guide {
+  position: absolute;
+  left: var(--hover-x);
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed var(--line-control);
+  opacity: 0;
+  pointer-events: none;
+  transition: left 150ms ease, opacity 150ms ease;
+}
+
+.plot-area.is-hovering .hover-guide {
+  opacity: 1;
+}
+
+.hover-point {
+  position: absolute;
+  left: var(--hover-x);
+  top: var(--hover-y);
+  width: 0.5rem;
+  height: 0.5rem;
+  background: var(--paper);
+  border: 0.125rem solid var(--ochre);
+  border-radius: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: left 150ms ease, top 150ms ease, opacity 150ms ease;
+}
+
+.plot-area.is-hovering .hover-point {
+  opacity: 1;
+}
+
+.trend-tooltip {
+  position: absolute;
+  z-index: 3;
+  top: var(--tooltip-y);
+  left: var(--tooltip-x);
+  min-width: 9.5rem;
+  padding: 0.6875rem 0.75rem;
+  pointer-events: none;
+  background: var(--tooltip-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: var(--shadow-tooltip);
+  opacity: 0;
+  transform: translate(0.75rem, calc(-100% - 0.5rem)) scale(0.97);
+  transition: opacity 150ms ease, transform 150ms ease, left 150ms ease, top 150ms ease;
+}
+
+.plot-area.is-hovering .trend-tooltip,
+.weekly-bars.is-hovering .trend-tooltip {
+  opacity: 1;
+  transform: translate(0.75rem, calc(-100% - 0.75rem)) scale(1);
+}
+
+.trend-tooltip.is-left {
+  transform: translate(calc(-100% - 0.75rem), calc(-100% - 0.75rem)) scale(1);
+}
+
+.trend-tooltip.is-below {
+  transform: translate(0.75rem, 0.75rem) scale(1);
+}
+
+.trend-tooltip.is-left.is-below {
+  transform: translate(calc(-100% - 0.75rem), 0.75rem) scale(1);
+}
+
+.trend-tooltip strong {
+  display: block;
+  margin-bottom: 0.4375rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.trend-tooltip dl {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+.trend-tooltip dl div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.trend-tooltip dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--ink-muted);
+}
+
+.trend-tooltip dt i {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 2px;
+}
+
+.trend-tooltip dt,
+.trend-tooltip dd {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-tooltip dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.trend-tooltip-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  padding-top: 0.4375rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.trend-tooltip-total span {
+  color: var(--ink-muted);
+}
+
+.trend-tooltip-total b {
+  font-weight: 600;
+}
+
 @keyframes donut-turn {
   from {
     opacity: 0.35;
@@ -162,6 +298,12 @@
   .donut-arcs,
   .donut-segment {
     animation: none;
+  }
+
+  .hover-guide,
+  .hover-point,
+  .trend-tooltip {
+    transition: none;
   }
 }
 

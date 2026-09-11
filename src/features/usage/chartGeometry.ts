@@ -93,14 +93,88 @@ function yAt(value: number, height: number, maxValue: number): number {
   return height - (Math.min(Math.max(value, 0), safeMax) / safeMax) * height;
 }
 
+export type CurvePoint = {
+  x: number;
+  y: number;
+};
+
+export type CurveSegment = {
+  from: CurvePoint;
+  c1: CurvePoint;
+  c2: CurvePoint;
+  to: CurvePoint;
+};
+
+/**
+ * Fritsch–Carlson 单调三次插值的切线：加权调和平均，保证曲线不过冲。
+ * 堆叠面积的相邻层共用一条累积边界，普通样条会在平台段鼓起并穿层，必须用单调版。
+ */
+export function monotoneSegments(points: CurvePoint[]): CurveSegment[] {
+  const count = points.length;
+  if (count < 2) return [];
+
+  const dx = points.slice(0, -1).map((point, index) => points[index + 1].x - point.x);
+  const slope = points.slice(0, -1).map((point, index) =>
+    dx[index] === 0 ? 0 : (points[index + 1].y - point.y) / dx[index],
+  );
+  const tangent = new Array<number>(count);
+  tangent[0] = slope[0];
+  tangent[count - 1] = slope[count - 2];
+  for (let index = 1; index < count - 1; index += 1) {
+    if (slope[index - 1] * slope[index] <= 0) {
+      tangent[index] = 0;
+      continue;
+    }
+    const before = 2 * dx[index] + dx[index - 1];
+    const after = dx[index] + 2 * dx[index - 1];
+    tangent[index] = (before + after) / (before / slope[index - 1] + after / slope[index]);
+  }
+
+  return points.slice(0, -1).map((point, index) => {
+    const h = dx[index];
+    return {
+      from: point,
+      c1: { x: point.x + h / 3, y: point.y + (h / 3) * tangent[index] },
+      c2: { x: points[index + 1].x - h / 3, y: points[index + 1].y - (h / 3) * tangent[index + 1] },
+      to: points[index + 1],
+    };
+  });
+}
+
+const fmt = (point: CurvePoint) => `${round(point.x)} ${round(point.y)}`;
+
+/** 单调插值折线，从首个点走到末个点。 */
+export function monotonePath(points: CurvePoint[]): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${fmt(points[0])}`;
+  return monotoneSegments(points).reduce(
+    (path, segment) => `${path} C ${fmt(segment.c1)}, ${fmt(segment.c2)}, ${fmt(segment.to)}`,
+    `M ${fmt(points[0])}`,
+  );
+}
+
+/** 同一条单调曲线的反向走法（控制点交换），用于堆叠面积的下边界。 */
+export function monotonePathReversed(points: CurvePoint[]): string {
+  if (points.length === 0) return "";
+  const last = points[points.length - 1];
+  if (points.length === 1) return `M ${fmt(last)}`;
+  return monotoneSegments(points).reduceRight(
+    (path, segment) => `${path} C ${fmt(segment.c2)}, ${fmt(segment.c1)}, ${fmt(segment.from)}`,
+    `M ${fmt(last)}`,
+  );
+}
+
 export type StackedArea = {
   name: string;
   tone: string;
   amount: number;
+  /** 填色用的闭合面积。 */
   path: string;
+  /** 上边界曲线，供顶边描线单独使用。 */
+  edge: string;
 };
 
-/** 累积堆叠面积：第 n 层的下边界即前 n-1 层的累积和。 */
+/** 累积堆叠面积：第 n 层的下边界即前 n-1 层的累积和，边界走单调插值。 */
 export function stackedAreaPaths(
   layers: StackedLayer[],
   width: number,
@@ -114,18 +188,22 @@ export function stackedAreaPaths(
   const areas: StackedArea[] = [];
   for (const layer of layers) {
     const upper = lower.map((base, index) => base + (layer.values[index] ?? 0));
-    const points: string[] = [];
-    for (let index = 0; index < count; index += 1) {
-      points.push(`${round(xAt(index, count, width))} ${round(yAt(upper[index], height, maxValue))}`);
-    }
-    for (let index = count - 1; index >= 0; index -= 1) {
-      points.push(`${round(xAt(index, count, width))} ${round(yAt(lower[index], height, maxValue))}`);
-    }
+    const upperPoints = upper.map((value, index) => ({
+      x: xAt(index, count, width),
+      y: yAt(value, height, maxValue),
+    }));
+    const lowerPoints = lower.map((value, index) => ({
+      x: xAt(index, count, width),
+      y: yAt(value, height, maxValue),
+    }));
+    const edge = monotonePath(upperPoints);
+    const floor = monotonePathReversed(lowerPoints).replace(/^M/, "L");
     areas.push({
       name: layer.name,
       tone: layer.tone,
       amount: layer.amount,
-      path: `M ${points.join(" L ")} Z`,
+      path: `${edge} ${floor} Z`,
+      edge,
     });
     for (let index = 0; index < count; index += 1) lower[index] = upper[index];
   }

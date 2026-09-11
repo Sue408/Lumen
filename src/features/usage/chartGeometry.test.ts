@@ -6,6 +6,8 @@ import {
   buildDonutSegments,
   buildSmoothPath,
   labelAnchors,
+  monotonePath,
+  monotoneSegments,
   stackedAreaPaths,
   stackedBarSegments,
 } from "./chartGeometry.ts";
@@ -61,6 +63,36 @@ test("stacked area paths stack each layer on the previous ceiling", () => {
 
 test("stacked area paths close to empty for no layers", () => {
   assert.deepEqual(stackedAreaPaths([], 600, 210, 30), []);
+});
+
+test("monotone interpolation keeps its endpoints and never overshoots", () => {
+  const points = [
+    { x: 0, y: 10 },
+    { x: 1, y: 10 },
+    { x: 2, y: 10 },
+    { x: 3, y: 2 },
+    { x: 4, y: 2 },
+  ];
+  const segments = monotoneSegments(points);
+  assert.equal(segments.length, 4);
+  for (const segment of segments) {
+    const low = Math.min(segment.from.y, segment.to.y) - 1e-9;
+    const high = Math.max(segment.from.y, segment.to.y) + 1e-9;
+    assert.ok(segment.c1.y >= low && segment.c1.y <= high);
+    assert.ok(segment.c2.y >= low && segment.c2.y <= high);
+  }
+  assert.match(monotonePath(points), /^M 0 10 /);
+});
+
+test("stacked area exposes a full top edge for the rim stroke", () => {
+  const areas = stackedAreaPaths(
+    [{ name: "a", tone: "ochre", values: [0, 10, 20], amount: 20 }],
+    600,
+    210,
+    20,
+  );
+  assert.match(areas[0].edge, /^M 0 210 /);
+  assert.ok(areas[0].path.startsWith(areas[0].edge));
 });
 
 test("stacked bars turn cumulative layers into per-bucket heights", () => {

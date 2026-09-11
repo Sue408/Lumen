@@ -1,11 +1,16 @@
-import type { Attribution } from "./usageData";
+import type { Attribution, Mover } from "./usageData";
 
 const money = new Intl.NumberFormat("zh-CN", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
 
-const pct = (value: number) => `${Math.round(value * 100)}%`;
+function dominantMover(movers: Mover[], deltaCost: number): Mover | undefined {
+  if (deltaCost === 0) return undefined;
+  return movers
+    .filter((mover) => Math.sign(mover.deltaCost) === Math.sign(deltaCost))
+    .sort((a, b) => Math.abs(b.deltaCost) - Math.abs(a.deltaCost))[0];
+}
 
 export function AttributionLine({
   attribution,
@@ -14,35 +19,32 @@ export function AttributionLine({
   attribution: Attribution;
   previousLabel: string;
 }) {
-  const { deltaCost, topMovers, cache } = attribution;
-  const segments: string[] = [];
+  const { deltaCost, topMovers } = attribution;
+  const direction = deltaCost > 0 ? "多花" : "少花";
+  const verb = deltaCost > 0 ? "增加" : "回落";
+  const dominant = dominantMover(topMovers, deltaCost);
 
-  if (deltaCost > 0) segments.push(`较${previousLabel}多花 $${money.format(deltaCost)}`);
-  else if (deltaCost < 0) segments.push(`较${previousLabel}少花 $${money.format(Math.abs(deltaCost))}`);
-  else segments.push(`较${previousLabel}花费持平`);
+  let sentence = `较${previousLabel}花费持平`;
+  if (deltaCost !== 0) {
+    sentence = `较${previousLabel}${direction} $${money.format(Math.abs(deltaCost))}`;
+    if (dominant) sentence += `，主要在${dominant.name}${verb}`;
+  }
+  sentence += "。";
 
-  const increases = topMovers.filter((mover) => mover.deltaCost > 0);
-  const decreases = topMovers.filter((mover) => mover.deltaCost < 0);
-  if (increases.length > 0) {
-    segments.push(
-      `主要来自 ${increases.map((mover) => `${mover.name} +$${money.format(mover.deltaCost)}`).join("、")}`,
-    );
-  }
-  if (decreases.length > 0) {
-    segments.push(
-      decreases
-        .map((mover) => `${mover.name} −$${money.format(Math.abs(mover.deltaCost))}`)
-        .join("、"),
-    );
-  }
-  if (cache) {
-    segments.push(`缓存命中率 ${pct(cache.fromRate)} → ${pct(cache.toRate)}`);
-  }
+  const detail = topMovers
+    .map(
+      (mover) =>
+        `${mover.name} ${mover.deltaCost >= 0 ? "+" : "−"}$${money.format(Math.abs(mover.deltaCost))}`,
+    )
+    .join("、");
 
   return (
-    <p className="insight-line attribution-line">
+    <p
+      className="insight-line attribution-line"
+      title={detail ? `涨跌明细：${detail}` : undefined}
+    >
       <span className="insight-label">归因</span>
-      {segments.join("；")}
+      {sentence}
     </p>
   );
 }

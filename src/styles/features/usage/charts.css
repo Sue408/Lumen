@@ -192,6 +192,15 @@
   vector-effect: non-scaling-stroke;
 }
 
+/* 每层上边界压一条满不透明的同色调线：身子的 alpha 变柔，地层边界仍然清晰 */
+.stack-edge {
+  fill: none;
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
 /* no data: draw the flat 0 curve on the baseline instead of a blank plot */
 .stack-zero {
   fill: none;
