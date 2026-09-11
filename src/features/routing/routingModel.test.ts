@@ -116,6 +116,6 @@ test("validateRouteDraft rejects targets that conflict with route protocol", () 
       { ...draft, targets: [{ uid: "u1", upstreamModelId: "m-anthropic", enabled: true }] },
       protocolOf,
     ),
-    "目标与路由协议不一致：请只选择 OpenAI 协议的上游模型。",
+    "目标与路由协议不一致：请只选择 OpenAI Chat 协议的上游模型。",
   );
 });

@@ -5,7 +5,7 @@ import type { Protocol } from "./protocol";
 export { protocolLabel } from "./protocol";
 export type { Protocol } from "./protocol";
 
-export type AuthScheme = "bearer" | "x-api-key";
+export type AuthScheme = "bearer" | "x-api-key" | "x-goog-api-key";
 export type IconTint = "ink" | "brand";
 
 export type Provider = {

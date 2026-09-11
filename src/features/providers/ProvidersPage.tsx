@@ -139,6 +139,7 @@ function ProviderForm({
             <select value={draft.authScheme} onChange={(event) => set({ authScheme: event.target.value as ProviderDraft["authScheme"] })}>
               <option value="bearer">{authSchemeLabel.bearer}</option>
               <option value="x-api-key">{authSchemeLabel["x-api-key"]}</option>
+              <option value="x-goog-api-key">{authSchemeLabel["x-goog-api-key"]}</option>
             </select>
           </label>
           <label className="field">
@@ -147,6 +148,8 @@ function ProviderForm({
               <select value={draft.protocol} onChange={(event) => set({ protocol: event.target.value as ProviderDraft["protocol"] })}>
                 <option value="openai">{protocolLabel.openai}</option>
                 <option value="anthropic">{protocolLabel.anthropic}</option>
+                <option value="responses">{protocolLabel.responses}</option>
+                <option value="gemini">{protocolLabel.gemini}</option>
               </select>
             ) : (
               <span className="field-static">{protocolLabel[draft.protocol]}</span>

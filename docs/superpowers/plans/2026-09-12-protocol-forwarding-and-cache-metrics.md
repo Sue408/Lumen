@@ -209,7 +209,22 @@
 - [ ] 说明 `SCHEMA_VERSION` 升级会重建空库、日志清空。
 - [ ] 运行 `cargo test`、`cargo clippy -- -D warnings`、`pnpm test`、`pnpm build` 至通过。
 
-### Task 10: 端到端验证
+### Task 10: 路由协议调用说明（悬停浮层）
+
+**Files:**
+- Create: `src/features/routing/protocolHelp.ts`
+- Create: `src/features/routing/protocolHelp.test.ts`
+- Create: `src/features/routing/ProtocolHelp.tsx`
+- Modify: `src/features/routing/RoutingPage.tsx`
+- Modify: `src/styles/features/routing/routing.css`
+
+- [ ] 纯数据模块 `protocolHelp.ts` 暴露 `protocolEndpoints`（协议 → 方法与入站路径）；测试守住「每个 `Protocol` 都有说明」，防止新增协议漏配。
+- [ ] `ProtocolHelp.tsx`：统一 `Info` 图标触发，悬停 / 聚焦弹出浮层；portal 到 body 并 `fixed` 定位，避免被 `workbench-sheet` 的 overflow 裁切；`Escape` 关闭；`role="tooltip"` + `aria-describedby`。
+- [ ] `RouteForm` 的「协议」标签内嵌该图标。
+- [ ] `routing.css` 增加 `.protocol-help*` 顶层类（portal 例外）与 `.routing-page .field-label`，颜色全部走 token。
+- [ ] 运行 `pnpm test` 与 `pnpm build` 至通过。
+
+### Task 11: 端到端验证
 
 **Files:** 无新增
 

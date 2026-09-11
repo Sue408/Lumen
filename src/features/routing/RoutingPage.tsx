@@ -43,6 +43,7 @@ import {
   validateRouteDraft,
   type RouteDraft,
 } from "./routingModel";
+import { ProtocolHelp } from "./ProtocolHelp";
 import { useFlipList } from "./useFlipList";
 
 type Pending = { kind: "existing"; id: string } | { kind: "new" };
@@ -132,11 +133,16 @@ function RouteForm({
             <input value={draft.displayName} onChange={(event) => set({ displayName: event.target.value })} placeholder="留空则同别名" />
           </label>
           <label className="field">
-            <span>协议</span>
+            <span className="field-label">
+              协议
+              <ProtocolHelp />
+            </span>
             {draft.id === null ? (
               <select value={draft.protocol} onChange={(event) => setProtocol(event.target.value as Protocol)}>
                 <option value="openai">{protocolLabel.openai}</option>
                 <option value="anthropic">{protocolLabel.anthropic}</option>
+                <option value="responses">{protocolLabel.responses}</option>
+                <option value="gemini">{protocolLabel.gemini}</option>
               </select>
             ) : (
               <span className="field-static">{protocolLabel[draft.protocol]}</span>

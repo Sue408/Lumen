@@ -9,6 +9,7 @@ import type {
 export const authSchemeLabel: Record<AuthScheme, string> = {
   bearer: "Bearer",
   "x-api-key": "x-api-key",
+  "x-goog-api-key": "x-goog-api-key",
 };
 
 export { protocolLabel } from "../../services/protocol.ts";

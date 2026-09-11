@@ -21,3 +21,109 @@
   font-size: 0.625rem;
   line-height: 1.4;
 }
+
+.routing-page .field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* 协议说明图标：触发按钮与浮层都是顶层类——浮层 portal 到 body，
+   无法被 .routing-page 作用域覆盖（与品牌图标选择器同理）。 */
+.protocol-help-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: help;
+}
+
+.protocol-help-trigger svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.protocol-help-trigger:hover {
+  color: var(--ochre);
+}
+
+.protocol-help-trigger:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.protocol-help {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  gap: 0.55rem;
+  width: min(24rem, calc(100vw - 2rem));
+  padding: 0.7rem 0.8rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow-float);
+}
+
+.protocol-help-title {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+}
+
+.protocol-help-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.protocol-help-row {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.2rem 0.6rem;
+  align-items: baseline;
+}
+
+.protocol-help-row dt {
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+}
+
+.protocol-help-row dd {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.protocol-help-row code {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  overflow-wrap: anywhere;
+}
+
+.protocol-help-row em {
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+  font-style: normal;
+}
+
+.protocol-help-foot {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+}
