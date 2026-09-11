@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 pub const AUTH_BEARER: &str = "bearer";
 pub const PROTOCOL_OPENAI: &str = "openai";
 pub const PROTOCOL_ANTHROPIC: &str = "anthropic";
+pub const PROTOCOL_RESPONSES: &str = "responses";
+pub const PROTOCOL_GEMINI: &str = "gemini";
 pub const ICON_TINT_INK: &str = "ink";
 pub const QUOTA_PERIOD_DAILY: &str = "daily";
 pub const QUOTA_PERIOD_WEEKLY: &str = "weekly";
@@ -12,7 +14,16 @@ pub const QUOTA_PERIOD_TOTAL: &str = "total";
 
 /// 入站协议是否受网关支持。路由保存与种子导入时据此校验。
 pub fn is_known_protocol(protocol: &str) -> bool {
-    matches!(protocol, PROTOCOL_OPENAI | PROTOCOL_ANTHROPIC)
+    matches!(
+        protocol,
+        PROTOCOL_OPENAI | PROTOCOL_ANTHROPIC | PROTOCOL_RESPONSES | PROTOCOL_GEMINI
+    )
+}
+
+/// 输入总量是否已包含缓存命中。Anthropic 的 `input_tokens` 不含缓存读取，其余协议
+/// （OpenAI / DeepSeek / Responses / Gemini）的输入总量已含命中，计费与命中率据此归一。
+pub fn contains_cache_read(protocol: &str) -> bool {
+    protocol != PROTOCOL_ANTHROPIC
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -347,5 +358,32 @@ impl RequestLog {
             request_id: row.get("request_id")?,
             is_stream: row.get::<_, i64>("is_stream")? != 0,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_protocols_cover_all_four() {
+        for protocol in [
+            PROTOCOL_OPENAI,
+            PROTOCOL_ANTHROPIC,
+            PROTOCOL_RESPONSES,
+            PROTOCOL_GEMINI,
+        ] {
+            assert!(is_known_protocol(protocol), "{protocol} 应被识别");
+        }
+        assert!(!is_known_protocol("cohere"));
+        assert!(!is_known_protocol(""));
+    }
+
+    #[test]
+    fn cache_boundary_only_excludes_anthropic() {
+        assert!(!contains_cache_read(PROTOCOL_ANTHROPIC));
+        assert!(contains_cache_read(PROTOCOL_OPENAI));
+        assert!(contains_cache_read(PROTOCOL_RESPONSES));
+        assert!(contains_cache_read(PROTOCOL_GEMINI));
     }
 }

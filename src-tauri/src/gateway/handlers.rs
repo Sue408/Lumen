@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -9,13 +9,14 @@ use chrono::Local;
 use serde_json::{json, Value};
 
 use crate::db::keys::{find_enabled_virtual_key, virtual_key_spend};
-use crate::db::models::{VirtualKey, PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI};
+use crate::db::models::{
+    VirtualKey, PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
+};
 use crate::db::routes::list_enabled_aliases;
 use crate::db::with_db;
 use crate::error::AppError;
 use crate::gateway::forward::{
-    contains_cache_read, ensure_include_usage, error_response, request_id, send, stream_response,
-    upstream_path_for,
+    ensure_include_usage, error_response, request_id, send, stream_response, upstream_path,
 };
 use crate::gateway::quota::{is_over_quota, period_start, QuotaPeriod};
 use crate::gateway::resolve::{resolve, ResolvedRoute};
@@ -24,6 +25,7 @@ use crate::state::AppState;
 
 const CHAT_ENDPOINT: &str = "/v1/chat/completions";
 const MESSAGES_ENDPOINT: &str = "/v1/messages";
+const RESPONSES_ENDPOINT: &str = "/v1/responses";
 const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(600);
 
 pub async fn health() -> Response {
@@ -56,7 +58,16 @@ pub async fn chat_completions(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    forward(state, headers, body, PROTOCOL_OPENAI, CHAT_ENDPOINT).await
+    forward(
+        state,
+        headers,
+        body,
+        PROTOCOL_OPENAI,
+        CHAT_ENDPOINT,
+        None,
+        None,
+    )
+    .await
 }
 
 /// Anthropic Messages 直通：交给协议为 anthropic 的上游处理，不做协议转换。
@@ -65,22 +76,96 @@ pub async fn messages(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    forward(state, headers, body, PROTOCOL_ANTHROPIC, MESSAGES_ENDPOINT).await
+    forward(
+        state,
+        headers,
+        body,
+        PROTOCOL_ANTHROPIC,
+        MESSAGES_ENDPOINT,
+        None,
+        None,
+    )
+    .await
+}
+
+/// OpenAI Responses 直通：别名取自 body.model，流式靠 response.* 事件收尾。
+pub async fn responses(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    forward(
+        state,
+        headers,
+        body,
+        PROTOCOL_RESPONSES,
+        RESPONSES_ENDPOINT,
+        None,
+        None,
+    )
+    .await
+}
+
+/// Gemini 原生直通：模型在 URL path（`/v1beta/models/{alias}:{action}`），不在 body。
+pub async fn gemini_generate(
+    State(state): State<Arc<AppState>>,
+    Path(model_action): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let Some((alias, action)) = model_action.split_once(':') else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "路径需为 /v1beta/models/{model}:{action}",
+        );
+    };
+    if alias.is_empty() {
+        return error_response(StatusCode::BAD_REQUEST, "请求缺少 model");
+    }
+    let is_stream = match action {
+        "generateContent" => false,
+        "streamGenerateContent" => true,
+        _ => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "不支持的动作：仅支持 generateContent / streamGenerateContent",
+            )
+        }
+    };
+    let alias = alias.to_string();
+    let endpoint = format!("/v1beta/models/{alias}:{action}");
+    forward(
+        state,
+        headers,
+        body,
+        PROTOCOL_GEMINI,
+        &endpoint,
+        Some(alias),
+        Some(is_stream),
+    )
+    .await
 }
 
 /// 端点协议与路由协议绑定：不匹配则在网关处拒绝，绝不把错误形状的 body 盲发上游。
+/// `path_alias` / `path_stream` 供 Gemini 等「模型或动作在路径上」的协议覆写。
 async fn forward(
     state: Arc<AppState>,
     headers: HeaderMap,
     mut body: Value,
     required_protocol: &str,
     endpoint: &str,
+    path_alias: Option<String>,
+    path_stream: Option<bool>,
 ) -> Response {
-    let alias = match body.get("model").and_then(Value::as_str) {
-        Some(alias) if !alias.is_empty() => alias.to_string(),
-        _ => return error_response(StatusCode::BAD_REQUEST, "请求缺少 model 字段"),
+    let alias = match path_alias {
+        Some(alias) => alias,
+        None => match body.get("model").and_then(Value::as_str) {
+            Some(alias) if !alias.is_empty() => alias.to_string(),
+            _ => return error_response(StatusCode::BAD_REQUEST, "请求缺少 model 字段"),
+        },
     };
-    let is_stream = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
+    let is_stream = path_stream
+        .unwrap_or_else(|| body.get("stream").and_then(Value::as_bool).unwrap_or(false));
 
     // 强制鉴权：无有效 key 直接拒绝，并落一条无归属的 error 日志。
     let virtual_key = match authenticate(&state, &headers).await {
@@ -191,13 +276,15 @@ async fn forward(
         return error.into_response();
     }
 
-    let upstream_path = upstream_path_for(&route.upstream_protocol);
-    body["model"] = Value::String(route.model_id.clone());
+    let upstream_path = upstream_path(&route.upstream_protocol, &route.model_id, is_stream);
+    // Gemini 的模型名在 URL path，不能（也不应）注入 body。
+    if route.upstream_protocol != PROTOCOL_GEMINI {
+        body["model"] = Value::String(route.model_id.clone());
+    }
     ensure_include_usage(&mut body, &route.upstream_protocol, is_stream);
-    let cache_in_input = contains_cache_read(&route.upstream_protocol);
     let started = Instant::now();
     let timeout = if is_stream { None } else { Some(UPSTREAM_TIMEOUT) };
-    let response = match send(&state, &route, &body, upstream_path, timeout).await {
+    let response = match send(&state, &route, &body, &upstream_path, timeout).await {
         Ok(response) => response,
         Err(error) => {
             let log = build_log(LogContext {
@@ -232,7 +319,8 @@ async fn forward(
         Err(error) => return crate::error::AppError::from(error).into_response(),
     };
     let value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-    let usage = extract_usage(&value, cache_in_input).unwrap_or_else(UsageTotals::missing);
+    let usage =
+        extract_usage(&value, &route.upstream_protocol).unwrap_or_else(UsageTotals::missing);
 
     let log = build_log(LogContext {
         endpoint: endpoint.to_string(),
@@ -442,10 +530,10 @@ mod tests {
                 name: format!("mock-{protocol}"),
                 base_url: base_url.to_string(),
                 api_key: "secret".into(),
-                auth_scheme: if protocol == "anthropic" {
-                    "x-api-key".into()
-                } else {
-                    "bearer".into()
+                auth_scheme: match protocol {
+                    "anthropic" => "x-api-key".into(),
+                    "gemini" => "x-goog-api-key".into(),
+                    _ => "bearer".into(),
                 },
                 protocol: protocol.into(),
                 extra_headers: std::collections::BTreeMap::new(),
@@ -786,5 +874,188 @@ mod tests {
         };
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].virtual_key_id.as_deref(), Some(key.id.as_str()));
+    }
+
+    async fn start_responses_upstream() -> String {
+        let app = axum::Router::new().route(
+            "/responses",
+            axum::routing::post(|| async {
+                Json(json!({
+                    "id": "resp_1",
+                    "object": "response",
+                    "output": [],
+                    "usage": {
+                        "input_tokens": 75,
+                        "input_tokens_details": { "cached_tokens": 20 },
+                        "output_tokens": 30,
+                        "total_tokens": 105
+                    }
+                }))
+            }),
+        );
+        serve(app).await
+    }
+
+    async fn gemini_upstream(
+        axum::extract::Path(model_action): axum::extract::Path<String>,
+        headers: axum::http::HeaderMap,
+        axum::extract::RawQuery(query): axum::extract::RawQuery,
+        Json(body): Json<Value>,
+    ) -> Json<Value> {
+        Json(json!({
+            "candidates": [
+                { "content": { "parts": [{ "text": "hi" }] }, "finishReason": "STOP" }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 100,
+                "candidatesTokenCount": 20,
+                "totalTokenCount": 120
+            },
+            "_path": model_action,
+            "_query": query,
+            "_key": headers.get("x-goog-api-key").and_then(|value| value.to_str().ok()),
+            "_model": body.get("model"),
+        }))
+    }
+
+    #[tokio::test]
+    async fn responses_passthrough_records_usage() {
+        let base_url = start_responses_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "responses", "lumen/resp");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/responses",
+                json!({ "model": "lumen/resp", "input": "hi" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["usage"]["total_tokens"], 105);
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].endpoint, "/v1/responses");
+        assert_eq!(logs[0].total_tokens, 105);
+        assert_eq!(logs[0].cache_read_tokens, 20);
+        assert!(logs[0].cache_read_in_input);
+        // 输入已含命中：未缓存 55 × 1 + 命中 20 × 1（回退输入价）+ 输出 30 × 2 = 135 / 百万。
+        assert!(
+            (logs[0].cost - 0.000135).abs() < 1e-9,
+            "cost was {}",
+            logs[0].cost
+        );
+    }
+
+    #[tokio::test]
+    async fn gemini_generate_passthrough_rewrites_path_and_auth() {
+        let app = axum::Router::new()
+            .route("/models/{model_action}", axum::routing::post(gemini_upstream));
+        let base_url = serve(app).await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "gemini", "lumen/gemini");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1beta/models/lumen/gemini:generateContent",
+                json!({ "contents": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["_path"], "mock-model:generateContent");
+        assert_eq!(value["_key"], "secret");
+        assert!(value["_model"].is_null());
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].endpoint, "/v1beta/models/lumen/gemini:generateContent");
+        assert_eq!(logs[0].total_tokens, 120);
+    }
+
+    #[tokio::test]
+    async fn gemini_stream_appends_alt_sse() {
+        let app = axum::Router::new()
+            .route("/models/{model_action}", axum::routing::post(gemini_upstream));
+        let base_url = serve(app).await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "gemini", "lumen/gemini");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1beta/models/lumen/gemini:streamGenerateContent",
+                json!({ "contents": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["_path"], "mock-model:streamGenerateContent");
+        assert_eq!(value["_query"], "alt=sse");
+    }
+
+    #[tokio::test]
+    async fn unsupported_gemini_action_is_rejected() {
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, "http://127.0.0.1:1", "gemini", "lumen/gemini");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1beta/models/lumen/gemini:countTokens",
+                json!({ "contents": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn chat_endpoint_rejects_gemini_route() {
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, "http://127.0.0.1:1", "gemini", "lumen/gemini");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/gemini", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["error"]["code"], "protocol_mismatch");
     }
 }

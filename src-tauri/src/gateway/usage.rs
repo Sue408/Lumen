@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::db::logs::insert_log;
-use crate::db::models::RequestLog;
+use crate::db::models::{contains_cache_read, RequestLog, PROTOCOL_GEMINI};
 use crate::db::with_db;
 use crate::error::AppError;
 use crate::gateway::resolve::ResolvedRoute;
@@ -104,25 +104,30 @@ fn token(value: Option<&Value>) -> Option<i64> {
     (parsed >= 0).then_some(parsed)
 }
 
-/// 跨厂商提取六类量，覆盖 OpenAI Chat / Responses / Anthropic / DeepSeek 的常见字段。
+/// 跨厂商提取六类量，覆盖 OpenAI Chat / Responses / Anthropic / DeepSeek / Gemini
+/// 的常见字段。字段名只作「存在即取值」，缺失一律留 `None`，绝不补 0。
 pub fn extract_fields(usage: &Value) -> UsageFields {
     UsageFields {
         input: token(
             usage
                 .get("prompt_tokens")
-                .or_else(|| usage.get("input_tokens")),
+                .or_else(|| usage.get("input_tokens"))
+                .or_else(|| usage.get("promptTokenCount")),
         ),
         output: token(
             usage
                 .get("completion_tokens")
-                .or_else(|| usage.get("output_tokens")),
+                .or_else(|| usage.get("output_tokens"))
+                .or_else(|| usage.get("candidatesTokenCount")),
         ),
-        total: token(usage.get("total_tokens")),
+        total: token(usage.get("total_tokens").or_else(|| usage.get("totalTokenCount"))),
         cache_read: token(
             usage
                 .get("cache_read_input_tokens")
                 .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
-                .or_else(|| usage.get("prompt_cache_hit_tokens")),
+                .or_else(|| usage.pointer("/input_tokens_details/cached_tokens"))
+                .or_else(|| usage.get("prompt_cache_hit_tokens"))
+                .or_else(|| usage.get("cachedContentTokenCount")),
         ),
         cache_creation: token(
             usage
@@ -132,7 +137,8 @@ pub fn extract_fields(usage: &Value) -> UsageFields {
         reasoning: token(
             usage
                 .pointer("/completion_tokens_details/reasoning_tokens")
-                .or_else(|| usage.pointer("/output_tokens_details/reasoning_tokens")),
+                .or_else(|| usage.pointer("/output_tokens_details/reasoning_tokens"))
+                .or_else(|| usage.get("thoughtsTokenCount")),
         ),
     }
 }
@@ -168,10 +174,20 @@ pub fn finalize(fields: UsageFields, contains_cache_read: bool) -> Option<UsageT
     })
 }
 
-/// 从完整响应中提取规范用量（非流式）。`contains_cache_read` 由协议决定。
-pub fn extract_usage(value: &Value, contains_cache_read: bool) -> Option<UsageTotals> {
-    let usage = value.get("usage").filter(|usage| !usage.is_null())?;
-    finalize(extract_fields(usage), contains_cache_read)
+/// 按协议选定用量容器：Gemini 原生用 `usageMetadata`，其余用 `usage`。
+fn usage_container<'a>(value: &'a Value, protocol: &str) -> Option<&'a Value> {
+    let key = if protocol == PROTOCOL_GEMINI {
+        "usageMetadata"
+    } else {
+        "usage"
+    };
+    value.get(key).filter(|usage| !usage.is_null())
+}
+
+/// 从完整响应中提取规范用量（非流式）。容器与缓存边界都由协议决定。
+pub fn extract_usage(value: &Value, protocol: &str) -> Option<UsageTotals> {
+    let usage = usage_container(value, protocol)?;
+    finalize(extract_fields(usage), contains_cache_read(protocol))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -296,6 +312,7 @@ pub async fn record(state: &AppState, log: RequestLog) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::models::{PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI, PROTOCOL_RESPONSES};
     use serde_json::json;
 
     fn pricing(input: f64, output: f64) -> Pricing {
@@ -372,7 +389,7 @@ mod tests {
     #[test]
     fn extract_usage_accepts_openai_naming() {
         let value = json!({ "usage": { "prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20 } });
-        let usage = extract_usage(&value, true).unwrap();
+        let usage = extract_usage(&value, PROTOCOL_OPENAI).unwrap();
         assert_eq!(usage.input_tokens, 12);
         assert_eq!(usage.output_tokens, 8);
         assert_eq!(usage.total_tokens, 20);
@@ -390,7 +407,7 @@ mod tests {
                 "completion_tokens_details": { "reasoning_tokens": 5 }
             }
         });
-        let usage = extract_usage(&value, true).unwrap();
+        let usage = extract_usage(&value, PROTOCOL_OPENAI).unwrap();
         assert_eq!(usage.cache_read_tokens, 64);
         assert_eq!(usage.reasoning_tokens, 5);
     }
@@ -405,7 +422,7 @@ mod tests {
                 "cache_creation_input_tokens": 400
             }
         });
-        let usage = extract_usage(&value, false).unwrap();
+        let usage = extract_usage(&value, PROTOCOL_ANTHROPIC).unwrap();
         assert_eq!(usage.input_tokens, 500);
         assert_eq!(usage.cache_read_tokens, 100);
         assert_eq!(usage.cache_creation_tokens, 400);
@@ -415,11 +432,11 @@ mod tests {
 
     #[test]
     fn extract_usage_treats_negative_and_null_as_missing() {
-        assert_eq!(extract_usage(&json!({ "usage": null }), true), None);
+        assert_eq!(extract_usage(&json!({ "usage": null }), PROTOCOL_OPENAI), None);
         let value = json!({ "usage": { "prompt_tokens": -1, "completion_tokens": -1 } });
-        assert_eq!(extract_usage(&value, true), None);
+        assert_eq!(extract_usage(&value, PROTOCOL_OPENAI), None);
         let partial = json!({ "usage": { "prompt_tokens": -1, "completion_tokens": 7 } });
-        let usage = extract_usage(&partial, true).unwrap();
+        let usage = extract_usage(&partial, PROTOCOL_OPENAI).unwrap();
         assert_eq!(usage.input_tokens, 0);
         assert_eq!(usage.output_tokens, 7);
         assert_eq!(usage.source, UsageSource::Partial);
@@ -428,14 +445,57 @@ mod tests {
     #[test]
     fn extract_usage_parses_string_numbers() {
         let value = json!({ "usage": { "prompt_tokens": "12", "completion_tokens": "8" } });
-        let usage = extract_usage(&value, true).unwrap();
+        let usage = extract_usage(&value, PROTOCOL_OPENAI).unwrap();
         assert_eq!(usage.input_tokens, 12);
         assert_eq!(usage.output_tokens, 8);
     }
 
     #[test]
     fn extract_usage_returns_none_without_usage() {
-        assert_eq!(extract_usage(&json!({ "choices": [] }), true), None);
+        assert_eq!(extract_usage(&json!({ "choices": [] }), PROTOCOL_OPENAI), None);
+    }
+
+    #[test]
+    fn extract_usage_reads_responses_fields() {
+        let value = json!({
+            "output": [],
+            "usage": {
+                "input_tokens": 75,
+                "input_tokens_details": { "cached_tokens": 20 },
+                "output_tokens": 1186,
+                "output_tokens_details": { "reasoning_tokens": 1024 },
+                "total_tokens": 1261
+            }
+        });
+        let usage = extract_usage(&value, PROTOCOL_RESPONSES).unwrap();
+        assert_eq!(usage.input_tokens, 75);
+        assert_eq!(usage.output_tokens, 1186);
+        assert_eq!(usage.cache_read_tokens, 20);
+        assert_eq!(usage.reasoning_tokens, 1024);
+        assert!(usage.contains_cache_read);
+    }
+
+    #[test]
+    fn extract_usage_reads_gemini_usage_metadata() {
+        let value = json!({
+            "candidates": [],
+            "usageMetadata": {
+                "promptTokenCount": 100,
+                "cachedContentTokenCount": 60,
+                "candidatesTokenCount": 20,
+                "thoughtsTokenCount": 8,
+                "totalTokenCount": 133
+            }
+        });
+        let usage = extract_usage(&value, PROTOCOL_GEMINI).unwrap();
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 20);
+        assert_eq!(usage.cache_read_tokens, 60);
+        assert_eq!(usage.reasoning_tokens, 8);
+        assert_eq!(usage.total_tokens, 133);
+        assert!(usage.contains_cache_read);
+        // Gemini 无独立写入量，不得臆造。
+        assert_eq!(usage.cache_creation_tokens, 0);
     }
 
     #[test]

@@ -7,7 +7,9 @@ use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use serde_json::Value;
 
-use crate::db::models::{PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI};
+use crate::db::models::{
+    contains_cache_read, PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
+};
 use crate::error::AppError;
 use crate::gateway::resolve::ResolvedRoute;
 use crate::gateway::usage::{
@@ -23,17 +25,21 @@ pub fn upstream_url(base_url: &str, path: &str) -> String {
     )
 }
 
-/// 由上游协议决定转发路径；端点与协议绑定后，这是路径的唯一来源。
-pub fn upstream_path_for(protocol: &str) -> &'static str {
+/// 由上游协议与模型名决定转发路径；端点与协议绑定后，这是路径的唯一来源。
+/// Gemini 的模型名在 path 而非 body，流式端点强制 `alt=sse` 以取得标准 SSE。
+pub fn upstream_path(protocol: &str, model_id: &str, is_stream: bool) -> String {
     match protocol {
-        PROTOCOL_ANTHROPIC => "messages",
-        _ => "chat/completions",
+        PROTOCOL_ANTHROPIC => "messages".to_string(),
+        PROTOCOL_RESPONSES => "responses".to_string(),
+        PROTOCOL_GEMINI => {
+            if is_stream {
+                format!("models/{model_id}:streamGenerateContent?alt=sse")
+            } else {
+                format!("models/{model_id}:generateContent")
+            }
+        }
+        _ => "chat/completions".to_string(),
     }
-}
-
-/// OpenAI 协议：输入总量已包含缓存命中，计费时需先扣除。
-pub fn contains_cache_read(protocol: &str) -> bool {
-    protocol != PROTOCOL_ANTHROPIC
 }
 
 /// 向上游发起请求：按 provider 注入自定义头与鉴权，用提供商密钥替换客户端鉴权。
@@ -57,6 +63,7 @@ pub async fn send(
     if !route.api_key.is_empty() {
         request = match route.auth_scheme.as_str() {
             "x-api-key" => request.header("x-api-key", &route.api_key),
+            "x-goog-api-key" => request.header("x-goog-api-key", &route.api_key),
             _ => request.bearer_auth(&route.api_key),
         };
     }
@@ -99,6 +106,8 @@ struct UsageScanner {
     fields: UsageFields,
     usage_seen: bool,
     finalized: bool,
+    /// 上游协议，决定容器、缓存边界与收尾标记。
+    protocol: String,
 }
 
 impl UsageScanner {
@@ -126,8 +135,16 @@ impl UsageScanner {
             return;
         };
 
-        // Anthropic 收尾事件；OpenAI 的最终 usage 块 choices 为空且带 usage。
-        if value.get("type").and_then(Value::as_str) == Some("message_stop") {
+        // Anthropic 以 message_stop 收尾；OpenAI 的最终 usage 块 choices 为空且带 usage；
+        // Responses 以 response.completed / incomplete / failed 收尾。
+        let event_type = value.get("type").and_then(Value::as_str);
+        if event_type == Some("message_stop") {
+            self.finalized = true;
+        }
+        if matches!(
+            event_type,
+            Some("response.completed" | "response.incomplete" | "response.failed")
+        ) {
             self.finalized = true;
         }
         if let Some(choices) = value.get("choices").and_then(Value::as_array) {
@@ -139,6 +156,16 @@ impl UsageScanner {
                 self.finalized = true;
             }
         }
+        // Gemini SSE 没有显式终止符：以「带 usageMetadata 且候选给出 finishReason」为收尾。
+        if self.protocol == PROTOCOL_GEMINI
+            && value.get("usageMetadata").is_some_and(|usage| !usage.is_null())
+            && value
+                .pointer("/candidates/0/finishReason")
+                .and_then(Value::as_str)
+                .is_some()
+        {
+            self.finalized = true;
+        }
 
         let usage = value
             .get("usage")
@@ -148,7 +175,14 @@ impl UsageScanner {
                     .get("message")
                     .and_then(|message| message.get("usage"))
                     .filter(|usage| !usage.is_null())
-            });
+            })
+            .or_else(|| {
+                value
+                    .get("response")
+                    .and_then(|response| response.get("usage"))
+                    .filter(|usage| !usage.is_null())
+            })
+            .or_else(|| value.get("usageMetadata").filter(|usage| !usage.is_null()));
         if let Some(usage) = usage {
             let fields = extract_fields(usage);
             if !fields.is_empty() {
@@ -158,11 +192,11 @@ impl UsageScanner {
         }
     }
 
-    fn totals(&self, contains_cache_read: bool) -> UsageTotals {
+    fn totals(&self) -> UsageTotals {
         if !self.usage_seen {
             return UsageTotals::missing();
         }
-        match finalize(self.fields, contains_cache_read) {
+        match finalize(self.fields, contains_cache_read(&self.protocol)) {
             Some(mut totals) => {
                 if !self.finalized {
                     totals.source = UsageSource::Partial;
@@ -186,13 +220,15 @@ pub fn stream_response(
     let status = response.status();
     let content_type = response.headers().get(header::CONTENT_TYPE).cloned();
     let request_id = request_id(response.headers());
-    let cache_in_input = contains_cache_read(&route.upstream_protocol);
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(16);
 
     tokio::spawn(async move {
         let started = Instant::now();
         let mut stream = response.bytes_stream();
-        let mut scanner = UsageScanner::default();
+        let mut scanner = UsageScanner {
+            protocol: route.upstream_protocol.clone(),
+            ..UsageScanner::default()
+        };
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
@@ -226,7 +262,7 @@ pub fn stream_response(
             error_message: None,
             request_id,
             virtual_key_id,
-            usage: scanner.totals(cache_in_input),
+            usage: scanner.totals(),
         });
         let _ = record(&state, log).await;
     });
@@ -255,6 +291,13 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn make_scanner(protocol: &str) -> UsageScanner {
+        UsageScanner {
+            protocol: protocol.to_string(),
+            ..UsageScanner::default()
+        }
+    }
+
     #[test]
     fn injects_include_usage_for_openai_stream() {
         let mut body = json!({ "model": "x", "stream": true });
@@ -281,14 +324,29 @@ mod tests {
     }
 
     #[test]
+    fn upstream_path_covers_new_protocols() {
+        assert_eq!(upstream_path(PROTOCOL_OPENAI, "gpt", false), "chat/completions");
+        assert_eq!(upstream_path(PROTOCOL_ANTHROPIC, "claude", false), "messages");
+        assert_eq!(upstream_path(PROTOCOL_RESPONSES, "gpt", false), "responses");
+        assert_eq!(
+            upstream_path(PROTOCOL_GEMINI, "gemini-2.5-pro", false),
+            "models/gemini-2.5-pro:generateContent"
+        );
+        assert_eq!(
+            upstream_path(PROTOCOL_GEMINI, "gemini-2.5-pro", true),
+            "models/gemini-2.5-pro:streamGenerateContent?alt=sse"
+        );
+    }
+
+    #[test]
     fn scanner_finalizes_openai_usage_chunk() {
-        let mut scanner = UsageScanner::default();
+        let mut scanner = make_scanner(PROTOCOL_OPENAI);
         scanner.push(b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n");
         scanner.push(
             b"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120}}\n\n",
         );
         scanner.push(b"data: [DONE]\n\n");
-        let totals = scanner.totals(true);
+        let totals = scanner.totals();
         assert_eq!(totals.source, UsageSource::Provider);
         assert_eq!(totals.input_tokens, 100);
         assert_eq!(totals.output_tokens, 20);
@@ -296,7 +354,7 @@ mod tests {
 
     #[test]
     fn scanner_merges_anthropic_events_and_flags_aborted_stream() {
-        let mut scanner = UsageScanner::default();
+        let mut scanner = make_scanner(PROTOCOL_ANTHROPIC);
         scanner.push(
             b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":25,\"output_tokens\":1,\"cache_read_input_tokens\":10}}}\n\n",
         );
@@ -304,18 +362,63 @@ mod tests {
             b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":15}}\n\n",
         );
         scanner.push(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n");
-        let totals = scanner.totals(false);
+        let totals = scanner.totals();
         assert_eq!(totals.source, UsageSource::Provider);
         assert_eq!(totals.input_tokens, 25);
         assert_eq!(totals.output_tokens, 15);
         assert_eq!(totals.cache_read_tokens, 10);
 
         // 缺少 message_stop：视为未收尾。
-        let mut aborted = UsageScanner::default();
+        let mut aborted = make_scanner(PROTOCOL_ANTHROPIC);
         aborted.push(
             b"data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":15}}\n\n",
         );
-        assert_eq!(aborted.totals(false).source, UsageSource::Partial);
+        assert_eq!(aborted.totals().source, UsageSource::Partial);
+    }
+
+    #[test]
+    fn scanner_reads_responses_completed_usage() {
+        let mut scanner = make_scanner(PROTOCOL_RESPONSES);
+        scanner.push(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n");
+        scanner.push(
+            b"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":75,\"input_tokens_details\":{\"cached_tokens\":20},\"output_tokens\":30,\"total_tokens\":105}}}\n\n",
+        );
+        let totals = scanner.totals();
+        assert_eq!(totals.source, UsageSource::Provider);
+        assert_eq!(totals.input_tokens, 75);
+        assert_eq!(totals.output_tokens, 30);
+        assert_eq!(totals.cache_read_tokens, 20);
+    }
+
+    #[test]
+    fn scanner_flags_responses_stream_without_completed() {
+        let mut scanner = make_scanner(PROTOCOL_RESPONSES);
+        scanner.push(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n");
+        assert_eq!(scanner.totals().source, UsageSource::Missing);
+    }
+
+    #[test]
+    fn scanner_reads_gemini_sse_usage() {
+        let mut scanner = make_scanner(PROTOCOL_GEMINI);
+        scanner.push(
+            b"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":100,\"cachedContentTokenCount\":60,\"candidatesTokenCount\":20,\"thoughtsTokenCount\":8,\"totalTokenCount\":133}}\n\n",
+        );
+        let totals = scanner.totals();
+        assert_eq!(totals.source, UsageSource::Provider);
+        assert_eq!(totals.input_tokens, 100);
+        assert_eq!(totals.output_tokens, 20);
+        assert_eq!(totals.cache_read_tokens, 60);
+        assert_eq!(totals.reasoning_tokens, 8);
+    }
+
+    #[test]
+    fn scanner_flags_gemini_stream_without_finish_reason() {
+        let mut scanner = make_scanner(PROTOCOL_GEMINI);
+        // 有用量但未给出 finishReason：不视为收尾 → Partial。
+        scanner.push(
+            b"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}]}}],\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":20}}\n\n",
+        );
+        assert_eq!(scanner.totals().source, UsageSource::Partial);
     }
 }
 
