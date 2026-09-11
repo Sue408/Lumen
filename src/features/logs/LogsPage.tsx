@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useLiveRevision } from "../../app/useLiveRevision";
 import { CalendarRange, Check, ChevronDown, Copy, X } from "lucide-react";
 import { InlineError, LoadingLines } from "../../components/ConfigControls";
 import type { RequestLog } from "../../services/gateway";
@@ -42,6 +43,7 @@ export function LogsPage() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [aliases, setAliases] = useState<string[]>([]);
+  const { revision } = useLiveRevision();
 
   useEffect(() => {
     let alive = true;
@@ -91,7 +93,7 @@ export function LogsPage() {
     return () => {
       alive = false;
     };
-  }, [filter, limit]);
+  }, [filter, limit, revision]);
 
   useEffect(() => {
     let alive = true;
@@ -109,7 +111,7 @@ export function LogsPage() {
     return () => {
       alive = false;
     };
-  }, [summaryFilter]);
+  }, [summaryFilter, revision]);
 
   const groups = useMemo(() => groupLogsByDay(logs ?? []), [logs]);
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLiveRevision } from "../../app/useLiveRevision";
 import { ChartColumn, Coins, KeyRound, Plus, Trash } from "lucide-react";
 import {
   EmptyNote,
@@ -209,6 +210,7 @@ export function KeysPage() {
   const [usage, setUsage] = useState<KeyUsage | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const { revision, lastLog } = useLiveRevision();
 
   const dirty = draft !== null && savedDraft !== null && isKeyDraftDirty(draft, savedDraft);
 
@@ -280,6 +282,13 @@ export function KeysPage() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (revision === 0) return;
+    if (!selectedId || selectedId === "new") return;
+    if (lastLog?.virtualKeyId !== selectedId) return;
+    void loadUsage(selectedId);
+  }, [revision]);
 
   const submit = async (): Promise<boolean> => {
     if (!draft) return false;

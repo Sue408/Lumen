@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useLiveRevision } from "../../app/useLiveRevision";
 import { InlineError, LoadingLines } from "../../components/ConfigControls";
 import { listVirtualKeys, type VirtualKey } from "../../services/config";
 import { queryUsageOverview } from "../../services/usage";
@@ -24,6 +25,9 @@ export function UsagePage() {
   const [error, setError] = useState<string | null>(null);
 
   const anchorTime = anchor.getTime();
+  const { revision, lastLog } = useLiveRevision();
+  const revisionRef = useRef(revision);
+  const queryRef = useRef(`${periodKey}|${anchorTime}|${scope}`);
   const current = isCurrentPeriod(periodKey, anchor);
   const cursor = formatPeriodCursor(periodKey, anchor);
   const currentHeading =
@@ -49,27 +53,45 @@ export function UsagePage() {
   }, []);
 
   useEffect(() => {
+    const queryKey = `${periodKey}|${anchorTime}|${scope}`;
+    const queryChanged = queryRef.current !== queryKey;
+    queryRef.current = queryKey;
+    const revisionChanged = revisionRef.current !== revision;
+    revisionRef.current = revision;
+    const isLiveRefresh = revisionChanged && !queryChanged;
+
+    if (isLiveRefresh) {
+      if (!current) return;
+      if (
+        scope !== ALL_SCOPE &&
+        scope !== UNASSIGNED_SCOPE &&
+        lastLog?.virtualKeyId !== scope
+      ) {
+        return;
+      }
+    } else {
+      setLoading(true);
+      setError(null);
+    }
+
     let alive = true;
-    setLoading(true);
-    setError(null);
     const scopeValue = scope === ALL_SCOPE ? null : scope;
     queryUsageOverview(periodKey, new Date(anchorTime), scopeValue)
       .then((data) => {
         if (alive) setOverview(data);
       })
       .catch((err: unknown) => {
-        if (alive) {
-          setError(String(err));
-          setOverview(null);
-        }
+        if (!alive || isLiveRefresh) return;
+        setError(String(err));
+        setOverview(null);
       })
       .finally(() => {
-        if (alive) setLoading(false);
+        if (alive && !isLiveRefresh) setLoading(false);
       });
     return () => {
       alive = false;
     };
-  }, [periodKey, anchorTime, scope]);
+  }, [periodKey, anchorTime, scope, revision]);
 
   const changePeriod = (next: PeriodKey) => {
     setPeriodKey(next);
