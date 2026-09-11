@@ -7,7 +7,7 @@ import {
   type CSSProperties,
   type PointerEvent,
 } from "react";
-import { buildAreaPath, buildSmoothPath, seriesAnchors } from "./chartGeometry";
+import { buildAreaPath, buildSmoothPath } from "./chartGeometry";
 import { toneFor } from "./chartTone";
 import {
   buildPeriodAxisLabels,
@@ -16,7 +16,7 @@ import {
   getNearestPointIndex,
   resampleSeries,
 } from "./trendInteraction";
-import { cumulativeToDistribution, smoothSeries } from "./usageVisualData";
+import { cumulativeToDistribution } from "./usageVisualData";
 import type { UsagePeriod } from "./usageData";
 import { isCurrentPeriod } from "./period";
 
@@ -29,9 +29,6 @@ const fallbackChartSize: ChartSize = { width: 600, height: 210 };
 
 /** 前缘淡出宽度（占整宽比例）：数据还没走完时，右端渐隐到纸面而非一刀切。 */
 const LEADING_FADE = 0.07;
-
-/** 逐小时值的平滑半径（小时）：把脉冲式调用揉成起伏的波，代价是峰高略降。 */
-const SMOOTH_SIGMA = 1;
 
 const money = new Intl.NumberFormat("zh-CN", {
   minimumFractionDigits: 2,
@@ -95,7 +92,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
   // so差分成每小时用量后再画——这条曲线要的是涨落，不是一直往上爬的累计。
   const elapsedBuckets = getElapsedBucketCount(period.periodKey, now);
   const pointCount = Math.max(elapsedBuckets, 2);
-  const rawLayers = useMemo(
+  const layers = useMemo(
     () =>
       period.layers.map((layer) => ({
         ...layer,
@@ -105,12 +102,6 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
         ),
       })),
     [period.layers, elapsedBuckets, pointCount],
-  );
-  // 画形用平滑值（脉冲揉成波），浮窗读数仍用上面的原始值。
-  const layers = useMemo(
-    () =>
-      rawLayers.map((layer) => ({ ...layer, values: smoothSeries(layer.values, SMOOTH_SIGMA) })),
-    [rawLayers],
   );
   const axisLabels = useMemo(
     () => buildPeriodAxisLabels(period.periodKey, now),
@@ -138,10 +129,6 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
         area: buildAreaPath(layer.values, chartSize.width, chartSize.height, yMax),
       })),
     [layers, chartSize.width, chartSize.height, yMax],
-  );
-  const anchors = useMemo(
-    () => seriesAnchors(layers, chartSize.height, yMax, 18),
-    [layers, chartSize.height, yMax],
   );
   // Visual compromise: a zero-value period has no curve to draw. Lift a flat 0
   // line a few px off the baseline so the chart reads as "0" instead of blank.
@@ -173,12 +160,12 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
   const hoverTotal =
     activeIndex === null
       ? 0
-      : rawLayers.reduce((sum, layer) => sum + (layer.values[activeIndex] ?? 0), 0);
+      : layers.reduce((sum, layer) => sum + (layer.values[activeIndex] ?? 0), 0);
   const hoverY = toY(hoverTotal);
   const hoverLayers =
     activeIndex === null
       ? []
-      : rawLayers.filter((layer) => (layer.values[activeIndex] ?? 0) > 0);
+      : layers.filter((layer) => (layer.values[activeIndex] ?? 0) > 0);
   const hoverLabel =
     activeIndex === null ? "" : sampleLabels[activeIndex] ?? axisLabels[activeIndex] ?? "";
   const hoverStyle = {
@@ -278,15 +265,15 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
               />
             )}
           </svg>
-          {anchors.map((anchor) => (
+          {layers.map((layer, index) => (
             <span
-              key={anchor.name}
+              key={layer.name}
               className="trend-label"
-              style={{ "--label-y": `${(anchor.y / chartSize.height) * 100}%` } as CSSProperties}
+              style={{ "--label-index": index } as CSSProperties}
             >
-              <i style={{ background: toneFor(anchor.tone) }} />
-              {anchor.name}
-              <b>${money.format(anchor.amount)}</b>
+              <i style={{ background: toneFor(layer.tone) }} />
+              {layer.name}
+              <b>${money.format(layer.amount)}</b>
             </span>
           ))}
           {activeIndex !== null ? (

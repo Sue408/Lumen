@@ -5,7 +5,6 @@ import {
   buildCostGradient,
   buildDonutSegments,
   buildSmoothPath,
-  seriesAnchors,
   stackedBarSegments,
 } from "./chartGeometry.ts";
 
@@ -71,34 +70,3 @@ test("stacked bars leave a gap between slots", () => {
   assert.ok(segment.width < 300);
 });
 
-test("series anchors push apart to keep the minimum gap", () => {
-  const anchors = seriesAnchors(
-    [
-      { name: "a", tone: "ochre", values: [0, 0.5], amount: 0.5 },
-      { name: "b", tone: "indigo", values: [0.5, 0], amount: 0.5 },
-      { name: "c", tone: "moss", values: [0.5, 0], amount: 0.5 },
-    ],
-    210,
-    30,
-    24,
-  );
-  const sorted = [...anchors].sort((a, b) => a.y - b.y);
-  for (let index = 1; index < sorted.length; index += 1) {
-    assert.ok(sorted[index].y - sorted[index - 1].y >= 24 - 1e-9);
-  }
-});
-
-test("series anchors clamp inside the chart box", () => {
-  const anchors = seriesAnchors(
-    [
-      { name: "a", tone: "ochre", values: [0, 30], amount: 30 },
-      { name: "b", tone: "indigo", values: [0, 30], amount: 30 },
-    ],
-    210,
-    30,
-    40,
-  );
-  for (const anchor of anchors) {
-    assert.ok(anchor.y >= 0 && anchor.y <= 210);
-  }
-});

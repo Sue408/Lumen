@@ -136,47 +136,4 @@ export function stackedBarSegments(
   });
 }
 
-export type LabelAnchor = {
-  name: string;
-  tone: string;
-  amount: number;
-  y: number;
-};
 
-/**
- * 直接标注锚点：每条独立曲线取自身末端的高度，再自上而下推开、夹在图表内——
- * 多条线交叠时标签才不会叠在一起。
- */
-export function seriesAnchors(
-  layers: StackedLayer[],
-  height: number,
-  maxValue: number,
-  minGap: number,
-): LabelAnchor[] {
-  const count = layers[0]?.values.length ?? 0;
-  if (layers.length === 0 || count === 0) return [];
-
-  const anchors: LabelAnchor[] = layers.map((layer) => ({
-    name: layer.name,
-    tone: layer.tone,
-    amount: layer.amount,
-    y: yAt(layer.values[count - 1] ?? 0, height, maxValue),
-  }));
-
-  anchors.sort((a, b) => a.y - b.y);
-  for (let index = 1; index < anchors.length; index += 1) {
-    anchors[index].y = Math.max(anchors[index].y, anchors[index - 1].y + minGap);
-  }
-  const overflow = anchors[anchors.length - 1].y - (height - minGap / 2);
-  if (overflow > 0) {
-    for (const anchor of anchors) anchor.y -= overflow;
-  }
-  const underflow = anchors[0].y - minGap / 2;
-  if (underflow < 0) {
-    for (const anchor of anchors) anchor.y -= underflow;
-  }
-  return anchors.map((anchor) => ({
-    ...anchor,
-    y: Math.min(Math.max(anchor.y, 0), height),
-  }));
-}
