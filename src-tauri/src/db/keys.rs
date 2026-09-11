@@ -141,6 +141,7 @@ mod tests {
             total_tokens: 15,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
+            cache_read_in_input: false,
             reasoning_tokens: 0,
             cost,
             usage_source: "provider".to_string(),

@@ -10,7 +10,9 @@ pub struct Mover {
     pub delta_cost: f64,
 }
 
-/// 缓存命中率相对上期的变化。命中率 = 缓存读取 / (缓存读取 + 缓存写入 + 输入)。
+/// 缓存命中率相对上期的变化。命中率 = 缓存读取 / 输入侧总量。
+/// 输入侧总量由调用方按缓存边界归一（OpenAI 系已含命中则不重复计入缓存读取），
+/// 此处只消费 `(cache_read, input_side)` 两个已汇总值，不再自行相加。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CacheShift {

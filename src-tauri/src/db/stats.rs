@@ -288,7 +288,9 @@ fn period_stats(
                 SUM(output_tokens),
                 COUNT(*),
                 SUM(cache_read_tokens),
-                SUM(cache_read_tokens + cache_creation_tokens + input_tokens)
+                SUM(CASE WHEN cache_read_in_input = 1
+                         THEN input_tokens + cache_creation_tokens
+                         ELSE input_tokens + cache_read_tokens + cache_creation_tokens END)
          FROM request_logs
          LEFT JOIN virtual_keys k ON k.id = request_logs.virtual_key_id
          WHERE request_logs.status = 'success'
@@ -452,7 +454,9 @@ fn quality_totals(
         "SELECT COUNT(*),
                 COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(cache_read_tokens), 0),
-                COALESCE(SUM(cache_read_tokens + cache_creation_tokens + input_tokens), 0),
+                COALESCE(SUM(CASE WHEN cache_read_in_input = 1
+                                  THEN input_tokens + cache_creation_tokens
+                                  ELSE input_tokens + cache_read_tokens + cache_creation_tokens END), 0),
                 COALESCE(SUM(reasoning_tokens), 0),
                 COALESCE(SUM(output_tokens), 0)
          FROM request_logs
@@ -617,7 +621,9 @@ fn period_layer_totals(
                 SUM(output_tokens),
                 COUNT(*),
                 SUM(cache_read_tokens),
-                SUM(cache_read_tokens + cache_creation_tokens + input_tokens)
+                SUM(CASE WHEN cache_read_in_input = 1
+                         THEN input_tokens + cache_creation_tokens
+                         ELSE input_tokens + cache_read_tokens + cache_creation_tokens END)
          FROM request_logs
          LEFT JOIN virtual_keys k ON k.id = request_logs.virtual_key_id
          WHERE request_logs.status = 'success'
@@ -794,6 +800,7 @@ mod tests {
             total_tokens: input + output,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
+            cache_read_in_input: false,
             reasoning_tokens: 0,
             cost,
             usage_source: "provider".to_string(),
@@ -972,6 +979,36 @@ mod tests {
         assert!((overview.quality.cache_hit_rate - 0.6).abs() < 1e-9);
         assert!((overview.quality.error_rate - 0.5).abs() < 1e-9);
         assert!((overview.quality.reasoning_share - 0.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn quality_cache_hit_rate_respects_boundary() {
+        let db = open_in_memory().unwrap();
+        let now = Local::now();
+        let today = period_start(Period::Day, now);
+        {
+            let conn = db.lock().unwrap();
+            // OpenAI 语义：input 已含命中。input=100、命中=60 → 分母 100，命中率 0.6
+            // （旧的固定相加分母会得 60/160 = 0.375）。
+            let mut contained = sample_log(today + Duration::hours(1), 100, 10, 0.5, "gpt");
+            contained.cache_read_tokens = 60;
+            contained.cache_read_in_input = true;
+            insert_log(&conn, &contained).unwrap();
+
+            // Anthropic 语义：input 不含命中。input=40、命中=60 → 分母 100，命中率 0.6。
+            let mut separate = sample_log(today + Duration::hours(2), 40, 10, 0.5, "claude");
+            separate.cache_read_tokens = 60;
+            separate.cache_read_in_input = false;
+            insert_log(&conn, &separate).unwrap();
+        }
+        let conn = db.lock().unwrap();
+        let overview = build_overview(&conn, Period::Day, now, &KeyScope::All).unwrap();
+        // 合并：命中 120，分母 (100) + (40 + 60) = 200 → 0.6。
+        assert!(
+            (overview.quality.cache_hit_rate - 0.6).abs() < 1e-9,
+            "got {}",
+            overview.quality.cache_hit_rate
+        );
     }
 
     /// 手动跑的粗略基准：`cargo test bench_overview -- --nocapture --ignored`。

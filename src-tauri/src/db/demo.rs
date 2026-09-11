@@ -920,6 +920,7 @@ fn generate_logs(set: &DemoSet, profile: &Profile, now: DateTime<Local>) -> Vec<
                 total_tokens: usage.total_tokens,
                 cache_read_tokens: usage.cache_read_tokens,
                 cache_creation_tokens: usage.cache_creation_tokens,
+                cache_read_in_input: usage.contains_cache_read,
                 reasoning_tokens: usage.reasoning_tokens,
                 cost,
                 usage_source: usage.source.as_str().to_string(),

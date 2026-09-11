@@ -302,6 +302,9 @@ pub struct RequestLog {
     pub total_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_creation_tokens: i64,
+    /// 输入总量是否已包含缓存命中（OpenAI / DeepSeek / Responses / Gemini 为真，
+    /// Anthropic 为假）。命中率的分母按此边界计算。
+    pub cache_read_in_input: bool,
     pub reasoning_tokens: i64,
     pub cost: f64,
     pub usage_source: String,
@@ -333,6 +336,7 @@ impl RequestLog {
             total_tokens: row.get("total_tokens")?,
             cache_read_tokens: row.get("cache_read_tokens")?,
             cache_creation_tokens: row.get("cache_creation_tokens")?,
+            cache_read_in_input: row.get::<_, i64>("cache_read_in_input")? != 0,
             reasoning_tokens: row.get("reasoning_tokens")?,
             cost: row.get("cost")?,
             usage_source: row.get("usage_source")?,

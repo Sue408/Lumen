@@ -56,6 +56,7 @@ function buildMockLogs(): RequestLog[] {
         totalTokens: inputTokens + outputTokens,
         cacheReadTokens,
         cacheCreationTokens: modelIndex === 0 ? (index * 211) % 1500 : 0,
+        cacheReadInInput: modelIndex !== 0,
         reasoningTokens: modelIndex === 1 ? (index * 353) % 2000 : 0,
         cost: failed
           ? 0

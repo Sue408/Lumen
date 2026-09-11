@@ -31,6 +31,7 @@ function log(overrides: Partial<RequestLog> = {}): RequestLog {
     totalTokens: 120,
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
+    cacheReadInInput: true,
     reasoningTokens: 0,
     cost: 0.01,
     usageSource: "provider",

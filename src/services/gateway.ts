@@ -29,6 +29,7 @@ export type RequestLog = {
   totalTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
+  cacheReadInInput: boolean;
   reasoningTokens: number;
   cost: number;
   usageSource: UsageSource;

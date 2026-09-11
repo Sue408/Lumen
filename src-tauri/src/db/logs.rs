@@ -108,11 +108,11 @@ pub fn insert_log(conn: &Connection, log: &RequestLog) -> Result<(), AppError> {
             id, occurred_at, endpoint, method, route_alias, route_id,
             upstream_model_id, upstream_model_name, model_real, provider_id, virtual_key_id,
             kind, input_tokens, output_tokens, total_tokens,
-            cache_read_tokens, cache_creation_tokens, reasoning_tokens,
+            cache_read_tokens, cache_creation_tokens, cache_read_in_input, reasoning_tokens,
             cost, usage_source, status, http_status, latency_ms, error_message, request_id, is_stream
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-            ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
+            ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
          )",
         params![
             log.id,
@@ -132,6 +132,7 @@ pub fn insert_log(conn: &Connection, log: &RequestLog) -> Result<(), AppError> {
             log.total_tokens,
             log.cache_read_tokens,
             log.cache_creation_tokens,
+            log.cache_read_in_input as i64,
             log.reasoning_tokens,
             log.cost,
             log.usage_source,
@@ -250,6 +251,7 @@ mod tests {
             total_tokens: 120,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
+            cache_read_in_input: false,
             reasoning_tokens: 0,
             cost: 0.01,
             usage_source: usage_source.into(),
@@ -270,6 +272,26 @@ mod tests {
         insert_log(&conn, &log(3, "2026-09-10T10:00:00+00:00", "success", "partial")).unwrap();
         drop(conn);
         db
+    }
+
+    #[test]
+    fn persists_cache_read_boundary() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let mut with_input = log(1, "2026-09-01T10:00:00+00:00", "success", "provider");
+        with_input.cache_read_tokens = 60;
+        with_input.cache_read_in_input = true;
+        insert_log(&conn, &with_input).unwrap();
+        let mut without_input = log(2, "2026-09-01T11:00:00+00:00", "success", "provider");
+        without_input.cache_read_tokens = 60;
+        without_input.cache_read_in_input = false;
+        insert_log(&conn, &without_input).unwrap();
+
+        let rows = list_logs(&conn, &LogFilter::default()).unwrap();
+        let by_id: std::collections::HashMap<_, _> =
+            rows.into_iter().map(|row| (row.id.clone(), row)).collect();
+        assert!(by_id["log-1"].cache_read_in_input);
+        assert!(!by_id["log-2"].cache_read_in_input);
     }
 
     #[test]

@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS request_logs (
     total_tokens        INTEGER NOT NULL DEFAULT 0,
     cache_read_tokens   INTEGER NOT NULL DEFAULT 0,
     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_in_input INTEGER NOT NULL DEFAULT 0,
     reasoning_tokens    INTEGER NOT NULL DEFAULT 0,
     cost                REAL NOT NULL DEFAULT 0,
     usage_source        TEXT NOT NULL DEFAULT 'missing',
@@ -127,7 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_usage_source ON request_logs(usage_s
 "#;
 
 /// 每次修改 `SCHEMA` 就 +1；启动时版本不符即重建空库（pre-launch 阶段不做逐列迁移）。
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 /// 依赖外键的表按子表在前顺序清空，避免重建时的外键约束。
 const DROP_ALL: &str = "
