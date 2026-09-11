@@ -4,17 +4,28 @@
   min-width: 0;
   height: 100vh;
   padding: var(--page-gutter-y) var(--page-gutter-x);
-  overflow-y: auto;
-  scrollbar-gutter: stable;
+  overflow: hidden;
 }
 
 .settings-page .settings-column {
   display: grid;
+  flex: 1 1 auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: var(--page-gap);
-  align-content: start;
   width: 100%;
   max-width: 44rem;
+  min-height: 0;
   margin: 0 auto;
+}
+
+.settings-page .settings-scroll {
+  display: grid;
+  gap: var(--page-gap);
+  align-content: start;
+  min-height: 0;
+  padding-right: 0.25rem;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .settings-page h1 {

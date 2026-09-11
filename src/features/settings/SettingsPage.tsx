@@ -223,6 +223,7 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
           </div>
         </header>
 
+        <div className="settings-scroll">
         {error ? <InlineError message={error} /> : null}
         {notice ? (
           <p className="settings-notice" role="status">
@@ -430,6 +431,7 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
             </section>
           </>
         )}
+        </div>
       </div>
     </main>
   );
