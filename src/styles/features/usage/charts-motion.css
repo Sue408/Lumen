@@ -30,7 +30,6 @@
 
 .chart-unit,
 .chart-meta,
-.series-key,
 .x-axis,
 .y-axis {
   color: var(--ink-muted);
@@ -51,7 +50,7 @@
 
 .cost-donut {
   position: relative;
-  width: min(100cqw, 100cqh, 12.48rem);
+  width: min(100cqw, 72cqh, 12.48rem);
   aspect-ratio: 1;
   background: none;
 }
@@ -66,7 +65,7 @@
   height: auto;
   overflow: visible;
   transform-origin: center;
-  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .donut-track,
@@ -76,7 +75,7 @@
 }
 
 .donut-track {
-  stroke: var(--paper-deep);
+  stroke: var(--line);
 }
 
 .donut-arcs {
@@ -91,15 +90,7 @@
   stroke-dasharray: var(--segment-length) var(--segment-rest);
   stroke-dashoffset: var(--segment-offset);
   animation: donut-segment-reveal 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-
-.donut-segment {
-  stroke-linecap: butt;
-  stroke-dasharray: var(--segment-length) var(--segment-rest);
-  stroke-dashoffset: var(--segment-offset);
-  animation: donut-segment-reveal 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  transition: stroke-width 180ms ease, filter 180ms ease;
+  transition: stroke-width 150ms ease, filter 150ms ease;
 }
 
 .cost-donut:hover svg {
@@ -112,203 +103,20 @@
 }
 
 .donut-total {
-  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
-  font-size: 1.5rem;
+  font-family: var(--font-serif);
+  font-size: clamp(0.95rem, 0.8rem + 0.6vw, 1.15rem);
   font-weight: 600;
-  line-height: 1.1;
+  line-height: 1.05;
+  color: var(--ink);
   font-variant-numeric: tabular-nums;
-}
-
-.usage-area {
-  opacity: 1;
-}
-
-.area-reveal {
-  transform-box: fill-box;
-  transform-origin: left center;
-  animation: area-reveal 450ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.trend-line {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-}
-
-.previous-line {
-  animation: draw-line 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.current-line {
-  animation: draw-line 450ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.current-point {
-  opacity: 0;
-  animation: point-enter 100ms ease-out 400ms both;
 }
 
 .plot-area {
   position: relative;
-  cursor: crosshair;
 }
 
 .plot-area svg {
   overflow: visible;
-}
-
-.plot-point {
-  position: absolute;
-  left: var(--hover-x, 100%);
-  top: var(--point-y);
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  transition: left 180ms ease, top 180ms ease, opacity 180ms ease;
-}
-
-.current-end-point {
-  left: 100%;
-  background: var(--ochre);
-  opacity: 1;
-}
-
-.hover-guide {
-  position: absolute;
-  left: var(--hover-x);
-  top: 0;
-  bottom: 0;
-  border-left: 1px dashed var(--guide-line);
-  opacity: 0;
-  transition: left 180ms ease, opacity 180ms ease;
-}
-
-.plot-area.is-hovering .hover-guide {
-  opacity: 1;
-}
-
-.hover-point {
-  z-index: 1;
-  opacity: 0;
-}
-
-.plot-area.is-hovering .hover-point {
-  opacity: 1;
-}
-
-.current-hover-point {
-  background: var(--paper);
-  border: 0.125rem solid var(--ochre);
-}
-
-.previous-hover-point {
-  background: var(--paper);
-  border: 0.1rem solid var(--point-hollow);
-}
-
-.trend-tooltip {
-  position: absolute;
-  z-index: 2;
-  top: var(--tooltip-y);
-  left: var(--tooltip-x);
-  min-width: 10.5rem;
-  padding: 0.6875rem 0.75rem;
-  pointer-events: none;
-  background: var(--tooltip-bg);
-  border: 1px solid var(--tooltip-line);
-  box-shadow: var(--shadow-float);
-  opacity: 0;
-  transform: translate(0.75rem, calc(-100% - 0.5rem)) scale(0.97);
-  transition: opacity 180ms ease, transform 180ms ease, left 180ms ease, top 180ms ease;
-}
-
-.plot-area.is-hovering .trend-tooltip {
-  opacity: 1;
-  transform: translate(0.75rem, calc(-100% - 0.75rem)) scale(1);
-}
-
-.trend-tooltip.is-left {
-  transform: translate(calc(-100% - 0.75rem), calc(-100% - 0.75rem)) scale(1);
-}
-
-.trend-tooltip.is-below {
-  transform: translate(0.75rem, 0.75rem) scale(1);
-}
-
-.trend-tooltip.is-left.is-below {
-  transform: translate(calc(-100% - 0.75rem), 0.75rem) scale(1);
-}
-
-.trend-tooltip strong {
-  display: block;
-  margin-bottom: 0.4375rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-}
-
-.trend-tooltip dl {
-  display: grid;
-  gap: 0.25rem;
-  margin: 0;
-}
-
-.trend-tooltip dl div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.trend-tooltip dt,
-.trend-tooltip dd,
-.trend-tooltip > span {
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.trend-tooltip dt {
-  color: var(--ink-muted);
-}
-
-.trend-tooltip dd {
-  margin: 0;
-  font-weight: 600;
-}
-
-.trend-tooltip > span {
-  display: block;
-  margin-top: 0.5rem;
-  padding-top: 0.4375rem;
-  border-top: 1px solid var(--line);
-}
-
-.trend-tooltip .is-increase {
-  color: var(--increase);
-}
-
-.trend-tooltip .is-decrease {
-  color: var(--moss);
-}
-
-@keyframes draw-line {
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
-@keyframes area-reveal {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(1);
-  }
-}
-
-@keyframes point-enter {
-  to {
-    opacity: 1;
-  }
 }
 
 @keyframes donut-turn {
@@ -338,17 +146,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .runtime-dot,
   .donut-arcs,
-  .donut-segment,
-  .area-reveal,
-  .trend-line,
-  .current-point {
+  .donut-segment {
     animation: none;
-  }
-
-  .trend-line {
-    stroke-dashoffset: 0;
   }
 }
 

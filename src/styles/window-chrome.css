@@ -2,7 +2,7 @@
   position: fixed;
   inset: 0 0 auto 0;
   z-index: 1000;
-  height: 2.5rem;
+  height: var(--chrome-h);
   pointer-events: none;
 }
 
@@ -17,7 +17,7 @@
   top: 0;
   right: 0;
   display: flex;
-  height: 2.5rem;
+  height: var(--chrome-h);
   pointer-events: auto;
 }
 
@@ -25,7 +25,7 @@
   display: grid;
   place-items: center;
   width: 2.75rem;
-  height: 2.5rem;
+  height: var(--chrome-h);
   padding: 0;
   color: var(--ink-muted);
   background: transparent;
@@ -94,13 +94,5 @@
 .window-icon-close::after {
   transform: translate(-50%, -50%) rotate(-45deg);
 }
-
-.usage-page {
-  padding-top: 2.5rem;
-}
-
-
-
-
 
 

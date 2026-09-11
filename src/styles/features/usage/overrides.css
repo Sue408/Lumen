@@ -1,4 +1,8 @@
-/* Usage page layout correction: keep metric strip compact and reserve the lower track for charts. */
+/*
+ * Usage page layout corrections: a compact metric strip, a reserved chart
+ * track, and fluid header controls. Consolidated from a stack of historical
+ * patches so each selector appears exactly once.
+ */
 .usage-page {
   grid-template-rows: auto auto auto minmax(0, 1fr);
 }
@@ -13,58 +17,9 @@
   padding-top: 0.5rem;
 }
 
+/* Header actions: icon actions first, period controls second. */
 .header-actions {
   display: flex;
-  align-items: flex-end;
-  gap: 0.75rem;
-}
-
-.period-control-stack {
-  display: grid;
-  justify-items: end;
-  gap: 0.65rem;
-}
-
-.period-control-stack .period-switcher {
-  width: max-content;
-}
-
-.period-control-stack .period-navigator {
-  min-height: 1.75rem;
-  gap: 0.35rem;
-}
-
-.period-control-stack .period-navigator > button:first-child,
-.period-control-stack .period-navigator > button:nth-child(3) {
-  width: 1.55rem;
-  height: 1.55rem;
-  font-size: 1rem;
-}
-
-.period-control-stack .period-navigator strong {
-  min-width: 9.5rem;
-  font-size: 0.75rem;
-}
-
-.period-control-stack .today-button,
-.today-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.35;
-}
-
-@media (max-width: 50rem) {
-  .header-actions {
-    align-items: flex-start;
-    width: 100%;
-  }
-
-  .period-control-stack {
-    justify-items: start;
-  }
-}
-
-/* Compact usage header controls: icon actions first, period controls second. */
-.header-actions {
   align-items: flex-end;
   gap: clamp(0.75rem, 1vw, 1.25rem);
 }
@@ -75,7 +30,6 @@
   align-self: flex-end;
   height: clamp(1.55rem, 2vw, 2rem);
   gap: clamp(0.3rem, 0.5vw, 0.6rem);
-  padding-bottom: 0;
 }
 
 .icon-button {
@@ -115,15 +69,31 @@
 
 .icon-button:disabled {
   cursor: not-allowed;
-  opacity: 0.35;
+  opacity: 0.4;
+}
+
+.icon-button.today-button {
+  margin-left: 0;
 }
 
 .period-control-stack {
+  display: grid;
+  justify-items: end;
   gap: clamp(0.65rem, 0.8vw, 0.9rem);
+}
+
+.period-control-stack .period-switcher {
+  width: max-content;
+  gap: clamp(1rem, 1.6vw, 1.75rem);
+}
+
+.period-control-stack .period-switcher button {
+  font-size: clamp(0.875rem, 0.85vw, 1rem);
 }
 
 .period-control-stack .period-navigator {
   min-height: clamp(1.55rem, 2vw, 2rem);
+  row-gap: 0.35rem;
   column-gap: clamp(0.1rem, 0.18vw, 0.2rem);
   justify-content: flex-start;
 }
@@ -140,21 +110,23 @@
   font-size: clamp(0.75rem, 0.85vw, 0.95rem);
 }
 
+.period-control-stack .today-button,
+.today-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
 @media (max-width: 50rem) {
+  .header-actions {
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  .period-control-stack {
+    justify-items: start;
+  }
+
   .header-utility-actions {
     padding-bottom: 0;
   }
-}
-
-
-.icon-button.today-button {
-  margin-left: 0;
-}
-
-.period-control-stack .period-switcher {
-  gap: clamp(1rem, 1.6vw, 1.75rem);
-}
-
-.period-control-stack .period-switcher button {
-  font-size: clamp(0.875rem, 0.85vw, 1rem);
 }

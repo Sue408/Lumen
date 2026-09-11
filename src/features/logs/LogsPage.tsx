@@ -192,7 +192,8 @@ export function LogsPage() {
         </p>
 
         <div className="logs-toolbar">
-          <div className="logs-scope" role="group" aria-label="查看口径">
+          <div className="logs-toolbar-view">
+            <div className="logs-scope" role="group" aria-label="查看口径">
             {logScopes.map((item) => (
               <button
                 className={item.key === scope ? "is-selected" : ""}
@@ -217,7 +218,8 @@ export function LogsPage() {
           >
             <CalendarRange aria-hidden="true" />
             {rangeActive ? rangeLabel : "时间范围"}
-          </button>
+            </button>
+          </div>
 
           <div className="logs-filters">
             <label>
@@ -246,11 +248,11 @@ export function LogsPage() {
                 placeholder="别名、模型、类型或 Token"
               />
             </label>
-          </div>
 
-          <span className="logs-count">
-            {loading ? "读取中…" : logs ? `${numberFormat.format(logs.length)} 条` : "读取中…"}
-          </span>
+            <span className="logs-count">
+              {loading ? "读取中…" : logs ? `${numberFormat.format(logs.length)} 条` : "读取中…"}
+            </span>
+          </div>
         </div>
 
         {rangeOpen ? (

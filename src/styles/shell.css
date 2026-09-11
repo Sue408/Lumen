@@ -23,9 +23,8 @@
 .usage-page h1,
 .usage-summary,
 .metric-value,
-.chart-heading h2,
-.donut-center strong {
-  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+.chart-heading h2 {
+  font-family: var(--font-serif);
 }
 
 .brand {

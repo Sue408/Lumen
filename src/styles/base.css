@@ -1,5 +1,38 @@
 :root {
-  font-family: Inter, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  /*
+   * Type system — the single source for the three families, mirroring the
+   * theme / layout token pattern. No web fonts are bundled: every stack ends
+   * in the platform's own serif / sans / mono so the ledger reads natively on
+   * Windows, macOS and Linux. Reference these tokens; never hardcode a stack.
+   */
+  --font-sans: Inter, "Noto Sans SC", "Microsoft YaHei", "PingFang SC",
+    "Hiragino Sans GB", system-ui, sans-serif;
+  /*
+   * Display serif is reserved for Latin and numerals. CJK has no dependable
+   * screen serif on Windows (SimSun renders with visible bitmap hatching), so
+   * after the real CJK serifs we fall back to the sans faces rather than the
+   * generic `serif` — clean Chinese beats a technically-serif glyph.
+   */
+  --font-serif: Georgia, "Times New Roman", "Noto Serif SC",
+    "Source Han Serif SC", "Songti SC", "Microsoft YaHei", "PingFang SC",
+    "Noto Sans SC", serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono",
+    "Cascadia Code", Consolas, Menlo, "Liberation Mono", monospace;
+
+  /* label tracking: eyebrow / section titles / field names share one value */
+  --tracking-label: 0.08em;
+
+  /*
+   * Fluid display sizes — these grow and shrink with the window instead of
+   * jumping between breakpoints, so the ledger keeps its proportions when the
+   * window is resized small or large.
+   */
+  --text-h1: clamp(1.5rem, 1.15rem + 1.05vw, 1.875rem);
+  --text-metric: clamp(1.45rem, 1rem + 1.5vw, 2rem);
+  --text-title: clamp(0.875rem, 0.82rem + 0.2vw, 0.9375rem);
+  --text-small: clamp(0.6875rem, 0.63rem + 0.25vw, 0.8125rem);
+
+  font-family: var(--font-sans);
   color: var(--ink);
   background: var(--paper);
   font-synthesis: none;
@@ -9,10 +42,6 @@
 
 * {
   box-sizing: border-box;
-}
-
-* {
-  scrollbar-gutter: stable;
 }
 
 @supports (-moz-appearance: none) {

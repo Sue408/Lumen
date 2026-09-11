@@ -19,8 +19,8 @@
 .providers-page h1,
 .routing-page h1 {
   margin: 0;
-  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
-  font-size: 1.875rem;
+  font-family: var(--font-serif);
+  font-size: var(--text-h1);
   font-weight: 600;
   line-height: 1.12;
 }
@@ -59,7 +59,7 @@
   color: var(--ink-soft);
   font-size: 0.75rem;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--tracking-label);
   font-variant-numeric: tabular-nums;
 }
 
@@ -99,7 +99,7 @@
   border-left: 2px solid transparent;
   border-radius: 0 4px 4px 0;
   cursor: pointer;
-  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
 }
 
 .register-select:hover {
@@ -195,7 +195,7 @@
 
 .sheet-title {
   margin: 0;
-  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+  font-family: var(--font-serif);
   font-size: 1.5rem;
   font-weight: 600;
   line-height: 1.15;
@@ -254,7 +254,7 @@
   color: var(--ink-soft);
   font-size: 0.8125rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--tracking-label);
 }
 
 .section-title svg {
@@ -323,7 +323,7 @@
 
 .brand-picker-trigger:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 .brand-picker-trigger .brand-mark.is-off {
@@ -360,7 +360,7 @@
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.75rem;
-  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
 .brand-picker-auto:hover {
@@ -391,7 +391,7 @@
   border-radius: 2px;
   cursor: pointer;
   font-size: 0.75rem;
-  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
 .brand-picker-tint button:hover {
@@ -424,7 +424,7 @@
   border-radius: 4px;
   cursor: pointer;
   place-items: center;
-  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
 .brand-picker-cell:hover {
@@ -495,7 +495,7 @@
   cursor: pointer;
   font-size: 0.75rem;
   white-space: nowrap;
-  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
 .toggle-pill:hover:not(:disabled) {
@@ -522,7 +522,7 @@
 
 .toggle-pill:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 .toggle-pill .status-dot {
@@ -542,7 +542,7 @@
   border-radius: 4px;
   cursor: pointer;
   place-items: center;
-  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
 .glyph-button svg {
@@ -611,7 +611,7 @@
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.8125rem;
-  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
 .quiet-button:hover:not(:disabled) {
@@ -641,7 +641,7 @@
 
 .quiet-button:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 /* ---- bars: unsaved prompt + danger confirm ---- */
@@ -873,7 +873,7 @@
 .model-id {
   overflow: hidden;
   color: var(--ink-muted);
-  font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.6875rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -977,7 +977,7 @@
   border-radius: 999px;
   cursor: pointer;
   font-size: 0.75rem;
-  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
 .capability-pill:hover:not(:disabled) {
@@ -993,7 +993,7 @@
 
 .capability-pill:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 .capability-pill:focus-visible {
@@ -1061,7 +1061,7 @@
   flex: 0 0 auto;
   color: var(--ink-muted);
   font-size: 0.6875rem;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-label);
 }
 
 .target-row.is-off .target-role {
@@ -1140,7 +1140,7 @@
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 1100;
   display: grid;
   padding: 2rem;
   background: var(--scrim);
@@ -1161,10 +1161,15 @@
 
 .modal-title {
   margin: 0 0 1rem;
-  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+  font-family: var(--font-serif);
   font-size: 1.125rem;
   font-weight: 600;
   line-height: 1.2;
+}
+
+.modal-card .entry-form {
+  display: grid;
+  gap: 1.25rem;
 }
 
 .modal-card .form-actions {

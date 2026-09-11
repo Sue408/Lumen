@@ -3,7 +3,7 @@
   grid-template-rows: auto auto auto minmax(20rem, 24rem);
   align-content: start;
   min-width: 0;
-  padding: var(--page-gutter-y) var(--page-gutter-x);
+  padding: var(--chrome-h) var(--page-gutter-x) var(--page-gutter-y);
   gap: 1.5rem;
   overflow: hidden;
 }
@@ -19,12 +19,12 @@
   margin-bottom: 4px;
   color: var(--ink-muted);
   font-size: 0.8125rem;
-  letter-spacing: 0.12em;
+  letter-spacing: var(--tracking-label);
 }
 
 .usage-page h1 {
   margin: 0;
-  font-size: 1.875rem;
+  font-size: var(--text-h1);
   font-weight: 600;
   line-height: 1.12;
 }
@@ -128,7 +128,7 @@
 
 .metric-value {
   overflow: hidden;
-  font-size: 2rem;
+  font-size: var(--text-metric);
   font-weight: 600;
   line-height: 1.12;
   text-overflow: ellipsis;
@@ -168,7 +168,7 @@
   padding-top: 0.1rem;
   color: var(--ink-muted);
   font-size: 0.6875rem;
-  letter-spacing: 0.1em;
+  letter-spacing: var(--tracking-label);
 }
 
 /* ---- per-key scope filter ---- */

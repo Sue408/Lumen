@@ -3,7 +3,7 @@
   flex-direction: column;
   min-width: 0;
   height: 100vh;
-  padding: var(--page-gutter-y) var(--page-gutter-x);
+  padding: var(--chrome-h) var(--page-gutter-x) var(--page-gutter-y);
   overflow: hidden;
 }
 
@@ -30,8 +30,8 @@
 
 .settings-page h1 {
   margin: 0;
-  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
-  font-size: 1.875rem;
+  font-family: var(--font-serif);
+  font-size: var(--text-h1);
   font-weight: 600;
   line-height: 1.12;
 }
@@ -122,7 +122,7 @@
   border-radius: 2px;
   cursor: pointer;
   font-size: 0.75rem;
-  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
 .settings-page .settings-segment button:hover {
@@ -133,6 +133,7 @@
   color: var(--ink);
   border-color: var(--ochre);
   background: var(--surface-active);
+  font-weight: 600;
 }
 
 .settings-page .settings-segment button:focus-visible {
@@ -143,7 +144,7 @@
 .settings-page .settings-path {
   overflow: hidden;
   color: var(--ink-muted);
-  font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;

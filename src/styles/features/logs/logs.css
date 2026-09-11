@@ -4,14 +4,14 @@
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 1.1rem;
   min-width: 0;
-  padding: 2.5rem var(--page-gutter-x) var(--page-gutter-y);
+  padding: var(--chrome-h) var(--page-gutter-x) var(--page-gutter-y);
   overflow: hidden;
 }
 
 .logs-page h1 {
   margin: 0;
-  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
-  font-size: 1.875rem;
+  font-family: var(--font-serif);
+  font-size: var(--text-h1);
   font-weight: 600;
   line-height: 1.12;
 }
@@ -37,9 +37,22 @@
 
 .logs-toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 0.75rem 1.25rem;
+  gap: 0.75rem 1rem;
+  min-width: 0;
+}
+
+.logs-toolbar-view {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 0.75rem;
+}
+
+.logs-scope,
+.logs-range-toggle {
+  flex: 0 0 auto;
 }
 
 .logs-scope {
@@ -55,11 +68,11 @@
   padding: 0.28rem 0.7rem;
   color: var(--ink-muted);
   background: transparent;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.8125rem;
-  transition: color 150ms ease, background-color 150ms ease;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
 .logs-scope button:hover {
@@ -68,7 +81,8 @@
 
 .logs-scope button.is-selected {
   color: var(--ink);
-  background: var(--paper-deep);
+  border-color: var(--ochre);
+  background: var(--surface-active);
   font-weight: 600;
 }
 
@@ -117,6 +131,8 @@
 .logs-filters {
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
   gap: 0.75rem;
   margin-left: auto;
 }
@@ -124,6 +140,7 @@
 .logs-filters label {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 0.4rem;
   color: var(--ink-muted);
   font-size: 0.75rem;
@@ -146,11 +163,18 @@
   outline-offset: 2px;
 }
 
+.logs-search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .logs-search input {
-  width: 16rem;
+  width: 100%;
+  min-width: 7rem;
 }
 
 .logs-count {
+  flex: 0 0 auto;
   color: var(--ink-muted);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
@@ -249,7 +273,7 @@
   background: var(--paper);
   font-size: 0.75rem;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-label);
 }
 
 .logs-row {
@@ -394,7 +418,7 @@
 }
 
 .logs-request-id code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.75rem;
 }
 
@@ -463,16 +487,19 @@
   outline-offset: 2px;
 }
 
-@media (max-width: 50rem) {
+/* narrow: stack the view controls and the filters as two blocks */
+@media (max-width: 60rem) {
+  .logs-toolbar {
+    flex-wrap: wrap;
+  }
+
   .logs-filters {
+    flex-basis: 100%;
     margin-left: 0;
-    width: 100%;
   }
+}
 
-  .logs-search input {
-    width: 11rem;
-  }
-
+@media (max-width: 50rem) {
   .logs-row-main {
     grid-template-columns: 3rem minmax(8rem, 1fr) 6.5rem 5rem 1rem;
     gap: 0.625rem;

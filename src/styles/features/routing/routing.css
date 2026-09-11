@@ -3,7 +3,7 @@
   flex-direction: column;
   min-width: 0;
   height: 100vh;
-  padding: 2.5rem var(--page-gutter-x) var(--page-gutter-y);
+  padding: var(--chrome-h) var(--page-gutter-x) var(--page-gutter-y);
   overflow: hidden;
 }
 

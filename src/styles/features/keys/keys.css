@@ -1,6 +1,10 @@
 /*
- * Virtual keys register. Same operating grammar as providers / routing,
- * plus the key display and quota meter that only this page owns.
+ * Virtual keys — an entry register, not a master/detail workbench.
+ *
+ * The job here is to read how much quota is left, create keys and copy them —
+ * not to edit or read key internals. So each key is a single row: name, an
+ * asterisk mask with a copy icon, a remaining-quota bar, and the actions.
+ * Vermilion stays reserved for over-budget / disabled.
  */
 
 .keys-page {
@@ -8,61 +12,221 @@
   flex-direction: column;
   min-width: 0;
   height: 100vh;
-  padding: 2.5rem var(--page-gutter-x) var(--page-gutter-y);
+  padding: var(--chrome-h) var(--page-gutter-x) var(--page-gutter-y);
   overflow: hidden;
 }
 
 .keys-page h1 {
   margin: 0;
-  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
-  font-size: 1.875rem;
+  font-family: var(--font-serif);
+  font-size: var(--text-h1);
   font-weight: 600;
   line-height: 1.12;
 }
 
-/* ---- key display (masked, with copy / rotate) ---- */
-
-.keys-page .key-value-row {
+/* the register holds the summary row and the list, so the new-key action can
+   sit close to the list's top rule */
+.keys-page .keys-register {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.6rem 0.75rem;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+  min-height: 0;
 }
 
-.keys-page .key-value {
-  flex: 1 1 16rem;
+.keys-page .keys-column {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--page-gap);
+  width: 100%;
+  max-width: 60rem;
   min-width: 0;
-  height: 2rem;
-  padding: 0 0.5rem;
-  overflow: hidden;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--line-control);
-  border-radius: 4px;
-  font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+  min-height: 0;
+  margin-inline: auto;
+}
+
+.keys-page .keys-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-right: 0.75rem;
+}
+
+.keys-page .keys-new {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 0.35rem;
+}
+
+.keys-page .keys-new svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.keys-page .keys-summary {
+  margin: 0;
+  color: var(--ink-muted);
   font-size: 0.8125rem;
-  line-height: 2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.keys-page .keys-summary strong {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.keys-page .keys-empty {
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+  justify-items: start;
+  padding-top: 0.5rem;
+}
+
+.keys-page .keys-list {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 4px 1rem 0;
+  margin: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  list-style: none;
+}
+
+/* ---- one row = one key ---- */
+
+.keys-page .key-card {
+  display: grid;
+  grid-template-columns: minmax(6rem, 1fr) auto minmax(16rem, auto);
+  align-items: center;
+  gap: 2.5rem;
+  padding: 0.95rem 0;
+  border-top: 1px solid var(--line-faint);
+}
+
+.keys-page .key-card:first-child {
+  border-top-color: var(--line);
+}
+
+/* three blocks — identity, key, usage+actions — split by two wide gaps */
+.keys-page .key-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.keys-page .key-part-id .brand-mark {
+  color: var(--ink-soft);
+}
+
+.keys-page .key-card.is-off .key-part-id .brand-mark {
+  color: var(--ink-faint);
+}
+
+.keys-page .key-card-name {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* ---- quota state + meter (vermilion is reserved for the warning) ---- */
-
-.keys-page .quota-state.is-normal {
+.keys-page .key-card.is-off .key-card-name {
   color: var(--ink-muted);
 }
 
-.keys-page .quota-state.is-near,
-.keys-page .quota-state.is-over {
-  color: var(--danger);
+/* ---- de-emphasised key mask + copy ---- */
+
+.keys-page .key-mask {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keys-page .key-card.is-off .key-mask {
+  color: var(--ink-faint);
+}
+
+.keys-page .key-copy {
+  display: inline-grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  place-items: center;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+}
+
+.keys-page .key-copy svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.keys-page .key-copy:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ochre);
+}
+
+.keys-page .key-copy:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.keys-page .key-copy:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+/* ---- quota: how much is left is the headline ---- */
+
+.keys-page .key-part-quota {
+  gap: 0.7rem;
+}
+
+.keys-page .key-part-quota .key-card-actions {
+  margin-left: 0.35rem;
 }
 
 .keys-page .quota-meter {
-  height: 4px;
-  margin-top: 0.5rem;
+  display: block;
+  flex: 0 0 auto;
+  width: clamp(5.5rem, 9vw, 9rem);
+  height: 6px;
+  overflow: hidden;
   background: var(--line-faint);
   border-radius: 999px;
-  overflow: hidden;
+}
+
+/* unlimited quota has no fill to show — mark it with a faint hatch instead */
+.keys-page .quota-meter.is-unlimited {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--line-faint) 0 6px,
+    transparent 6px 12px
+  );
 }
 
 .keys-page .quota-meter-fill {
@@ -76,6 +240,30 @@
 .keys-page .quota-meter.is-near .quota-meter-fill,
 .keys-page .quota-meter.is-over .quota-meter-fill {
   background: var(--danger);
+}
+
+.keys-page .key-quota-text {
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.keys-page .key-quota-text.is-near,
+.keys-page .key-quota-text.is-over {
+  color: var(--danger);
+}
+
+.keys-page .key-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.keys-page .key-card .confirm-bar {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

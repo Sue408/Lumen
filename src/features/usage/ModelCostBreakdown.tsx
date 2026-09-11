@@ -67,7 +67,7 @@ export function ModelCostBreakdown({ period }: ModelCostBreakdownProps) {
                 className="donut-total"
                 target={`$ ${period.totalCost.toFixed(2)}`}
               />
-              <span>总花费</span>
+              <span className="donut-label">总花费</span>
             </div>
           </div>
         </div>

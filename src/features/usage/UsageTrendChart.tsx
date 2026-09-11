@@ -125,11 +125,11 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
               />
             ))}
           </svg>
-          {anchors.map((anchor) => (
+          {anchors.map((anchor, index) => (
             <span
               key={anchor.name}
               className="stack-label"
-              style={{ "--label-y": `${(anchor.y / chartSize.height) * 100}%` } as CSSProperties}
+              style={{ "--label-index": `${index}` } as CSSProperties}
             >
               <i style={{ background: toneFor(anchor.tone) }} />
               {anchor.name}

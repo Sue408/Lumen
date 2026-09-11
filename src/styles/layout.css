@@ -12,4 +12,9 @@
   --page-gutter-x: clamp(2.25rem, 2.6vw, 3.5rem);
   --page-gutter-y: clamp(1.5rem, 4vh, 4rem);
   --page-gap: clamp(1rem, 2.5vh, 2.75rem);
+  /*
+   * Height of the custom title bar. Every page reserves at least this much
+   * top padding so its header clears the window controls.
+   */
+  --chrome-h: 2.5rem;
 }
