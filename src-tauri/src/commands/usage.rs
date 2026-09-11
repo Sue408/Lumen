@@ -5,7 +5,7 @@ use tauri::State;
 
 use crate::db::logs::{count_logs, list_log_aliases, list_logs, LogFilter};
 use crate::db::models::RequestLog;
-use crate::db::stats::{query_overview, Period, UsageOverview};
+use crate::db::stats::{query_overview, KeyScope, Period, UsageOverview};
 use crate::db::with_db;
 use crate::error::AppError;
 use crate::state::AppState;
@@ -40,6 +40,7 @@ pub async fn query_usage_overview_cmd(
     state: State<'_, Arc<AppState>>,
     period: String,
     anchor: Option<String>,
+    virtual_key_id: Option<String>,
 ) -> Result<UsageOverview, AppError> {
     let period = Period::parse(&period)?;
     let anchor = match anchor.filter(|value| !value.is_empty()) {
@@ -48,5 +49,6 @@ pub async fn query_usage_overview_cmd(
             .map_err(|_| AppError::message(format!("无法解析时间：{raw}")))?,
         None => Local::now(),
     };
-    query_overview(&state.db, period, anchor).await
+    let scope = KeyScope::from_filter(virtual_key_id);
+    query_overview(&state.db, period, anchor, scope).await
 }

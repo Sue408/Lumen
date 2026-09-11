@@ -218,14 +218,56 @@
 .model-cost {
   color: var(--ink-muted);
 }
-
 @keyframes breathe {
   0%,
   100% {
     opacity: 0.55;
   }
+
   50% {
     opacity: 1;
   }
+}
+
+/* ---- stacked area (day view): direct labels replace the legend ---- */
+
+.stack-plot {
+  overflow: visible;
+}
+
+.stack-area {
+  stroke: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.stack-label {
+  position: absolute;
+  top: var(--label-y);
+  right: 4px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.15rem;
+  color: var(--ink-soft);
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  text-align: right;
+  white-space: nowrap;
+  transform: translateY(-50%);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.stack-label i {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 1px;
+}
+
+.stack-label b {
+  color: var(--ink);
+  font-weight: 600;
 }
 

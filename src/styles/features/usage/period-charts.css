@@ -230,3 +230,23 @@
   }
 }
 
+/* ---- stacked bars (week view) ---- */
+
+.stack-track {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: stretch;
+  justify-content: flex-start;
+  width: min(1.6rem, 60%);
+  height: 100%;
+  margin: 0 auto;
+  border-radius: 2px 2px 0 0;
+  overflow: hidden;
+}
+
+.stack-seg {
+  display: block;
+  width: 100%;
+  min-height: 0;
+}
+

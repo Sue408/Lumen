@@ -1,20 +1,24 @@
 import { useEffect, useState } from "react";
 import { InlineError, LoadingLines } from "../../components/ConfigControls";
+import { listVirtualKeys, type VirtualKey } from "../../services/config";
 import { queryUsageOverview } from "../../services/usage";
 import { AnimatedMetricValue } from "./AnimatedMetricValue";
+import { AttributionLine } from "./AttributionLine";
 import { ModelCostBreakdown } from "./ModelCostBreakdown";
+import { QualityLine } from "./QualityLine";
 import { UsageTrendChart } from "./UsageTrendChart";
 import { WeeklyUsageBars, MonthlyUsageHeatmap } from "./PeriodUsageCharts";
-import {
-  formatPeriodCursor,
-  isCurrentPeriod,
-  shiftPeriod,
-} from "./period";
+import { formatPeriodCursor, isCurrentPeriod, shiftPeriod } from "./period";
 import { periodLabels, type PeriodKey, type UsagePeriod } from "./usageData";
+
+const ALL_SCOPE = "all";
+const UNASSIGNED_SCOPE = "__unassigned__";
 
 export function UsagePage() {
   const [periodKey, setPeriodKey] = useState<PeriodKey>("day");
   const [anchor, setAnchor] = useState(() => new Date());
+  const [scope, setScope] = useState(ALL_SCOPE);
+  const [keys, setKeys] = useState<VirtualKey[]>([]);
   const [overview, setOverview] = useState<UsagePeriod | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,9 +36,24 @@ export function UsagePage() {
 
   useEffect(() => {
     let alive = true;
+    listVirtualKeys()
+      .then((next) => {
+        if (alive) setKeys(next);
+      })
+      .catch(() => {
+        if (alive) setKeys([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
     setLoading(true);
     setError(null);
-    queryUsageOverview(periodKey, new Date(anchorTime))
+    const scopeValue = scope === ALL_SCOPE ? null : scope;
+    queryUsageOverview(periodKey, new Date(anchorTime), scopeValue)
       .then((data) => {
         if (alive) setOverview(data);
       })
@@ -50,7 +69,7 @@ export function UsagePage() {
     return () => {
       alive = false;
     };
-  }, [periodKey, anchorTime]);
+  }, [periodKey, anchorTime, scope]);
 
   const changePeriod = (next: PeriodKey) => {
     setPeriodKey(next);
@@ -68,17 +87,40 @@ export function UsagePage() {
         </div>
       </header>
       <div className="page-controls">
-        {overview ? (
-          <p className="usage-summary" aria-live="polite">
-            <strong>{current ? overview.summaryLead : cursor}</strong>
-            {current ? overview.summaryTail : "的用量记录已整理完毕。"}
-          </p>
-        ) : (
-          <p className="usage-summary" aria-live="polite">
-            {error ? "暂时无法读取用量数据。" : "正在整理用量数据…"}
-          </p>
-        )}
+        <div className="summary-stack">
+          {overview ? (
+            <p className="usage-summary" aria-live="polite">
+              <strong>{current ? overview.summaryLead : cursor}</strong>
+              {current ? overview.summaryTail : "的用量记录已整理完毕。"}
+            </p>
+          ) : (
+            <p className="usage-summary" aria-live="polite">
+              {error ? "暂时无法读取用量数据。" : "正在整理用量数据…"}
+            </p>
+          )}
+          {overview ? (
+            <div className="insight-block" aria-label="本期洞察">
+              <AttributionLine
+                attribution={overview.attribution}
+                previousLabel={overview.series.previous}
+              />
+              <QualityLine quality={overview.quality} />
+            </div>
+          ) : null}
+        </div>
         <div className="header-actions">
+          <label className="scope-select">
+            <span className="sr-only">按虚拟密钥筛选</span>
+            <select value={scope} onChange={(event) => setScope(event.target.value)}>
+              <option value={ALL_SCOPE}>全部</option>
+              <option value={UNASSIGNED_SCOPE}>未归属</option>
+              {keys.map((key) => (
+                <option key={key.id} value={key.id}>
+                  {key.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="header-utility-actions" aria-label="账本操作">
             <button
               className="icon-button today-button"
@@ -149,16 +191,20 @@ export function UsagePage() {
           <section className="usage-charts" aria-label="本期用量图表">
             {periodKey === "day" ? (
               <UsageTrendChart
-                key={`trend-${periodKey}-${anchorTime}`}
+                key={`trend-${periodKey}-${anchorTime}-${scope}`}
                 period={overview}
                 anchor={anchor}
               />
             ) : periodKey === "week" ? (
-              <WeeklyUsageBars key={`bars-${anchorTime}`} period={overview} />
+              <WeeklyUsageBars key={`bars-${anchorTime}-${scope}`} period={overview} />
             ) : (
-              <MonthlyUsageHeatmap key={`heat-${anchorTime}`} period={overview} anchor={anchor} />
+              <MonthlyUsageHeatmap
+                key={`heat-${anchorTime}-${scope}`}
+                period={overview}
+                anchor={anchor}
+              />
             )}
-            <ModelCostBreakdown key={`cost-${periodKey}-${anchorTime}`} period={overview} />
+            <ModelCostBreakdown key={`cost-${periodKey}-${anchorTime}-${scope}`} period={overview} />
           </section>
         </>
       ) : null}

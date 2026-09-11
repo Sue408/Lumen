@@ -8,10 +8,41 @@ export type Metric = {
 
 export type ChartTone = "ochre" | "indigo" | "moss" | "yellow";
 
+export type LayerTone = ChartTone | "ink";
+
 export type ModelCost = {
   name: string;
   cost: number;
   tone: ChartTone;
+};
+
+export type UsageLayer = {
+  name: string;
+  tone: LayerTone;
+  values: number[];
+  amount: number;
+};
+
+export type Mover = {
+  name: string;
+  deltaCost: number;
+};
+
+export type CacheShift = {
+  fromRate: number;
+  toRate: number;
+};
+
+export type Attribution = {
+  deltaCost: number;
+  topMovers: Mover[];
+  cache: CacheShift | null;
+};
+
+export type Quality = {
+  cacheHitRate: number;
+  errorRate: number;
+  reasoningShare: number;
 };
 
 export type UsagePeriod = {
@@ -29,6 +60,9 @@ export type UsagePeriod = {
     currentValues: number[];
     previousValues: number[];
   };
+  layers: UsageLayer[];
+  attribution: Attribution;
+  quality: Quality;
   modelCosts: ModelCost[];
 };
 
@@ -59,6 +93,21 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
       currentValues: [2, 13, 36, 47, 51],
       previousValues: [6, 22, 31, 42, 47],
     },
+    layers: [
+      { name: "Claude 桌面端", tone: "ochre", values: [0.8, 1.3, 1.8, 2.1, 2.31], amount: 2.31 },
+      { name: "GPT-5 脚本", tone: "indigo", values: [0.4, 0.7, 0.95, 1.15, 1.3], amount: 1.3 },
+      { name: "手机端", tone: "moss", values: [0.25, 0.4, 0.55, 0.68, 0.77], amount: 0.77 },
+      { name: "未归属", tone: "ink", values: [0.15, 0.24, 0.32, 0.39, 0.44], amount: 0.44 },
+    ],
+    attribution: {
+      deltaCost: -0.42,
+      topMovers: [
+        { name: "Claude 桌面端", deltaCost: 0.31 },
+        { name: "未归属", deltaCost: -0.72 },
+      ],
+      cache: { fromRate: 0.62, toRate: 0.51 },
+    },
+    quality: { cacheHitRate: 0.51, errorRate: 0.024, reasoningShare: 0.18 },
     modelCosts: [
       { name: "Claude Sonnet", cost: 2.31, tone: "ochre" },
       { name: "GPT-5", cost: 1.3, tone: "indigo" },
@@ -86,6 +135,21 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
       currentValues: [42, 118, 236, 292, 371, 404],
       previousValues: [58, 146, 214, 268, 329, 362],
     },
+    layers: [
+      { name: "Claude 桌面端", tone: "ochre", values: [2.1, 4.8, 7.9, 10.6, 13.2, 15.1], amount: 15.1 },
+      { name: "GPT-5 脚本", tone: "indigo", values: [1.2, 2.7, 4.4, 6.0, 7.4, 8.49], amount: 8.49 },
+      { name: "手机端", tone: "moss", values: [0.7, 1.6, 2.7, 3.6, 4.4, 5.03], amount: 5.03 },
+      { name: "未归属", tone: "ink", values: [0.4, 0.9, 1.5, 2.0, 2.4, 2.84], amount: 2.84 },
+    ],
+    attribution: {
+      deltaCost: 2.06,
+      topMovers: [
+        { name: "Claude 桌面端", deltaCost: 1.8 },
+        { name: "手机端", deltaCost: 0.6 },
+      ],
+      cache: { fromRate: 0.58, toRate: 0.55 },
+    },
+    quality: { cacheHitRate: 0.55, errorRate: 0.019, reasoningShare: 0.15 },
     modelCosts: [
       { name: "Claude Sonnet", cost: 15.1, tone: "ochre" },
       { name: "GPT-5", cost: 8.49, tone: "indigo" },
@@ -113,6 +177,21 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
       currentValues: [84, 247, 524, 713, 842],
       previousValues: [122, 318, 486, 662, 751],
     },
+    layers: [
+      { name: "Claude 桌面端", tone: "ochre", values: [6.2, 14.1, 23.0, 30.5, 36.68], amount: 36.68 },
+      { name: "GPT-5 脚本", tone: "indigo", values: [3.5, 7.9, 12.9, 17.1, 20.63], amount: 20.63 },
+      { name: "手机端", tone: "moss", values: [2.1, 4.7, 7.7, 10.2, 12.23], amount: 12.23 },
+      { name: "未归属", tone: "ink", values: [1.2, 2.6, 4.3, 5.7, 6.88], amount: 6.88 },
+    ],
+    attribution: {
+      deltaCost: -4.88,
+      topMovers: [
+        { name: "GPT-5 脚本", deltaCost: 2.1 },
+        { name: "Claude 桌面端", deltaCost: -6.4 },
+      ],
+      cache: { fromRate: 0.6, toRate: 0.63 },
+    },
+    quality: { cacheHitRate: 0.63, errorRate: 0.021, reasoningShare: 0.12 },
     modelCosts: [
       { name: "Claude Sonnet", cost: 36.68, tone: "ochre" },
       { name: "GPT-5", cost: 20.63, tone: "indigo" },
@@ -121,5 +200,3 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
     ],
   },
 };
-
-

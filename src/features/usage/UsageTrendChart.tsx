@@ -1,20 +1,9 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from "react";
-import { buildAreaPath, buildSmoothPath } from "./chartGeometry";
-import {
-  buildPeriodAxisLabels,
-  buildPeriodSampleLabels,
-  buildTrendDetail,
-  getNearestPointIndex,
-  getVisiblePointCount,
-  resampleSeries,
-} from "./trendInteraction";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { labelAnchors, stackedAreaPaths } from "./chartGeometry";
+import { toneFor } from "./chartTone";
+import { buildPeriodAxisLabels, getVisiblePointCount, resampleSeries } from "./trendInteraction";
 import type { UsagePeriod } from "./usageData";
 import { isCurrentPeriod } from "./period";
-
-type UsageTrendChartProps = {
-  period: UsagePeriod;
-  anchor?: Date;
-};
 
 type ChartSize = {
   width: number;
@@ -22,10 +11,19 @@ type ChartSize = {
 };
 
 const fallbackChartSize: ChartSize = { width: 600, height: 210 };
-const tokenNumber = new Intl.NumberFormat("zh-CN", {
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 1,
+const money = new Intl.NumberFormat("zh-CN", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
+
+function niceMax(value: number): number {
+  if (value <= 0) return 10;
+  const exponent = Math.floor(Math.log10(value));
+  const base = 10 ** exponent;
+  const normalized = value / base;
+  const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return nice * base;
+}
 
 function useCurrentMinute() {
   const [now, setNow] = useState(() => new Date());
@@ -38,18 +36,16 @@ function useCurrentMinute() {
   return now;
 }
 
-export function UsageTrendChart({ period, anchor }: UsageTrendChartProps) {
+export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; anchor?: Date }) {
   const plotRef = useRef<HTMLDivElement>(null);
   const [chartSize, setChartSize] = useState<ChartSize>(fallbackChartSize);
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const [isHovering, setIsHovering] = useState(false);
   const liveNow = useCurrentMinute();
-  const now = anchor && !isCurrentPeriod("day", anchor, liveNow)
-    ? new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), 23, 59)
-    : liveNow;
+  const now =
+    anchor && !isCurrentPeriod("day", anchor, liveNow)
+      ? new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), 23, 59)
+      : liveNow;
   const id = useId().replace(/:/g, "");
-  const gradientId = `usage-area-${id}`;
-  const clipId = `usage-clip-${id}`;
+  const clipId = `stack-clip-${id}`;
 
   useLayoutEffect(() => {
     const plot = plotRef.current;
@@ -70,190 +66,76 @@ export function UsageTrendChart({ period, anchor }: UsageTrendChartProps) {
   }, []);
 
   const pointCount = getVisiblePointCount(period.periodKey, now);
-  const currentValues = resampleSeries(period.series.currentValues, pointCount);
-  const previousValues = resampleSeries(period.series.previousValues, pointCount);
+  const layers = useMemo(
+    () =>
+      period.layers.map((layer) => ({
+        ...layer,
+        values: resampleSeries(layer.values, pointCount),
+      })),
+    [period.layers, pointCount],
+  );
   const axisLabels = useMemo(
     () => buildPeriodAxisLabels(period.periodKey, now),
     [period.periodKey, now],
   );
-  const sampleLabels = useMemo(
-    () => buildPeriodSampleLabels(period.periodKey, now, pointCount),
-    [period.periodKey, now, pointCount],
-  );
-  const currentPath = buildSmoothPath(
-    currentValues,
-    chartSize.width,
-    chartSize.height,
-    period.yAxisMax,
-  );
-  const currentArea = buildAreaPath(
-    currentValues,
-    chartSize.width,
-    chartSize.height,
-    period.yAxisMax,
-  );
-  const previousPath = buildSmoothPath(
-    previousValues,
-    chartSize.width,
-    chartSize.height,
-    period.yAxisMax,
-  );
-  const lastValue = currentValues[currentValues.length - 1] ?? 0;
-  const lastY = chartSize.height - (lastValue / period.yAxisMax) * chartSize.height;
 
-  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    setIsHovering(true);
-    setHoveredIndex(
-      getNearestPointIndex(
-        event.clientX,
-        bounds.left,
-        bounds.width,
-        currentValues.length,
-      ),
-    );
-  };
-
-  const detail =
-    hoveredIndex === null
-      ? null
-      : buildTrendDetail(
-          sampleLabels[hoveredIndex] ?? axisLabels[hoveredIndex] ?? "",
-          currentValues[hoveredIndex] ?? 0,
-          previousValues[hoveredIndex] ?? 0,
-        );
-  const hoverX =
-    hoveredIndex === null || currentValues.length <= 1
-      ? 0
-      : (hoveredIndex / (currentValues.length - 1)) * chartSize.width;
-  const hoverCurrentY =
-    detail === null
-      ? 0
-      : chartSize.height - (detail.currentValue / period.yAxisMax) * chartSize.height;
-  const hoverPreviousY =
-    detail === null
-      ? 0
-      : chartSize.height - (detail.previousValue / period.yAxisMax) * chartSize.height;
-  const hoverPositionStyle = {
-    "--hover-x": `${(hoverX / chartSize.width) * 100}%`,
-    "--hover-current-y": `${(hoverCurrentY / chartSize.height) * 100}%`,
-    "--hover-previous-y": `${(hoverPreviousY / chartSize.height) * 100}%`,
-  } as CSSProperties;
-  const tooltipStyle = {
-    "--tooltip-x": `${(hoverX / chartSize.width) * 100}%`,
-    "--tooltip-y": `${(hoverCurrentY / chartSize.height) * 100}%`,
-  } as CSSProperties;
+  const stackTotal = layers.reduce(
+    (sum, layer) => sum + (layer.values[layer.values.length - 1] ?? 0),
+    0,
+  );
+  const yMax = niceMax(stackTotal > 0 ? stackTotal : period.totalCost);
+  const areas = stackedAreaPaths(layers, chartSize.width, chartSize.height, yMax);
+  const anchors = labelAnchors(layers, chartSize.height, yMax, 18);
 
   return (
     <article className="chart-panel trend-panel">
       <header className="chart-heading">
         <h2>
-          Token 用量趋势
-          <span className="chart-unit">万 Tokens</span>
+          花费构成
+          <span className="chart-unit">元 · 累积</span>
         </h2>
-        <div className="series-key" aria-label="趋势线说明">
-          <span>
-            <i className="key-line" aria-hidden="true" />
-            {period.series.current}
-          </span>
-          <span>
-            <i className="key-line is-previous" aria-hidden="true" />
-            {period.series.previous}
-          </span>
-        </div>
+        <span className="chart-meta">{layers.length} 个分层</span>
       </header>
 
       <div className="trend-chart">
         <div className="y-axis" aria-hidden="true">
-          <span>{period.yAxisMax}</span>
-          <span>{period.yAxisMax / 2}</span>
+          <span>{yMax}</span>
+          <span>{yMax / 2}</span>
           <span>0</span>
         </div>
-        <div
-          className={`plot-area${isHovering ? " is-hovering" : ""}`}
-          ref={plotRef}
-          onPointerMove={handlePointerMove}
-          onPointerEnter={() => setIsHovering(true)}
-          onPointerLeave={() => setIsHovering(false)}
-          style={hoverPositionStyle}
-        >
+        <div className="plot-area stack-plot" ref={plotRef}>
           <svg
             viewBox={`0 0 ${chartSize.width} ${chartSize.height}`}
             preserveAspectRatio="none"
             role="img"
-            aria-label={`${period.series.current}与${period.series.previous}的 Token 用量趋势`}
+            aria-label={`${period.heading}按分层堆叠的花费构成`}
           >
             <defs>
-              <linearGradient
-                id={gradientId}
-                x1="0"
-                y1="0"
-                x2="0"
-                y2={chartSize.height}
-                gradientUnits="userSpaceOnUse"
-              >
-                <stop offset="0%" stopOpacity="0.16" style={{ stopColor: "var(--chart-ochre)" }} />
-                <stop offset="55%" stopOpacity="0.055" style={{ stopColor: "var(--chart-ochre)" }} />
-                <stop offset="100%" stopOpacity="0" style={{ stopColor: "var(--chart-ochre)" }} />
-              </linearGradient>
               <clipPath id={clipId}>
-                <rect className="area-reveal" x="0" y="0" width={chartSize.width} height={chartSize.height} />
+                <rect x="0" y="0" width={chartSize.width} height={chartSize.height} />
               </clipPath>
             </defs>
-            <path
-              className="usage-area"
-              d={currentArea}
-              fill={`url(#${gradientId})`}
-              clipPath={`url(#${clipId})`}
-            />
-            <path className="trend-line previous-line" d={previousPath} pathLength="1" />
-            <path className="trend-line current-line" d={currentPath} pathLength="1" />
+            {areas.map((area) => (
+              <path
+                key={area.name}
+                className="stack-area"
+                d={area.path}
+                fill={toneFor(area.tone)}
+                clipPath={`url(#${clipId})`}
+              />
+            ))}
           </svg>
-
-          <span
-            className="plot-point current-end-point current-point"
-            style={{ "--point-y": `${(lastY / chartSize.height) * 100}%` } as CSSProperties}
-            aria-hidden="true"
-          />
-          {detail ? (
-            <>
-              <span className="hover-guide" aria-hidden="true" />
-              <span
-                className="plot-point hover-point previous-hover-point"
-                style={{ "--point-y": "var(--hover-previous-y)" } as CSSProperties}
-                aria-hidden="true"
-              />
-              <span
-                className="plot-point hover-point current-hover-point"
-                style={{ "--point-y": "var(--hover-current-y)" } as CSSProperties}
-                aria-hidden="true"
-              />
-              <div
-                className={`trend-tooltip${hoverX > chartSize.width * 0.68 ? " is-left" : ""}${hoverCurrentY < chartSize.height * 0.38 ? " is-below" : ""}`}
-                style={tooltipStyle}
-                role="status"
-              >
-                <strong>{detail.label}</strong>
-                <dl>
-                  <div>
-                    <dt>{period.series.current}</dt>
-                    <dd>{tokenNumber.format(detail.currentValue)} 万</dd>
-                  </div>
-                  <div>
-                    <dt>{period.series.previous}</dt>
-                    <dd>{tokenNumber.format(detail.previousValue)} 万</dd>
-                  </div>
-                </dl>
-                <span className={detail.difference >= 0 ? "is-increase" : "is-decrease"}>
-                  同期 {detail.difference >= 0 ? "+" : "−"}
-                  {tokenNumber.format(Math.abs(detail.difference))} 万
-                  {detail.percentage === null
-                    ? ""
-                    : ` (${detail.percentage >= 0 ? "+" : "−"}${Math.abs(detail.percentage)}%)`}
-                </span>
-              </div>
-            </>
-          ) : null}
+          {anchors.map((anchor) => (
+            <span
+              key={anchor.name}
+              className="stack-label"
+              style={{ "--label-y": `${(anchor.y / chartSize.height) * 100}%` } as CSSProperties}
+            >
+              <i style={{ background: toneFor(anchor.tone) }} />
+              {anchor.name}
+              <b>¥{money.format(anchor.amount)}</b>
+            </span>
+          ))}
         </div>
         <div className="x-axis" aria-hidden="true">
           {axisLabels.map((label, index) => (
@@ -264,4 +146,3 @@ export function UsageTrendChart({ period, anchor }: UsageTrendChartProps) {
     </article>
   );
 }
-

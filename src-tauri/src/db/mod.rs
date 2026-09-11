@@ -1,3 +1,4 @@
+pub mod attribution;
 pub mod keys;
 pub mod logs;
 pub mod models;

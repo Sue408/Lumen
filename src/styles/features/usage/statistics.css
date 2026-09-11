@@ -90,8 +90,10 @@
   min-width: 0;
 }
 
-.page-controls .usage-summary {
+.page-controls .summary-stack {
+  display: grid;
   flex: 1 1 auto;
+  gap: 0.3rem;
   min-width: 0;
 }
 
@@ -142,5 +144,54 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+/* ---- insights: attribution + quality lines ---- */
+
+.insight-block {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.insight-line {
+  display: flex;
+  gap: 0.6rem;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.insight-label {
+  flex: 0 0 auto;
+  padding-top: 0.1rem;
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+}
+
+/* ---- per-key scope filter ---- */
+
+.scope-select {
+  display: inline-flex;
+  align-self: flex-end;
+}
+
+.scope-select select {
+  height: clamp(1.55rem, 2vw, 2rem);
+  max-width: 10rem;
+  padding: 0 0.5rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line-control);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.scope-select select:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
 }
 

@@ -1,7 +1,10 @@
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, Months, Timelike, Utc};
 use rusqlite::Connection;
 use serde::Serialize;
 
+use crate::db::attribution::{build_attribution, Attribution};
 use crate::db::with_db;
 use crate::db::Db;
 use crate::error::AppError;
@@ -50,6 +53,43 @@ struct Totals {
 
 type LogRow = (DateTime<FixedOffset>, i64, i64, f64);
 
+/// 日志过滤范围：全部 / 未归属（历史 NULL）/ 指定密钥。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyScope {
+    All,
+    Unassigned,
+    Key(String),
+}
+
+/// 前端请求「未归属」桶时使用的哨兵值。
+pub const UNASSIGNED_SENTINEL: &str = "__unassigned__";
+
+impl KeyScope {
+    pub fn from_filter(value: Option<String>) -> Self {
+        match value {
+            None => KeyScope::All,
+            Some(value) if value == UNASSIGNED_SENTINEL => KeyScope::Unassigned,
+            Some(value) if value.is_empty() => KeyScope::All,
+            Some(value) => KeyScope::Key(value),
+        }
+    }
+
+    fn clause(&self) -> &'static str {
+        match self {
+            KeyScope::All => "",
+            KeyScope::Unassigned => " AND virtual_key_id IS NULL",
+            KeyScope::Key(_) => " AND virtual_key_id = ?3",
+        }
+    }
+
+    fn param(&self) -> Option<&str> {
+        match self {
+            KeyScope::Key(id) => Some(id),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricDto {
@@ -75,6 +115,26 @@ pub struct SeriesDto {
     pub previous_values: Vec<f64>,
 }
 
+/// 堆叠图的一层：某密钥或某模型在本期的累积花费（元）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageLayer {
+    pub name: String,
+    /// `ochre` / `indigo` / `moss` / `yellow`；「未归属」与「其他」为 `ink`。
+    pub tone: String,
+    pub values: Vec<f64>,
+    pub amount: f64,
+}
+
+/// 用量质量：命中率 / 失败率 / 推理占比。统计覆盖全部记录（含失败）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Quality {
+    pub cache_hit_rate: f64,
+    pub error_rate: f64,
+    pub reasoning_share: f64,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageOverview {
@@ -87,6 +147,9 @@ pub struct UsageOverview {
     pub axis_labels: Vec<String>,
     pub y_axis_max: f64,
     pub series: SeriesDto,
+    pub layers: Vec<UsageLayer>,
+    pub attribution: Attribution,
+    pub quality: Quality,
     pub model_costs: Vec<ModelCostDto>,
 }
 
@@ -159,17 +222,23 @@ fn fetch_rows(
     conn: &Connection,
     start: DateTime<Local>,
     end: DateTime<Local>,
+    scope: &KeyScope,
 ) -> Result<Vec<LogRow>, AppError> {
-    let mut stmt = conn.prepare(
+    let sql = format!(
         "SELECT occurred_at, input_tokens, output_tokens, cost
          FROM request_logs
-         WHERE status = 'success' AND occurred_at >= ?1 AND occurred_at < ?2",
-    )?;
+         WHERE status = 'success' AND occurred_at >= ?1 AND occurred_at < ?2{}",
+        scope.clause()
+    );
+    let start = start.with_timezone(&Utc).to_rfc3339();
+    let end = end.with_timezone(&Utc).to_rfc3339();
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(start), Box::new(end)];
+    if let Some(key) = scope.param() {
+        values.push(Box::new(key.to_string()));
+    }
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(
-        [
-            start.with_timezone(&Utc).to_rfc3339(),
-            end.with_timezone(&Utc).to_rfc3339(),
-        ],
+        rusqlite::params_from_iter(values.iter().map(|value| value.as_ref())),
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -232,6 +301,249 @@ fn cumulative_series(
             round2(running)
         })
         .collect()
+}
+
+type LayerRow = (DateTime<FixedOffset>, f64, String);
+
+fn layer_expr(scope: &KeyScope) -> &'static str {
+    match scope {
+        KeyScope::All => "COALESCE(k.name, '未归属')",
+        _ => "COALESCE(upstream_model_name, route_alias, '未知')",
+    }
+}
+
+fn fetch_layered_rows(
+    conn: &Connection,
+    start: DateTime<Local>,
+    end: DateTime<Local>,
+    scope: &KeyScope,
+) -> Result<Vec<LayerRow>, AppError> {
+    let sql = format!(
+        "SELECT request_logs.occurred_at, request_logs.cost, {} AS layer
+         FROM request_logs
+         LEFT JOIN virtual_keys k ON k.id = request_logs.virtual_key_id
+         WHERE request_logs.status = 'success'
+           AND request_logs.occurred_at >= ?1 AND request_logs.occurred_at < ?2{}",
+        layer_expr(scope),
+        scope.clause()
+    );
+    let start = start.with_timezone(&Utc).to_rfc3339();
+    let end = end.with_timezone(&Utc).to_rfc3339();
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(start), Box::new(end)];
+    if let Some(key) = scope.param() {
+        values.push(Box::new(key.to_string()));
+    }
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(
+        rusqlite::params_from_iter(values.iter().map(|value| value.as_ref())),
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, f64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        },
+    )?;
+    let mut parsed = Vec::new();
+    for row in rows {
+        let (raw, cost, layer) = row?;
+        if let Ok(occurred) = DateTime::parse_from_rfc3339(&raw) {
+            parsed.push((occurred, cost, layer));
+        }
+    }
+    Ok(parsed)
+}
+
+fn accumulate(buckets: Vec<f64>) -> Vec<f64> {
+    let mut running = 0.0;
+    buckets
+        .into_iter()
+        .map(|value| {
+            running += value;
+            round2(running)
+        })
+        .collect()
+}
+
+fn layer_buckets(
+    period: Period,
+    start: DateTime<Local>,
+    rows: &[LayerRow],
+    count: usize,
+    include: impl Fn(&str) -> bool,
+) -> Vec<f64> {
+    let mut buckets = vec![0f64; count];
+    for (occurred, cost, layer) in rows {
+        if include(layer) {
+            let moment = occurred.with_timezone(&Local);
+            if let Some(bucket) = bucket_index(period, start, moment) {
+                if bucket < count {
+                    buckets[bucket] += cost;
+                }
+            }
+        }
+    }
+    accumulate(buckets)
+}
+
+/// 按 scope 决定堆叠维度：全部 → 按密钥；单 key / 未归属 → 按模型。
+/// 取花费前 4 层 + 「其他」；「未归属」与「其他」走墨阶，不占矿物颜料。
+fn build_layers(
+    conn: &Connection,
+    period: Period,
+    start: DateTime<Local>,
+    scope: &KeyScope,
+) -> Result<Vec<UsageLayer>, AppError> {
+    let rows = fetch_layered_rows(conn, start, period_end(period, start), scope)?;
+
+    let mut totals: BTreeMap<String, f64> = BTreeMap::new();
+    for (_, cost, layer) in &rows {
+        *totals.entry(layer.clone()).or_insert(0.0) += cost;
+    }
+    let mut ranked: Vec<(String, f64)> = totals.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let keep = if ranked.len() <= MAX_MODEL_SLICES {
+        ranked.len()
+    } else {
+        MAX_MODEL_SLICES - 1
+    };
+    let head: Vec<(String, f64)> = ranked.iter().take(keep).cloned().collect();
+    let has_rest = ranked.len() > keep;
+    let rest_total: f64 = ranked.iter().skip(keep).map(|(_, cost)| cost).sum();
+    let count = period.bucket_count(start);
+
+    let mut layers: Vec<UsageLayer> = Vec::new();
+    let mut tone_index = 0usize;
+    for (name, amount) in &head {
+        let tone = if name == "未归属" {
+            "ink".to_string()
+        } else {
+            let tone = TONES[tone_index % TONES.len()].to_string();
+            tone_index += 1;
+            tone
+        };
+        let name_owned = name.clone();
+        layers.push(UsageLayer {
+            name: name.clone(),
+            tone,
+            values: layer_buckets(period, start, &rows, count, |layer| layer == name_owned),
+            amount: round2(*amount),
+        });
+    }
+    if has_rest {
+        let in_head = |layer: &str| head.iter().any(|(name, _)| name == layer);
+        layers.push(UsageLayer {
+            name: "其他".to_string(),
+            tone: "ink".to_string(),
+            values: layer_buckets(period, start, &rows, count, |layer| !in_head(layer)),
+            amount: round2(rest_total),
+        });
+    }
+    Ok(layers)
+}
+
+fn layer_totals(
+    conn: &Connection,
+    start: DateTime<Local>,
+    end: DateTime<Local>,
+    scope: &KeyScope,
+) -> Result<Vec<(String, f64)>, AppError> {
+    let rows = fetch_layered_rows(conn, start, end, scope)?;
+    let mut totals: BTreeMap<String, f64> = BTreeMap::new();
+    for (_, cost, layer) in rows {
+        *totals.entry(layer).or_insert(0.0) += cost;
+    }
+    Ok(totals.into_iter().collect())
+}
+
+/// 返回 `(缓存读取, 输入侧总量)`。输入侧近似为「缓存读取 + 缓存写入 + 输入」：
+/// Anthropic 语义精确，OpenAI 语义下输入已含缓存读取、分母偏大，仅作趋势参考。
+fn cache_totals(
+    conn: &Connection,
+    start: DateTime<Local>,
+    end: DateTime<Local>,
+    scope: &KeyScope,
+) -> Result<(i64, i64), AppError> {
+    let sql = format!(
+        "SELECT COALESCE(SUM(cache_read_tokens), 0),
+                COALESCE(SUM(cache_read_tokens + cache_creation_tokens + input_tokens), 0)
+         FROM request_logs
+         WHERE status = 'success' AND occurred_at >= ?1 AND occurred_at < ?2{}",
+        scope.clause()
+    );
+    let start = start.with_timezone(&Utc).to_rfc3339();
+    let end = end.with_timezone(&Utc).to_rfc3339();
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(start), Box::new(end)];
+    if let Some(key) = scope.param() {
+        values.push(Box::new(key.to_string()));
+    }
+    let mut stmt = conn.prepare(&sql)?;
+    let totals = stmt.query_row(
+        rusqlite::params_from_iter(values.iter().map(|value| value.as_ref())),
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+    )?;
+    Ok(totals)
+}
+
+fn quality_totals(
+    conn: &Connection,
+    start: DateTime<Local>,
+    end: DateTime<Local>,
+    scope: &KeyScope,
+) -> Result<Quality, AppError> {
+    let sql = format!(
+        "SELECT COUNT(*),
+                COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(cache_read_tokens), 0),
+                COALESCE(SUM(cache_read_tokens + cache_creation_tokens + input_tokens), 0),
+                COALESCE(SUM(reasoning_tokens), 0),
+                COALESCE(SUM(output_tokens), 0)
+         FROM request_logs
+         WHERE occurred_at >= ?1 AND occurred_at < ?2{}",
+        scope.clause()
+    );
+    let start = start.with_timezone(&Utc).to_rfc3339();
+    let end = end.with_timezone(&Utc).to_rfc3339();
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(start), Box::new(end)];
+    if let Some(key) = scope.param() {
+        values.push(Box::new(key.to_string()));
+    }
+    let mut stmt = conn.prepare(&sql)?;
+    let (count, errors, cache_read, cache_denom, reasoning, output) = stmt.query_row(
+        rusqlite::params_from_iter(values.iter().map(|value| value.as_ref())),
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+            ))
+        },
+    )?;
+    Ok(Quality {
+        cache_hit_rate: if cache_denom > 0 {
+            round4(cache_read as f64 / cache_denom as f64)
+        } else {
+            0.0
+        },
+        error_rate: if count > 0 {
+            round4(errors as f64 / count as f64)
+        } else {
+            0.0
+        },
+        reasoning_share: if output > 0 {
+            round4(reasoning as f64 / output as f64)
+        } else {
+            0.0
+        },
+    })
+}
+
+fn round4(value: f64) -> f64 {
+    (value * 10_000.0).round() / 10_000.0
 }
 
 fn round2(value: f64) -> f64 {
@@ -333,19 +645,25 @@ fn model_costs(
     conn: &Connection,
     start: DateTime<Local>,
     end: DateTime<Local>,
+    scope: &KeyScope,
 ) -> Result<Vec<ModelCostDto>, AppError> {
-    let mut stmt = conn.prepare(
+    let sql = format!(
         "SELECT COALESCE(upstream_model_name, route_alias, '未知') AS name, SUM(cost) AS cost
          FROM request_logs
-         WHERE status = 'success' AND occurred_at >= ?1 AND occurred_at < ?2
+         WHERE status = 'success' AND occurred_at >= ?1 AND occurred_at < ?2{}
          GROUP BY name
          ORDER BY cost DESC",
-    )?;
+        scope.clause()
+    );
+    let start = start.with_timezone(&Utc).to_rfc3339();
+    let end = end.with_timezone(&Utc).to_rfc3339();
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(start), Box::new(end)];
+    if let Some(key) = scope.param() {
+        values.push(Box::new(key.to_string()));
+    }
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(
-        [
-            start.with_timezone(&Utc).to_rfc3339(),
-            end.with_timezone(&Utc).to_rfc3339(),
-        ],
+        rusqlite::params_from_iter(values.iter().map(|value| value.as_ref())),
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?)),
     )?;
     let mut collected: Vec<(String, f64)> = Vec::new();
@@ -393,13 +711,14 @@ pub fn build_overview(
     conn: &Connection,
     period: Period,
     anchor: DateTime<Local>,
+    scope: &KeyScope,
 ) -> Result<UsageOverview, AppError> {
     let start = period_start(period, anchor);
     let end = period_end(period, start);
     let prev_start = previous_start(period, start);
 
-    let current_rows = fetch_rows(conn, start, end)?;
-    let previous_rows = fetch_rows(conn, prev_start, start)?;
+    let current_rows = fetch_rows(conn, start, end, scope)?;
+    let previous_rows = fetch_rows(conn, prev_start, start, scope)?;
     let current = totals(&current_rows);
     let previous = totals(&previous_rows);
 
@@ -452,7 +771,17 @@ pub fn build_overview(
     };
 
     let (current_label, previous_label) = series_labels(period, start);
-    let model_costs = model_costs(conn, start, end)?;
+    let model_costs = model_costs(conn, start, end, scope)?;
+    let layers = build_layers(conn, period, start, scope)?;
+    let previous_layers = layer_totals(conn, prev_start, start, scope)?;
+    let current_layers = layer_totals(conn, start, end, scope)?;
+    let attribution = build_attribution(
+        &previous_layers,
+        &current_layers,
+        cache_totals(conn, prev_start, start, scope)?,
+        cache_totals(conn, start, end, scope)?,
+    );
+    let quality = quality_totals(conn, start, end, scope)?;
 
     Ok(UsageOverview {
         period_key: period.key().to_string(),
@@ -469,6 +798,9 @@ pub fn build_overview(
             current_values: current_series,
             previous_values: previous_series,
         },
+        layers,
+        attribution,
+        quality,
         model_costs,
     })
 }
@@ -477,15 +809,17 @@ pub async fn query_overview(
     db: &Db,
     period: Period,
     anchor: DateTime<Local>,
+    scope: KeyScope,
 ) -> Result<UsageOverview, AppError> {
-    with_db(db, move |conn| build_overview(conn, period, anchor)).await
+    with_db(db, move |conn| build_overview(conn, period, anchor, &scope)).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::keys::save_virtual_key;
     use crate::db::logs::insert_log;
-    use crate::db::models::RequestLog;
+    use crate::db::models::{RequestLog, VirtualKeyInput};
     use crate::db::open_in_memory;
 
     fn sample_log(occurred: DateTime<Local>, input: i64, output: i64, cost: f64, model: &str) -> RequestLog {
@@ -548,7 +882,7 @@ mod tests {
             insert_log(&conn, &sample_log(today - Duration::hours(2), 9999, 9999, 9.0, "alpha")).unwrap();
         }
         let conn = db.lock().unwrap();
-        let overview = build_overview(&conn, Period::Day, now).unwrap();
+        let overview = build_overview(&conn, Period::Day, now, &KeyScope::All).unwrap();
 
         assert_eq!(overview.total_cost, 2.25);
         assert_eq!(overview.metrics[0].value, "3 次");
@@ -559,5 +893,131 @@ mod tests {
         assert_eq!(overview.model_costs[0].cost, 1.5);
         // 输入 tokens: 5000 → 0.5 万
         assert_eq!(overview.metrics[1].value, "0.5 万");
+    }
+
+    #[test]
+    fn overview_respects_key_scope() {
+        let db = open_in_memory().unwrap();
+        let now = Local::now();
+        let today = period_start(Period::Day, now);
+        {
+            let conn = db.lock().unwrap();
+            let mut first = sample_log(today + Duration::hours(1), 1000, 500, 0.5, "alpha");
+            first.virtual_key_id = Some("k1".to_string());
+            insert_log(&conn, &first).unwrap();
+            let mut second = sample_log(today + Duration::hours(2), 2000, 1000, 1.5, "beta");
+            second.virtual_key_id = Some("k2".to_string());
+            insert_log(&conn, &second).unwrap();
+            // 无归属：virtual_key_id 保持 NULL
+            insert_log(
+                &conn,
+                &sample_log(today + Duration::hours(3), 3000, 1500, 2.0, "gamma"),
+            )
+            .unwrap();
+        }
+        let conn = db.lock().unwrap();
+
+        let all = build_overview(&conn, Period::Day, now, &KeyScope::All).unwrap();
+        assert_eq!(all.total_cost, 4.0);
+
+        let unassigned = build_overview(&conn, Period::Day, now, &KeyScope::Unassigned).unwrap();
+        assert_eq!(unassigned.total_cost, 2.0);
+        assert_eq!(unassigned.metrics[0].value, "1 次");
+
+        let keyed = build_overview(&conn, Period::Day, now, &KeyScope::Key("k1".to_string())).unwrap();
+        assert_eq!(keyed.total_cost, 0.5);
+        assert_eq!(keyed.metrics[0].value, "1 次");
+        assert_eq!(keyed.model_costs.len(), 1);
+        assert_eq!(keyed.model_costs[0].name, "alpha");
+    }
+
+    #[test]
+    fn layers_group_by_key_for_all_and_by_model_for_single_key() {
+        let db = open_in_memory().unwrap();
+        let now = Local::now();
+        let today = period_start(Period::Day, now);
+        let first_id;
+        {
+            let conn = db.lock().unwrap();
+            let first = save_virtual_key(
+                &conn,
+                &VirtualKeyInput {
+                    id: None,
+                    key: Some("sk-lumen-k1".to_string()),
+                    name: "甲".to_string(),
+                    enabled: true,
+                    quota_limit: None,
+                    quota_period: "monthly".to_string(),
+                },
+            )
+            .unwrap();
+            first_id = first.id.clone();
+            let second = save_virtual_key(
+                &conn,
+                &VirtualKeyInput {
+                    id: None,
+                    key: Some("sk-lumen-k2".to_string()),
+                    name: "乙".to_string(),
+                    enabled: true,
+                    quota_limit: None,
+                    quota_period: "monthly".to_string(),
+                },
+            )
+            .unwrap();
+
+            let mut a = sample_log(today + Duration::hours(1), 100, 50, 1.0, "alpha");
+            a.virtual_key_id = Some(first.id.clone());
+            insert_log(&conn, &a).unwrap();
+            let mut b = sample_log(today + Duration::hours(2), 100, 50, 2.0, "alpha");
+            b.virtual_key_id = Some(first.id.clone());
+            insert_log(&conn, &b).unwrap();
+            let mut c = sample_log(today + Duration::hours(3), 100, 50, 5.0, "beta");
+            c.virtual_key_id = Some(second.id.clone());
+            insert_log(&conn, &c).unwrap();
+            insert_log(
+                &conn,
+                &sample_log(today + Duration::hours(4), 100, 50, 4.0, "gamma"),
+            )
+            .unwrap();
+        }
+        let conn = db.lock().unwrap();
+
+        let all = build_overview(&conn, Period::Day, now, &KeyScope::All).unwrap();
+        let names: Vec<&str> = all.layers.iter().map(|layer| layer.name.as_str()).collect();
+        assert_eq!(names, vec!["乙", "未归属", "甲"]);
+        assert_eq!(all.layers[0].tone, "ochre");
+        assert_eq!(all.layers[1].tone, "ink");
+        assert_eq!(all.layers[2].tone, "indigo");
+        assert!((all.layers[1].amount - 4.0).abs() < 1e-9);
+        assert!((all.layers[1].values.last().copied().unwrap() - 4.0).abs() < 1e-9);
+
+        let keyed = build_overview(&conn, Period::Day, now, &KeyScope::Key(first_id)).unwrap();
+        let keyed_names: Vec<&str> = keyed.layers.iter().map(|layer| layer.name.as_str()).collect();
+        assert_eq!(keyed_names, vec!["alpha"]);
+        assert!((keyed.layers[0].amount - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn quality_reports_cache_error_and_reasoning_rates() {
+        let db = open_in_memory().unwrap();
+        let now = Local::now();
+        let today = period_start(Period::Day, now);
+        {
+            let conn = db.lock().unwrap();
+            let mut ok = sample_log(today + Duration::hours(1), 40, 100, 0.5, "alpha");
+            ok.cache_read_tokens = 60;
+            ok.reasoning_tokens = 20;
+            insert_log(&conn, &ok).unwrap();
+
+            let mut failed = sample_log(today + Duration::hours(2), 0, 0, 0.0, "alpha");
+            failed.status = "error".to_string();
+            insert_log(&conn, &failed).unwrap();
+        }
+        let conn = db.lock().unwrap();
+        let overview = build_overview(&conn, Period::Day, now, &KeyScope::All).unwrap();
+
+        assert!((overview.quality.cache_hit_rate - 0.6).abs() < 1e-9);
+        assert!((overview.quality.error_rate - 0.5).abs() < 1e-9);
+        assert!((overview.quality.reasoning_share - 0.2).abs() < 1e-9);
     }
 }

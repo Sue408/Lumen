@@ -1,115 +1,50 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { useState } from "react";
 import { cumulativeToDistribution, buildMonthHeatmap } from "./usageVisualData";
+import { toneFor } from "./chartTone";
 import { isCurrentPeriod } from "./period";
 import type { UsagePeriod } from "./usageData";
 
-const tokenNumber = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
-
 const weekLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
-type BarHover = {
-  index: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
 export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
-  const values = cumulativeToDistribution(period.series.currentValues);
-  const previous = cumulativeToDistribution(period.series.previousValues);
-  const max = Math.max(...values, ...previous, 1);
   const labels = weekLabels;
-  const containerRef = useRef<HTMLDivElement>(null);
-  const rectRef = useRef<DOMRect | null>(null);
-  const frameRef = useRef<number | null>(null);
-  const pendingRef = useRef<BarHover | null>(null);
-  const [hover, setHover] = useState<BarHover | null>(null);
+  const distributed = period.layers.map((layer) => cumulativeToDistribution(layer.values));
+  const dayTotals = labels.map((_, index) =>
+    distributed.reduce((sum, values) => sum + (values[index] ?? 0), 0),
+  );
+  const max = Math.max(...dayTotals, 0.0001);
 
-  useEffect(() => {
-    const refresh = () => {
-      if (containerRef.current) rectRef.current = containerRef.current.getBoundingClientRect();
-    };
-    window.addEventListener("resize", refresh);
-    return () => {
-      window.removeEventListener("resize", refresh);
-      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
-    };
-  }, []);
-
-  const handlePointerEnter = () => {
-    if (containerRef.current) rectRef.current = containerRef.current.getBoundingClientRect();
-  };
-
-  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    const container = containerRef.current;
-    if (!container) return;
-    const rect = rectRef.current ?? container.getBoundingClientRect();
-    rectRef.current = rect;
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const ratio = x / rect.width;
-    const index = Math.min(labels.length - 1, Math.max(0, Math.floor(ratio * labels.length)));
-    pendingRef.current = { index, x, y, width: rect.width, height: rect.height };
-    if (frameRef.current === null) {
-      frameRef.current = requestAnimationFrame(() => {
-        frameRef.current = null;
-        const pending = pendingRef.current;
-        if (!pending) return;
-        setHover((prev) =>
-          prev && prev.index === pending.index && prev.x === pending.x && prev.y === pending.y
-            ? prev
-            : pending,
-        );
-      });
-    }
-  };
-
-  const handlePointerLeave = () => {
-    if (frameRef.current !== null) {
-      cancelAnimationFrame(frameRef.current);
-      frameRef.current = null;
-    }
-    pendingRef.current = null;
-    setHover(null);
-  };
-
-  const hoveredValue = hover ? values[hover.index] ?? 0 : 0;
-  const tooltipStyle = hover
-    ? ({ "--tip-x": `${hover.x}px`, "--tip-y": `${hover.y}px` } as CSSProperties)
-    : undefined;
-
-  return <article className="chart-panel trend-panel">
-    <header className="chart-heading"><h2>每日用量分布<span className="chart-unit">万 Tokens</span></h2><span className="chart-meta">本周 · 上周同期</span></header>
-    <div
-      className="weekly-bars"
-      ref={containerRef}
-      role="img"
-      aria-label="本周每日 Token 用量柱状图"
-      onPointerEnter={handlePointerEnter}
-      onPointerMove={handlePointerMove}
-      onPointerLeave={handlePointerLeave}
-    >
-      {labels.map((label, index) => {
-        const value = values[index] ?? 0;
-        const prior = previous[index] ?? 0;
-        return <div className={`bar-column${value === 0 ? " is-empty" : ""}`} key={label}>
-          <div className="bar-track"><i className="bar-previous" style={{ height: `${(prior / max) * 100}%` }} /><i className="bar-current" style={{ height: `${(value / max) * 100}%` }} /></div>
-          <span>{label}</span>
-        </div>;
-      })}
-      {hover && hoveredValue > 0 ? (
-        <div
-          className={`bar-tooltip${hover.x > hover.width * 0.7 ? " is-left" : ""}${hover.y < hover.height * 0.4 ? " is-below" : ""}`}
-          style={tooltipStyle}
-        >
-          <strong>{labels[hover.index]}</strong>
-          <span>本周 {tokenNumber.format(hoveredValue)} 万</span>
-          <span>上周 {tokenNumber.format(previous[hover.index] ?? 0)} 万</span>
-        </div>
-      ) : null}
-    </div>
-  </article>;
+  return (
+    <article className="chart-panel trend-panel">
+      <header className="chart-heading">
+        <h2>
+          每日花费构成
+          <span className="chart-unit">元</span>
+        </h2>
+        <span className="chart-meta">按分层堆叠</span>
+      </header>
+      <div className="weekly-bars">
+        {labels.map((label, index) => (
+          <div className={`bar-column${dayTotals[index] === 0 ? " is-empty" : ""}`} key={label}>
+            <div className="stack-track">
+              {period.layers.map((layer, layerIndex) => {
+                const value = distributed[layerIndex][index] ?? 0;
+                return (
+                  <i
+                    key={layer.name}
+                    className="stack-seg"
+                    style={{ height: `${(value / max) * 100}%`, background: toneFor(layer.tone) }}
+                    title={`${layer.name} ¥${value.toFixed(2)}`}
+                  />
+                );
+              })}
+            </div>
+            <span>{label}</span>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
 }
 
 export function MonthlyUsageHeatmap({ period, anchor }: { period: UsagePeriod; anchor: Date }) {

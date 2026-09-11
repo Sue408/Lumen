@@ -105,11 +105,16 @@ function matchMockLogs(filter: LogFilter): RequestLog[] {
   });
 }
 
-export async function queryUsageOverview(period: PeriodKey, anchor?: Date): Promise<UsagePeriod> {
+export async function queryUsageOverview(
+  period: PeriodKey,
+  anchor?: Date,
+  keyScope?: string | null,
+): Promise<UsagePeriod> {
   if (!isTauriRuntime(window)) return clone(usagePeriods[period]);
   return invoke<UsagePeriod>("query_usage_overview_cmd", {
     period,
     anchor: anchor ? anchor.toISOString() : null,
+    virtualKeyId: keyScope ?? null,
   });
 }
 
