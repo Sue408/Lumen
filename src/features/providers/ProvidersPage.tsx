@@ -206,19 +206,19 @@ function ModelForm({
           <input value={draft.displayName} onChange={(event) => set({ displayName: event.target.value })} placeholder="留空则同上" />
         </label>
         <label className="field">
-          <span>输入单价 · 元 / 百万</span>
+          <span>输入单价 · $ / 百万</span>
           <input inputMode="decimal" value={draft.inputPrice} onChange={(event) => set({ inputPrice: event.target.value })} />
         </label>
         <label className="field">
-          <span>输出单价 · 元 / 百万</span>
+          <span>输出单价 · $ / 百万</span>
           <input inputMode="decimal" value={draft.outputPrice} onChange={(event) => set({ outputPrice: event.target.value })} />
         </label>
         <label className="field">
-          <span>缓存读单价 · 元 / 百万</span>
+          <span>缓存读单价 · $ / 百万</span>
           <input inputMode="decimal" value={draft.cacheReadPrice} onChange={(event) => set({ cacheReadPrice: event.target.value })} />
         </label>
         <label className="field">
-          <span>缓存写单价 · 元 / 百万</span>
+          <span>缓存写单价 · $ / 百万</span>
           <input inputMode="decimal" value={draft.cacheCreationPrice} onChange={(event) => set({ cacheCreationPrice: event.target.value })} />
         </label>
         <label className="field">
@@ -784,15 +784,15 @@ export function ProvidersPage() {
                                 <span className="model-price-group">
                                   <span className="price-cell">
                                     <em>入</em>
-                                    <b>¥{model.inputPrice}</b>
+                                    <b>${model.inputPrice}</b>
                                   </span>
                                   <span className="price-cell">
                                     <em>出</em>
-                                    <b>¥{model.outputPrice}</b>
+                                    <b>${model.outputPrice}</b>
                                   </span>
-                                  <span className="price-cell" title="缓存读单价 · 元 / 百万 token">
+                                  <span className="price-cell" title="缓存读单价 · $ / 百万 token">
                                     <em>缓存读</em>
-                                    <b>¥{model.cacheReadPrice}</b>
+                                    <b>${model.cacheReadPrice}</b>
                                   </span>
                                 </span>
                                 {model.capabilities.filter(isCapabilityId).length > 0 ? (

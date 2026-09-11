@@ -132,10 +132,10 @@ function KeyForm({
         <div className="field-grid">
           <div className="field">
             <span>计量</span>
-            <span className="field-static">按花费 ¥</span>
+            <span className="field-static">按花费 $</span>
           </div>
           <label className="field">
-            <span>上限 · 元 / 留空不限</span>
+            <span>上限 · $ / 留空不限</span>
             <input
               inputMode="decimal"
               value={draft.quotaLimit}

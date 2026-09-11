@@ -99,7 +99,7 @@ pub fn virtual_key_usage(
     Ok(usage)
 }
 
-/// 某密钥自周期起点以来的成功花费合计（元）。失败的调用不计入。
+/// 某密钥自周期起点以来的成功花费合计（美元）。失败的调用不计入。
 pub fn virtual_key_spend(
     conn: &Connection,
     key_id: &str,

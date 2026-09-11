@@ -13,7 +13,8 @@ const donutCircumference = 2 * Math.PI * 46;
 
 const currency = new Intl.NumberFormat("zh-CN", {
   style: "currency",
-  currency: "CNY",
+  currency: "USD",
+  currencyDisplay: "narrowSymbol",
   minimumFractionDigits: 2,
 });
 
@@ -64,7 +65,7 @@ export function ModelCostBreakdown({ period }: ModelCostBreakdownProps) {
             <div className="donut-center">
               <AnimatedMetricValue
                 className="donut-total"
-                target={`¥ ${period.totalCost.toFixed(2)}`}
+                target={`$ ${period.totalCost.toFixed(2)}`}
               />
               <span>总花费</span>
             </div>

@@ -133,7 +133,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
             >
               <i style={{ background: toneFor(anchor.tone) }} />
               {anchor.name}
-              <b>¥{money.format(anchor.amount)}</b>
+              <b>${money.format(anchor.amount)}</b>
             </span>
           ))}
         </div>

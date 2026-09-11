@@ -34,7 +34,7 @@ export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
                     key={layer.name}
                     className="stack-seg"
                     style={{ height: `${(value / max) * 100}%`, background: toneFor(layer.tone) }}
-                    title={`${layer.name} ¥${value.toFixed(2)}`}
+                    title={`${layer.name} $${value.toFixed(2)}`}
                   />
                 );
               })}

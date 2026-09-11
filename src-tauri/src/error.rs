@@ -28,7 +28,7 @@ pub enum AppError {
     },
     #[error("缺少或无效的虚拟密钥")]
     Unauthorized,
-    #[error("虚拟密钥「{name}」已超出额度：已用 ¥{spent:.2} / 上限 ¥{limit:.2}（{period}）")]
+    #[error("虚拟密钥「{name}」已超出额度：已用 ${spent:.2} / 上限 ${limit:.2}（{period}）")]
     QuotaExceeded {
         name: String,
         spent: f64,

@@ -93,15 +93,15 @@ export function quotaSummary(
   limit: number | null,
   period: QuotaPeriod,
 ): string {
-  const spentText = `¥${formatAmount(spent)}`;
+  const spentText = `$${formatAmount(spent)}`;
   if (limit === null) return `${spentText} / 不限`;
-  return `${spentText} / ¥${formatAmount(limit)} · ${quotaPeriodLabel[period]}`;
+  return `${spentText} / $${formatAmount(limit)} · ${quotaPeriodLabel[period]}`;
 }
 
 /** 登记簿摘要：只描述额度配置，不涉及实际花费。 */
 export function quotaConfigSummary(limit: number | null, period: QuotaPeriod): string {
   if (limit === null) return "不限额度";
-  return `上限 ¥${formatAmount(limit)} · ${quotaPeriodLabel[period]}`;
+  return `上限 $${formatAmount(limit)} · ${quotaPeriodLabel[period]}`;
 }
 
 export type QuotaTone = "normal" | "near" | "over";

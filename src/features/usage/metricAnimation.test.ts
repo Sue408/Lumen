@@ -5,7 +5,7 @@ import { formatAnimatedMetric } from "./metricAnimation.ts";
 test("metric animation preserves each metric's display format", () => {
   assert.equal(formatAnimatedMetric("86 次", 0.5), "43 次");
   assert.equal(formatAnimatedMetric("48.2 万", 0.5), "24.1 万");
-  assert.equal(formatAnimatedMetric("¥ 4.82", 0.5), "¥ 2.41");
+  assert.equal(formatAnimatedMetric("$ 4.82", 0.5), "$ 2.41");
   assert.equal(formatAnimatedMetric("1,284 次", 0.5), "642 次");
 });
 

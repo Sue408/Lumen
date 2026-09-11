@@ -75,13 +75,13 @@ test("quotaLimitToNumber maps blank to null", () => {
 });
 
 test("quotaSummary shows the limit or unlimited", () => {
-  assert.equal(quotaSummary(21.3, 50, "monthly"), "¥21.30 / ¥50.00 · 每月");
-  assert.equal(quotaSummary(12.1, null, "monthly"), "¥12.10 / 不限");
+  assert.equal(quotaSummary(21.3, 50, "monthly"), "$21.30 / $50.00 · 每月");
+  assert.equal(quotaSummary(12.1, null, "monthly"), "$12.10 / 不限");
 });
 
 test("quotaConfigSummary describes the configured cap only", () => {
   assert.equal(quotaConfigSummary(null, "monthly"), "不限额度");
-  assert.equal(quotaConfigSummary(50, "weekly"), "上限 ¥50.00 · 每周");
+  assert.equal(quotaConfigSummary(50, "weekly"), "上限 $50.00 · 每周");
 });
 
 test("quotaTone switches at 80 percent and the limit", () => {

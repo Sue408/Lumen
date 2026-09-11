@@ -115,7 +115,7 @@ pub struct SeriesDto {
     pub previous_values: Vec<f64>,
 }
 
-/// 堆叠图的一层：某密钥或某模型在本期的累积花费（元）。
+/// 堆叠图的一层：某密钥或某模型在本期的累积花费（美元）。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageLayer {
@@ -741,7 +741,7 @@ pub fn build_overview(
         },
         MetricDto {
             label: "总花费".to_string(),
-            value: format!("¥ {:.2}", current.cost),
+            value: format!("$ {:.2}", current.cost),
             comparison: comparison(unit, current.cost, previous.cost),
         },
     ];
@@ -886,7 +886,7 @@ mod tests {
 
         assert_eq!(overview.total_cost, 2.25);
         assert_eq!(overview.metrics[0].value, "3 次");
-        assert_eq!(overview.metrics[3].value, "¥ 2.25");
+        assert_eq!(overview.metrics[3].value, "$ 2.25");
         assert_eq!(overview.model_costs.len(), 2);
         assert_eq!(overview.model_costs[0].name, "beta");
         assert_eq!(overview.model_costs[1].name, "alpha");

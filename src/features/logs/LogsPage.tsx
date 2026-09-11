@@ -23,7 +23,11 @@ import {
 
 const PAGE_SIZE = 100;
 const numberFormat = new Intl.NumberFormat("zh-CN");
-const currency = new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY" });
+const currency = new Intl.NumberFormat("zh-CN", {
+  style: "currency",
+  currency: "USD",
+  currencyDisplay: "narrowSymbol",
+});
 const formatTokens = (value: number) => `${numberFormat.format(value)} Tokens`;
 
 type Summary = { all: number; failed: number; unreliable: number };

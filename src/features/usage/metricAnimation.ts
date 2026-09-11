@@ -6,8 +6,8 @@ export function formatAnimatedMetric(target: string, progress: number): string {
   const targetValue = Number.parseFloat(normalized.replace(/[^\d.-]/g, ""));
   const value = targetValue * clampProgress(progress);
 
-  if (target.trim().startsWith("¥")) {
-    return `¥ ${value.toFixed(2)}`;
+  if (target.trim().startsWith("$")) {
+    return `$ ${value.toFixed(2)}`;
   }
   if (target.trim().endsWith("万")) {
     return `${value.toFixed(1)} 万`;
