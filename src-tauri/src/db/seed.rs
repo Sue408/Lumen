@@ -5,7 +5,7 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-use super::models::{AUTH_BEARER, ICON_TINT_INK, PROTOCOL_OPENAI};
+use super::models::{is_known_protocol, AUTH_BEARER, ICON_TINT_INK, PROTOCOL_OPENAI};
 use crate::error::AppError;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -73,6 +73,8 @@ struct SeedRoute {
     alias: String,
     #[serde(default)]
     display_name: String,
+    #[serde(default = "default_protocol")]
+    protocol: String,
     #[serde(default = "default_true")]
     enabled: bool,
     #[serde(default)]
@@ -127,6 +129,7 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
     let now = chrono::Utc::now().to_rfc3339();
     let tx = conn.unchecked_transaction()?;
     let mut provider_ids: HashMap<String, String> = HashMap::new();
+    let mut provider_protocols: HashMap<String, String> = HashMap::new();
     for provider in &seed.providers {
         let id = uuid::Uuid::new_v4().to_string();
         let extra_headers = serde_json::to_string(&provider.extra_headers)?;
@@ -148,10 +151,12 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
                 now,
             ],
         )?;
+        provider_protocols.insert(provider.name.clone(), provider.protocol.clone());
         provider_ids.insert(provider.name.clone(), id);
     }
 
     let mut model_ids: HashMap<String, String> = HashMap::new();
+    let mut model_protocols: HashMap<String, String> = HashMap::new();
     for model in &seed.upstream_models {
         let provider_id = provider_ids.get(&model.provider).ok_or_else(|| {
             AppError::message(format!("seed 引用了不存在的提供商：{}", model.provider))
@@ -185,12 +190,22 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
                 model.enabled as i64,
             ],
         )?;
+        model_protocols.insert(
+            id.clone(),
+            provider_protocols.get(&model.provider).cloned().unwrap_or_default(),
+        );
         model_ids.insert(model.model_id.clone(), id.clone());
         model_ids.entry(display_name).or_insert(id);
     }
 
     let mut imported = 0;
     for route in &seed.routes {
+        if !is_known_protocol(&route.protocol) {
+            return Err(AppError::message(format!(
+                "seed 路由 {} 使用了未知协议：{}",
+                route.alias, route.protocol
+            )));
+        }
         let route_id = uuid::Uuid::new_v4().to_string();
         let display_name = if route.display_name.is_empty() {
             route.alias.clone()
@@ -198,9 +213,16 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
             route.display_name.clone()
         };
         tx.execute(
-            "INSERT INTO routes (id, alias, display_name, enabled, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![route_id, route.alias, display_name, route.enabled as i64, now],
+            "INSERT INTO routes (id, alias, display_name, protocol, enabled, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                route_id,
+                route.alias,
+                display_name,
+                route.protocol,
+                route.enabled as i64,
+                now
+            ],
         )?;
         for target in &route.targets {
             let model_id = model_ids.get(&target.upstream_model).ok_or_else(|| {
@@ -209,6 +231,16 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
                     route.alias, target.upstream_model
                 ))
             })?;
+            let target_protocol = model_protocols
+                .get(model_id)
+                .map(String::as_str)
+                .unwrap_or_default();
+            if target_protocol != route.protocol {
+                return Err(AppError::message(format!(
+                    "seed 路由 {} 协议不一致：目标为 {target_protocol}，声明为 {}",
+                    route.alias, route.protocol
+                )));
+            }
             tx.execute(
                 "INSERT INTO route_targets (id, route_id, upstream_model_id, priority, enabled)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -293,7 +325,7 @@ pub fn export_seed(conn: &Connection) -> Result<String, AppError> {
 
     let route_rows: Vec<(String, SeedRoute)> = {
         let mut stmt = conn.prepare(
-            "SELECT id, alias, display_name, enabled FROM routes ORDER BY created_at, alias",
+            "SELECT id, alias, display_name, protocol, enabled FROM routes ORDER BY created_at, alias",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -301,7 +333,8 @@ pub fn export_seed(conn: &Connection) -> Result<String, AppError> {
                 SeedRoute {
                     alias: row.get(1)?,
                     display_name: row.get(2)?,
-                    enabled: row.get::<_, i64>(3)? != 0,
+                    protocol: row.get(3)?,
+                    enabled: row.get::<_, i64>(4)? != 0,
                     targets: Vec::new(),
                 },
             ))

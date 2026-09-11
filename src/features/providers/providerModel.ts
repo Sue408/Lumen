@@ -11,10 +11,7 @@ export const authSchemeLabel: Record<AuthScheme, string> = {
   "x-api-key": "x-api-key",
 };
 
-export const protocolLabel: Record<Protocol, string> = {
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-};
+export { protocolLabel } from "../../services/protocol.ts";
 
 export function formatExtraHeaders(headers: Record<string, string>): string {
   return Object.entries(headers)

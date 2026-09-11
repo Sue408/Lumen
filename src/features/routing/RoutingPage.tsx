@@ -26,8 +26,10 @@ import {
   listProviders,
   listRoutes,
   listUpstreamModels,
+  protocolLabel,
   saveRoute,
   type IconTint,
+  type Protocol,
   type Provider,
   type RouteWithTargets,
   type UpstreamModel,
@@ -64,8 +66,9 @@ function markTint(mark: ModelMark | null | undefined): IconTint {
   return mark && mark.enabled ? mark.tint : "ink";
 }
 
-function groupedModels(providers: Provider[], models: UpstreamModel[]) {
+function groupedModels(providers: Provider[], models: UpstreamModel[], protocol: Protocol) {
   return providers
+    .filter((provider) => provider.protocol === protocol)
     .map((provider) => ({
       id: provider.id,
       name: provider.name,
@@ -80,6 +83,7 @@ function RouteForm({
   providers,
   models,
   brands,
+  modelProtocol,
   busy,
   error,
   onChange,
@@ -91,6 +95,7 @@ function RouteForm({
   providers: Provider[];
   models: UpstreamModel[];
   brands: Map<string, ModelMark>;
+  modelProtocol: Map<string, Protocol | undefined>;
   busy: boolean;
   error: string | null;
   onChange: (draft: RouteDraft) => void;
@@ -100,7 +105,16 @@ function RouteForm({
   const set = (patch: Partial<RouteDraft>) => onChange({ ...draft, ...patch });
   const setTarget = (index: number, patch: Partial<RouteDraft["targets"][number]>) =>
     set({ targets: draft.targets.map((target, itemIndex) => (itemIndex === index ? { ...target, ...patch } : target)) });
-  const groups = groupedModels(providers, models);
+  // 切换协议时丢弃不再兼容的目标：一个路由只服务一种协议。
+  const setProtocol = (protocol: Protocol) => {
+    const targets = draft.targets.filter((target) => {
+      const current = modelProtocol.get(target.upstreamModelId);
+      return current === undefined || current === protocol;
+    });
+    onChange({ ...draft, protocol, targets });
+  };
+  const groups = groupedModels(providers, models, draft.protocol);
+  const firstCompatible = groups[0]?.models[0]?.id ?? "";
   const dirty = isRouteDraftDirty(draft, savedDraft);
   const { containerRef, capture } = useFlipList<HTMLOListElement>();
 
@@ -123,6 +137,13 @@ function RouteForm({
             <span>展示名</span>
             <input value={draft.displayName} onChange={(event) => set({ displayName: event.target.value })} placeholder="留空则同别名" />
           </label>
+          <label className="field">
+            <span>协议</span>
+            <select value={draft.protocol} onChange={(event) => setProtocol(event.target.value as Protocol)}>
+              <option value="openai">{protocolLabel.openai}</option>
+              <option value="anthropic">{protocolLabel.anthropic}</option>
+            </select>
+          </label>
         </div>
       </section>
 
@@ -135,9 +156,9 @@ function RouteForm({
               type="button"
               onClick={() => {
                 capture();
-                set({ targets: [...draft.targets, makeTarget(models[0]?.id ?? "")] });
+                set({ targets: [...draft.targets, makeTarget(firstCompatible)] });
               }}
-              disabled={busy || models.length === 0}
+              disabled={busy || groups.length === 0}
             >
               ＋ 添加目标
             </button>
@@ -150,7 +171,9 @@ function RouteForm({
           <EmptyNote>
             {models.length === 0
               ? "还没有可用的上游模型，请先到上游提供商页登记。"
-              : "还没有添加目标，添加后才能保存。"}
+              : groups.length === 0
+                ? `还没有 ${protocolLabel[draft.protocol]} 协议的上游模型，请先到上游提供商页登记。`
+                : "还没有添加目标，添加后才能保存。"}
           </EmptyNote>
         ) : (
           <ol className="target-list" ref={containerRef}>
@@ -234,6 +257,10 @@ export function RoutingPage() {
 
   const dirty = draft !== null && savedDraft !== null && isRouteDraftDirty(draft, savedDraft);
   const brands = useMemo(() => buildBrandLookup(providers, models), [providers, models]);
+  const modelProtocol = useMemo(() => {
+    const providerProtocol = new Map(providers.map((provider) => [provider.id, provider.protocol]));
+    return new Map(models.map((model) => [model.id, providerProtocol.get(model.providerId)]));
+  }, [providers, models]);
 
   const select = (route: RouteWithTargets) => {
     const next = routeToDraft(route);
@@ -306,7 +333,7 @@ export function RoutingPage() {
 
   const submit = async (): Promise<boolean> => {
     if (!draft) return false;
-    const message = validateRouteDraft(draft);
+    const message = validateRouteDraft(draft, (id) => modelProtocol.get(id));
     if (message) {
       setFormError(message);
       return false;
@@ -318,6 +345,7 @@ export function RoutingPage() {
         id: draft.id,
         alias: draft.alias.trim(),
         displayName: draft.displayName.trim() || draft.alias.trim(),
+        protocol: draft.protocol,
         enabled: draft.enabled,
         targets: draft.targets.map((target, index) => ({
           upstreamModelId: target.upstreamModelId,
@@ -429,6 +457,7 @@ export function RoutingPage() {
                         <span className="register-body">
                           <span className="register-name" title={route.alias}>{route.alias}</span>
                           <span className="register-meta">
+                            <span className="protocol-tag">{protocolLabel[route.protocol]}</span>
                             {route.enabled
                               ? `${route.targets.length} 条目标`
                               : `已停用 · ${route.targets.length} 条目标`}
@@ -503,6 +532,7 @@ export function RoutingPage() {
                     providers={providers}
                     models={models}
                     brands={brands}
+                    modelProtocol={modelProtocol}
                     busy={busy}
                     error={formError}
                     onChange={setDraft}

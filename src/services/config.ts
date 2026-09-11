@@ -1,8 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "../components/tauriRuntime";
+import type { Protocol } from "./protocol";
+
+export { protocolLabel } from "./protocol";
+export type { Protocol } from "./protocol";
 
 export type AuthScheme = "bearer" | "x-api-key";
-export type Protocol = "openai" | "anthropic";
 export type IconTint = "ink" | "brand";
 
 export type Provider = {
@@ -68,6 +71,7 @@ export type Route = {
   id: string;
   alias: string;
   displayName: string;
+  protocol: Protocol;
   enabled: boolean;
   createdAt: string;
 };
@@ -92,6 +96,7 @@ export type RouteInput = {
   id?: string | null;
   alias: string;
   displayName: string;
+  protocol?: Protocol;
   enabled?: boolean;
   targets: RouteTargetInput[];
 };
@@ -181,17 +186,19 @@ let mockRoutes: RouteWithTargets[] = [
     id: "r-flash",
     alias: "deepseek/deepseek-v4-flash",
     displayName: "DeepSeek V4 Flash",
+    protocol: "anthropic",
     enabled: true,
     createdAt: "2026-09-01T02:05:00+00:00",
     targets: [
       { id: "t-1", routeId: "r-flash", upstreamModelId: "m-ds-flash", priority: 0, enabled: true },
-      { id: "t-2", routeId: "r-flash", upstreamModelId: "m-gpt-4o", priority: 1, enabled: true },
+      { id: "t-2", routeId: "r-flash", upstreamModelId: "m-ds-reason", priority: 1, enabled: true },
     ],
   },
   {
     id: "r-reason",
     alias: "deepseek/deepseek-v4-reasoner",
     displayName: "DeepSeek V4 Reasoner",
+    protocol: "anthropic",
     enabled: false,
     createdAt: "2026-09-04T09:00:00+00:00",
     targets: [
@@ -273,6 +280,7 @@ function mockSaveRoute(input: RouteInput): RouteWithTargets {
     id,
     alias: input.alias,
     displayName: input.displayName,
+    protocol: input.protocol ?? "openai",
     enabled: input.enabled ?? true,
     createdAt: existing?.createdAt ?? nowIso(),
     targets: input.targets.map((target, index) => ({

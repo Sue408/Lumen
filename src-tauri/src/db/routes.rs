@@ -1,6 +1,6 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
-use super::models::{Route, RouteInput, RouteTarget, RouteWithTargets};
+use super::models::{is_known_protocol, Route, RouteInput, RouteTarget, RouteWithTargets};
 use crate::error::AppError;
 
 pub fn list_routes(conn: &Connection) -> Result<Vec<RouteWithTargets>, AppError> {
@@ -39,7 +39,43 @@ fn list_targets(conn: &Connection, route_id: &str) -> Result<Vec<RouteTarget>, A
     Ok(targets)
 }
 
+/// 查上游模型所属提供商的协议，用于校验路由协议同构。
+fn target_protocol(conn: &Connection, upstream_model_id: &str) -> Result<Option<String>, AppError> {
+    conn.query_row(
+        "SELECT p.protocol
+           FROM upstream_models m
+           JOIN providers p ON p.id = m.provider_id
+          WHERE m.id = ?1",
+        [upstream_model_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(AppError::from)
+}
+
 pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTargets, AppError> {
+    if !is_known_protocol(&input.protocol) {
+        return Err(AppError::message(format!("未知协议：{}", input.protocol)));
+    }
+    // 一个路由只允许一种协议：所有目标的上游提供商协议必须与路由声明一致。
+    for target in &input.targets {
+        match target_protocol(conn, &target.upstream_model_id)? {
+            Some(protocol) if protocol == input.protocol => {}
+            Some(protocol) => {
+                return Err(AppError::message(format!(
+                    "路由协议与上游模型不一致：目标为 {protocol} 协议，路由声明为 {}",
+                    input.protocol
+                )))
+            }
+            None => {
+                return Err(AppError::message(format!(
+                    "上游模型不存在：{}",
+                    target.upstream_model_id
+                )))
+            }
+        }
+    }
+
     let id = input
         .id
         .clone()
@@ -48,13 +84,21 @@ pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTarg
     let created_at = chrono::Utc::now().to_rfc3339();
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "INSERT INTO routes (id, alias, display_name, enabled, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO routes (id, alias, display_name, protocol, enabled, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(id) DO UPDATE SET
             alias = excluded.alias,
             display_name = excluded.display_name,
+            protocol = excluded.protocol,
             enabled = excluded.enabled",
-        params![id, input.alias, input.display_name, input.enabled as i64, created_at],
+        params![
+            id,
+            input.alias,
+            input.display_name,
+            input.protocol,
+            input.enabled as i64,
+            created_at
+        ],
     )?;
     tx.execute("DELETE FROM route_targets WHERE route_id = ?1", [&id])?;
     for target in &input.targets {
@@ -89,4 +133,107 @@ pub fn list_enabled_aliases(conn: &Connection) -> Result<Vec<(String, String)>, 
         aliases.push(row?);
     }
     Ok(aliases)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    use crate::db::models::{ProviderInput, RouteInput, RouteTargetInput, UpstreamModelInput};
+    use crate::db::{open_in_memory, providers};
+
+    fn seed_model(conn: &Connection, protocol: &str, model_id: &str) -> String {
+        let provider = providers::save_provider(
+            conn,
+            &ProviderInput {
+                id: None,
+                name: format!("p-{protocol}-{model_id}"),
+                base_url: "https://example.com/v1".into(),
+                api_key: "secret".into(),
+                auth_scheme: "bearer".into(),
+                protocol: protocol.into(),
+                extra_headers: BTreeMap::new(),
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+        .unwrap();
+        providers::save_upstream_model(
+            conn,
+            &UpstreamModelInput {
+                id: None,
+                provider_id: provider.id,
+                model_id: model_id.into(),
+                display_name: model_id.into(),
+                input_price: 0.0,
+                output_price: 0.0,
+                cache_read_price: 0.0,
+                cache_creation_price: 0.0,
+                context_window: 0,
+                capabilities: Vec::new(),
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+        .unwrap()
+        .id
+    }
+
+    #[test]
+    fn rejects_mixed_protocol_targets() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let openai = seed_model(&conn, "openai", "gpt");
+        let anthropic = seed_model(&conn, "anthropic", "claude");
+        let result = save_route(
+            &conn,
+            &RouteInput {
+                id: None,
+                alias: "mix".into(),
+                display_name: "Mix".into(),
+                protocol: "openai".into(),
+                enabled: true,
+                targets: vec![
+                    RouteTargetInput {
+                        upstream_model_id: openai,
+                        priority: 0,
+                        enabled: true,
+                    },
+                    RouteTargetInput {
+                        upstream_model_id: anthropic,
+                        priority: 1,
+                        enabled: true,
+                    },
+                ],
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn persists_protocol_for_homogeneous_targets() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let anthropic = seed_model(&conn, "anthropic", "claude");
+        let saved = save_route(
+            &conn,
+            &RouteInput {
+                id: None,
+                alias: "claude".into(),
+                display_name: "Claude".into(),
+                protocol: "anthropic".into(),
+                enabled: true,
+                targets: vec![RouteTargetInput {
+                    upstream_model_id: anthropic,
+                    priority: 0,
+                    enabled: true,
+                }],
+            },
+        )
+        .unwrap();
+        assert_eq!(saved.route.protocol, "anthropic");
+    }
 }

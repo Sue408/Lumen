@@ -1,3 +1,4 @@
+import { protocolLabel, type Protocol } from "../../services/protocol.ts";
 import type { RouteWithTargets } from "../../services/config";
 
 export function moveTarget<T>(list: T[], index: number, delta: number): T[] {
@@ -18,6 +19,7 @@ export type RouteDraft = {
   id: string | null;
   alias: string;
   displayName: string;
+  protocol: Protocol;
   enabled: boolean;
   targets: RouteTargetDraft[];
 };
@@ -27,7 +29,7 @@ export function makeTarget(upstreamModelId: string): RouteTargetDraft {
 }
 
 export function emptyRouteDraft(): RouteDraft {
-  return { id: null, alias: "", displayName: "", enabled: true, targets: [] };
+  return { id: null, alias: "", displayName: "", protocol: "openai", enabled: true, targets: [] };
 }
 
 export function routeToDraft(route: RouteWithTargets): RouteDraft {
@@ -35,6 +37,7 @@ export function routeToDraft(route: RouteWithTargets): RouteDraft {
     id: route.id,
     alias: route.alias,
     displayName: route.displayName,
+    protocol: route.protocol,
     enabled: route.enabled,
     targets: [...route.targets]
       .sort((a, b) => a.priority - b.priority)
@@ -49,6 +52,7 @@ export function routeToDraft(route: RouteWithTargets): RouteDraft {
 export function isRouteDraftDirty(draft: RouteDraft, original: RouteDraft): boolean {
   if (draft.alias !== original.alias) return true;
   if (draft.displayName !== original.displayName) return true;
+  if (draft.protocol !== original.protocol) return true;
   if (draft.enabled !== original.enabled) return true;
   if (draft.targets.length !== original.targets.length) return true;
   return draft.targets.some((target, index) => {
@@ -60,7 +64,11 @@ export function isRouteDraftDirty(draft: RouteDraft, original: RouteDraft): bool
   });
 }
 
-export function validateRouteDraft(draft: RouteDraft): string | null {
+/// `protocolOf` 提供上游模型 → 协议映射时，额外校验目标与路由协议同构。
+export function validateRouteDraft(
+  draft: RouteDraft,
+  protocolOf?: (upstreamModelId: string) => Protocol | undefined,
+): string | null {
   const alias = draft.alias.trim();
   if (alias.length === 0) return "请填写路由别名。";
   if (/\s/.test(alias)) return "别名不能包含空格。";
@@ -72,6 +80,15 @@ export function validateRouteDraft(draft: RouteDraft): string | null {
   for (const target of draft.targets) {
     if (seen.has(target.upstreamModelId)) return "同一个上游模型不能重复添加。";
     seen.add(target.upstreamModelId);
+  }
+  if (protocolOf) {
+    const conflict = draft.targets.some((target) => {
+      const protocol = protocolOf(target.upstreamModelId);
+      return protocol !== undefined && protocol !== draft.protocol;
+    });
+    if (conflict) {
+      return `目标与路由协议不一致：请只选择 ${protocolLabel[draft.protocol]} 协议的上游模型。`;
+    }
   }
   return null;
 }

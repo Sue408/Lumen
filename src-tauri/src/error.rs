@@ -20,6 +20,12 @@ pub enum AppError {
     NotRunning,
     #[error("未找到模型：{0}")]
     ModelNotFound(String),
+    #[error("协议不匹配：别名 {alias} 的上游为 {actual} 协议，不能通过需要 {expected} 协议的端点调用")]
+    ProtocolMismatch {
+        alias: String,
+        expected: String,
+        actual: String,
+    },
     #[error("{0}")]
     Message(String),
 }
@@ -43,6 +49,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let status = match &self {
             AppError::ModelNotFound(_) => StatusCode::NOT_FOUND,
+            AppError::ProtocolMismatch { .. } => StatusCode::BAD_REQUEST,
             AppError::NotRunning | AppError::AlreadyRunning => StatusCode::CONFLICT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
@@ -60,6 +67,7 @@ impl IntoResponse for AppError {
 fn error_code(error: &AppError) -> &'static str {
     match error {
         AppError::ModelNotFound(_) => "model_not_found",
+        AppError::ProtocolMismatch { .. } => "protocol_mismatch",
         AppError::AlreadyRunning => "already_running",
         AppError::NotRunning => "not_running",
         _ => "internal_error",

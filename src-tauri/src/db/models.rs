@@ -6,6 +6,11 @@ pub const PROTOCOL_OPENAI: &str = "openai";
 pub const PROTOCOL_ANTHROPIC: &str = "anthropic";
 pub const ICON_TINT_INK: &str = "ink";
 
+/// 入站协议是否受网关支持。路由保存与种子导入时据此校验。
+pub fn is_known_protocol(protocol: &str) -> bool {
+    matches!(protocol, PROTOCOL_OPENAI | PROTOCOL_ANTHROPIC)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Provider {
@@ -157,6 +162,7 @@ pub struct Route {
     pub id: String,
     pub alias: String,
     pub display_name: String,
+    pub protocol: String,
     pub enabled: bool,
     pub created_at: String,
 }
@@ -185,6 +191,8 @@ pub struct RouteInput {
     pub id: Option<String>,
     pub alias: String,
     pub display_name: String,
+    #[serde(default = "default_protocol")]
+    pub protocol: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
@@ -207,6 +215,7 @@ impl Route {
             id: row.get("id")?,
             alias: row.get("alias")?,
             display_name: row.get("display_name")?,
+            protocol: row.get("protocol")?,
             enabled: row.get::<_, i64>("enabled")? != 0,
             created_at: row.get("created_at")?,
         })

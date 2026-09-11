@@ -23,6 +23,14 @@ pub fn upstream_url(base_url: &str, path: &str) -> String {
     )
 }
 
+/// 由上游协议决定转发路径；端点与协议绑定后，这是路径的唯一来源。
+pub fn upstream_path_for(protocol: &str) -> &'static str {
+    match protocol {
+        PROTOCOL_ANTHROPIC => "messages",
+        _ => "chat/completions",
+    }
+}
+
 /// OpenAI 协议：输入总量已包含缓存命中，计费时需先扣除。
 pub fn contains_cache_read(protocol: &str) -> bool {
     protocol != PROTOCOL_ANTHROPIC
@@ -53,7 +61,7 @@ pub async fn send(
         };
     }
 
-    if route.protocol == PROTOCOL_ANTHROPIC
+    if route.upstream_protocol == PROTOCOL_ANTHROPIC
         && !route.extra_headers.contains_key("anthropic-version")
     {
         request = request.header("anthropic-version", "2023-06-01");
@@ -177,7 +185,7 @@ pub fn stream_response(
     let status = response.status();
     let content_type = response.headers().get(header::CONTENT_TYPE).cloned();
     let request_id = request_id(response.headers());
-    let cache_in_input = contains_cache_read(&route.protocol);
+    let cache_in_input = contains_cache_read(&route.upstream_protocol);
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(16);
 
     tokio::spawn(async move {

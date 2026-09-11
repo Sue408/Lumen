@@ -19,7 +19,10 @@ pub struct ResolvedRoute {
     pub base_url: String,
     pub api_key: String,
     pub auth_scheme: String,
-    pub protocol: String,
+    /// 路由声明的入站协议（端点必须与之匹配）。
+    pub route_protocol: String,
+    /// 上游提供商的协议（决定转发路径、鉴权头与计费口径）。
+    pub upstream_protocol: String,
     pub extra_headers: BTreeMap<String, String>,
 }
 
@@ -27,6 +30,7 @@ pub fn resolve_route(conn: &Connection, alias: &str) -> Result<Option<ResolvedRo
     let mut stmt = conn.prepare(
         "SELECT
             r.id            AS route_id,
+            r.protocol      AS route_protocol,
             m.id            AS upstream_model_id,
             m.model_id      AS model_id,
             m.display_name  AS display_name,
@@ -38,7 +42,7 @@ pub fn resolve_route(conn: &Connection, alias: &str) -> Result<Option<ResolvedRo
             p.base_url      AS base_url,
             p.api_key       AS api_key,
             p.auth_scheme   AS auth_scheme,
-            p.protocol      AS protocol,
+            p.protocol      AS upstream_protocol,
             p.extra_headers AS extra_headers
          FROM routes r
          JOIN route_targets t   ON t.route_id = r.id
@@ -56,6 +60,7 @@ pub fn resolve_route(conn: &Connection, alias: &str) -> Result<Option<ResolvedRo
         let raw_headers: String = row.get("extra_headers")?;
         Ok(ResolvedRoute {
             route_id: row.get("route_id")?,
+            route_protocol: row.get("route_protocol")?,
             upstream_model_id: row.get("upstream_model_id")?,
             model_id: row.get("model_id")?,
             display_name: row.get("display_name")?,
@@ -67,7 +72,7 @@ pub fn resolve_route(conn: &Connection, alias: &str) -> Result<Option<ResolvedRo
             base_url: row.get("base_url")?,
             api_key: row.get("api_key")?,
             auth_scheme: row.get("auth_scheme")?,
-            protocol: row.get("protocol")?,
+            upstream_protocol: row.get("upstream_protocol")?,
             extra_headers: serde_json::from_str(&raw_headers).unwrap_or_default(),
         })
     })?;
@@ -131,6 +136,7 @@ mod tests {
                 id: None,
                 alias: "lumen/x".into(),
                 display_name: "X".into(),
+                protocol: "openai".into(),
                 enabled: true,
                 targets: vec![RouteTargetInput {
                     upstream_model_id: model.id,

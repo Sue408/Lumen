@@ -7,13 +7,15 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::{json, Value};
 
+use crate::db::models::{PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI};
 use crate::db::routes::list_enabled_aliases;
 use crate::db::with_db;
 use crate::error::AppError;
 use crate::gateway::forward::{
     contains_cache_read, ensure_include_usage, error_response, request_id, send, stream_response,
+    upstream_path_for,
 };
-use crate::gateway::resolve::resolve;
+use crate::gateway::resolve::{resolve, ResolvedRoute};
 use crate::gateway::usage::{build_log, extract_usage, record, LogContext, UsageTotals};
 use crate::state::AppState;
 
@@ -50,7 +52,7 @@ pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Response {
-    forward_completion(state, body, CHAT_ENDPOINT, "chat/completions").await
+    forward(state, body, PROTOCOL_OPENAI, CHAT_ENDPOINT).await
 }
 
 /// Anthropic Messages 直通：交给协议为 anthropic 的上游处理，不做协议转换。
@@ -58,14 +60,15 @@ pub async fn messages(
     State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Response {
-    forward_completion(state, body, MESSAGES_ENDPOINT, "messages").await
+    forward(state, body, PROTOCOL_ANTHROPIC, MESSAGES_ENDPOINT).await
 }
 
-async fn forward_completion(
+/// 端点协议与路由协议绑定：不匹配则在网关处拒绝，绝不把错误形状的 body 盲发上游。
+async fn forward(
     state: Arc<AppState>,
     mut body: Value,
+    required_protocol: &str,
     endpoint: &str,
-    upstream_path: &str,
 ) -> Response {
     let alias = match body.get("model").and_then(Value::as_str) {
         Some(alias) if !alias.is_empty() => alias.to_string(),
@@ -76,29 +79,35 @@ async fn forward_completion(
     let route = match resolve(&state, &alias).await {
         Ok(Some(route)) => route,
         Ok(None) => {
-            let log = build_log(LogContext {
-                endpoint: endpoint.to_string(),
-                method: "POST".to_string(),
-                alias: alias.clone(),
-                kind: "chat".to_string(),
-                is_stream,
-                route: None,
-                latency_ms: 0,
-                status: "error".to_string(),
-                http_status: Some(404),
-                error_message: Some(format!("未找到模型：{alias}")),
-                request_id: None,
-                usage: UsageTotals::missing(),
-            });
-            let _ = record(&state, log).await;
-            return AppError::ModelNotFound(alias).into_response();
+            let error = AppError::ModelNotFound(alias.clone());
+            reject(&state, endpoint, &alias, is_stream, None, &error).await;
+            return error.into_response();
         }
         Err(error) => return error.into_response(),
     };
 
+    if route.route_protocol != required_protocol {
+        let error = AppError::ProtocolMismatch {
+            alias: alias.clone(),
+            expected: required_protocol.to_string(),
+            actual: route.route_protocol.clone(),
+        };
+        reject(&state, endpoint, &alias, is_stream, Some(route), &error).await;
+        return error.into_response();
+    }
+    if route.route_protocol != route.upstream_protocol {
+        let error = AppError::message(format!(
+            "配置不一致：路由 {alias} 声明为 {} 协议，但上游提供商为 {} 协议",
+            route.route_protocol, route.upstream_protocol
+        ));
+        reject(&state, endpoint, &alias, is_stream, Some(route), &error).await;
+        return error.into_response();
+    }
+
+    let upstream_path = upstream_path_for(&route.upstream_protocol);
     body["model"] = Value::String(route.model_id.clone());
-    ensure_include_usage(&mut body, &route.protocol, is_stream);
-    let cache_in_input = contains_cache_read(&route.protocol);
+    ensure_include_usage(&mut body, &route.upstream_protocol, is_stream);
+    let cache_in_input = contains_cache_read(&route.upstream_protocol);
     let started = Instant::now();
     let timeout = if is_stream { None } else { Some(UPSTREAM_TIMEOUT) };
     let response = match send(&state, &route, &body, upstream_path, timeout).await {
@@ -181,6 +190,40 @@ fn error_message(value: &Value, fallback: &str) -> String {
                 fallback.to_string()
             }
         })
+}
+
+fn reject_status(error: &AppError) -> i64 {
+    match error {
+        AppError::ModelNotFound(_) => 404,
+        AppError::ProtocolMismatch { .. } => 400,
+        _ => 500,
+    }
+}
+
+/// 在进入转发前拒绝请求（未找到模型 / 协议不匹配 / 配置不一致），并落一条 error 日志。
+async fn reject(
+    state: &AppState,
+    endpoint: &str,
+    alias: &str,
+    is_stream: bool,
+    route: Option<ResolvedRoute>,
+    error: &AppError,
+) {
+    let log = build_log(LogContext {
+        endpoint: endpoint.to_string(),
+        method: "POST".to_string(),
+        alias: alias.to_string(),
+        kind: "chat".to_string(),
+        is_stream,
+        route,
+        latency_ms: 0,
+        status: "error".to_string(),
+        http_status: Some(reject_status(error)),
+        error_message: Some(error.to_string()),
+        request_id: None,
+        usage: UsageTotals::missing(),
+    });
+    let _ = record(state, log).await;
 }
 
 #[cfg(test)]
@@ -300,6 +343,7 @@ mod tests {
                 id: None,
                 alias: alias.into(),
                 display_name: "Mock".into(),
+                protocol: protocol.into(),
                 enabled: true,
                 targets: vec![RouteTargetInput {
                     upstream_model_id: model.id,
@@ -415,5 +459,59 @@ mod tests {
         assert_eq!(logs[0].total_tokens, 30);
         assert_eq!(logs[0].endpoint, "/v1/messages");
         assert!((logs[0].cost - 0.00004).abs() < 1e-9, "cost was {}", logs[0].cost);
+    }
+
+    #[tokio::test]
+    async fn chat_endpoint_rejects_anthropic_route() {
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, "http://127.0.0.1:1", "anthropic", "lumen/claude");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/claude", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["error"]["code"], "protocol_mismatch");
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].status, "error");
+        assert_eq!(logs[0].http_status, Some(400));
+    }
+
+    #[tokio::test]
+    async fn messages_endpoint_rejects_openai_route() {
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, "http://127.0.0.1:1", "openai", "lumen/gpt");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/messages",
+                json!({ "model": "lumen/gpt", "max_tokens": 8, "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].http_status, Some(400));
     }
 }

@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS routes (
     id            TEXT PRIMARY KEY,
     alias         TEXT NOT NULL UNIQUE,
     display_name  TEXT NOT NULL,
+    protocol      TEXT NOT NULL DEFAULT 'openai',
     enabled       INTEGER NOT NULL DEFAULT 1,
     created_at    TEXT NOT NULL
 );
@@ -111,7 +112,7 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(status);
 "#;
 
 /// 每次修改 `SCHEMA` 就 +1；启动时版本不符即重建空库（pre-launch 阶段不做逐列迁移）。
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// 依赖外键的表按子表在前顺序清空，避免重建时的外键约束。
 const DROP_ALL: &str = "

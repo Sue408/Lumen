@@ -6,3 +6,18 @@
   padding: 2.5rem var(--page-gutter-x) var(--page-gutter-y);
   overflow: hidden;
 }
+
+.routing-page .register-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.routing-page .protocol-tag {
+  padding: 0 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  color: var(--ink-muted);
+  font-size: 0.625rem;
+  line-height: 1.4;
+}

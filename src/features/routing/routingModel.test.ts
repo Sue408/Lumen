@@ -6,6 +6,7 @@ import {
   moveTarget,
   routeToDraft,
   validateRouteDraft,
+  type RouteDraft,
 } from "./routingModel.ts";
 import type { RouteWithTargets } from "../../services/config.ts";
 
@@ -21,6 +22,7 @@ test("routeToDraft sorts targets by priority", () => {
     id: "r1",
     alias: "deepseek",
     displayName: "DeepSeek",
+    protocol: "anthropic",
     enabled: true,
     createdAt: "",
     targets: [
@@ -29,6 +31,7 @@ test("routeToDraft sorts targets by priority", () => {
     ],
   };
   const draft = routeToDraft(route);
+  assert.equal(draft.protocol, "anthropic");
   assert.deepEqual(
     draft.targets.map(({ upstreamModelId, enabled }) => ({ upstreamModelId, enabled })),
     [
@@ -44,6 +47,7 @@ test("isRouteDraftDirty detects field, target and order changes", () => {
     id: "r1",
     alias: "a",
     displayName: "A",
+    protocol: "openai",
     enabled: true,
     createdAt: "",
     targets: [
@@ -53,6 +57,7 @@ test("isRouteDraftDirty detects field, target and order changes", () => {
   });
   assert.equal(isRouteDraftDirty(base, base), false);
   assert.equal(isRouteDraftDirty({ ...base, alias: "b" }, base), true);
+  assert.equal(isRouteDraftDirty({ ...base, protocol: "anthropic" }, base), true);
   assert.equal(isRouteDraftDirty({ ...base, enabled: false }, base), true);
   assert.equal(isRouteDraftDirty({ ...base, targets: base.targets.slice(0, 1) }, base), true);
   assert.equal(
@@ -93,5 +98,24 @@ test("validateRouteDraft enforces alias, targets and uniqueness", () => {
   assert.equal(
     validateRouteDraft({ ...draft, alias: "gpt", targets: [{ uid: "u1", upstreamModelId: "m1", enabled: true }] }),
     null,
+  );
+});
+
+test("validateRouteDraft rejects targets that conflict with route protocol", () => {
+  const protocolOf = (id: string): "openai" | "anthropic" | undefined =>
+    id === "m-openai" ? "openai" : id === "m-anthropic" ? "anthropic" : undefined;
+  const draft: RouteDraft = {
+    ...emptyRouteDraft(),
+    alias: "gpt",
+    protocol: "openai",
+    targets: [{ uid: "u1", upstreamModelId: "m-openai", enabled: true }],
+  };
+  assert.equal(validateRouteDraft(draft, protocolOf), null);
+  assert.equal(
+    validateRouteDraft(
+      { ...draft, targets: [{ uid: "u1", upstreamModelId: "m-anthropic", enabled: true }] },
+      protocolOf,
+    ),
+    "目标与路由协议不一致：请只选择 OpenAI 协议的上游模型。",
   );
 });
