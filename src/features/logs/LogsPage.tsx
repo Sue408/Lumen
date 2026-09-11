@@ -3,7 +3,7 @@ import { useLiveRevision } from "../../app/useLiveRevision";
 import { CalendarRange, Check, ChevronDown, Copy, X } from "lucide-react";
 import { InlineError, LoadingLines } from "../../components/ConfigControls";
 import type { RequestLog } from "../../services/gateway";
-import { countLogs, listLogAliases, listLogs } from "../../services/usage";
+import { listLogAliases, queryLogPage, type LogSummary } from "../../services/usage";
 import {
   ALL_ALIASES,
   buildLogFilter,
@@ -30,8 +30,6 @@ const currency = new Intl.NumberFormat("zh-CN", {
 });
 const formatTokens = (value: number) => `${numberFormat.format(value)} Tokens`;
 
-type Summary = { all: number; failed: number; unreliable: number };
-
 export function LogsPage() {
   const [scope, setScope] = useState<LogScope>("attention");
   const [alias, setAlias] = useState(ALL_ALIASES);
@@ -42,7 +40,7 @@ export function LogsPage() {
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [logs, setLogs] = useState<RequestLog[] | null>(null);
   const [total, setTotal] = useState<number | null>(null);
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const [summary, setSummary] = useState<LogSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -79,17 +77,19 @@ export function LogsPage() {
     let alive = true;
     setLoading(true);
     setError(null);
-    Promise.all([listLogs({ ...filter, limit }), countLogs(filter)])
-      .then(([rows, count]) => {
+    queryLogPage({ ...filter, limit }, summaryFilter)
+      .then((page) => {
         if (!alive) return;
-        setLogs(rows);
-        setTotal(count);
+        setLogs(page.logs);
+        setTotal(page.total);
+        setSummary(page.summary);
       })
       .catch((err: unknown) => {
         if (!alive) return;
         setError(String(err));
         setLogs(null);
         setTotal(null);
+        setSummary(null);
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -97,25 +97,7 @@ export function LogsPage() {
     return () => {
       alive = false;
     };
-  }, [filter, limit, revision]);
-
-  useEffect(() => {
-    let alive = true;
-    Promise.all([
-      countLogs(summaryFilter),
-      countLogs({ ...summaryFilter, status: "error" }),
-      countLogs({ ...summaryFilter, usageSource: "unreliable" }),
-    ])
-      .then(([all, failed, unreliable]) => {
-        if (alive) setSummary({ all, failed, unreliable });
-      })
-      .catch(() => {
-        if (alive) setSummary(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [summaryFilter, revision]);
+  }, [filter, limit, summaryFilter, revision]);
 
   const groups = useMemo(() => groupLogsByDay(logs ?? []), [logs]);
 

@@ -118,18 +118,39 @@ export async function queryUsageOverview(
   });
 }
 
-export async function listLogs(filter?: LogFilter): Promise<RequestLog[]> {
+export type LogSummary = { all: number; failed: number; unreliable: number };
+
+export type LogPage = {
+  logs: RequestLog[];
+  total: number;
+  summary: LogSummary;
+};
+
+export async function queryLogPage(
+  filter?: LogFilter,
+  summaryFilter?: LogFilter,
+): Promise<LogPage> {
   if (!isTauriRuntime(window)) {
+    const matched = matchMockLogs(filter ?? {});
     const offset = filter?.offset ?? 0;
     const limit = filter?.limit ?? 200;
-    return clone(matchMockLogs(filter ?? {}).slice(offset, offset + limit));
+    const forSummary = matchMockLogs(summaryFilter ?? filter ?? {});
+    return clone({
+      logs: matched.slice(offset, offset + limit),
+      total: matched.length,
+      summary: {
+        all: forSummary.length,
+        failed: forSummary.filter((log) => log.status === "error").length,
+        unreliable: forSummary.filter(
+          (log) => log.usageSource === "missing" || log.usageSource === "partial",
+        ).length,
+      },
+    });
   }
-  return invoke<RequestLog[]>("list_logs_cmd", { filter: filter ?? null });
-}
-
-export async function countLogs(filter?: LogFilter): Promise<number> {
-  if (!isTauriRuntime(window)) return matchMockLogs(filter ?? {}).length;
-  return invoke<number>("count_logs_cmd", { filter: filter ?? null });
+  return invoke<LogPage>("query_log_page_cmd", {
+    filter: filter ?? null,
+    summaryFilter: summaryFilter ?? null,
+  });
 }
 
 export async function listLogAliases(): Promise<string[]> {
