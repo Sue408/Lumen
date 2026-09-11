@@ -31,9 +31,33 @@ export async function setAutostart(enabled: boolean): Promise<boolean> {
   return invoke<boolean>("set_autostart_cmd", { enabled });
 }
 
-export async function exportSeed(): Promise<string> {
-  if (!isTauriRuntime(window)) return "lumen.seed.json";
-  return invoke<string>("export_seed_cmd");
+export type ItemSummary = {
+  created: number;
+  updated: number;
+};
+
+export type ImportSummary = {
+  providers: ItemSummary;
+  models: ItemSummary;
+  routes: ItemSummary;
+  virtualKeys: ItemSummary;
+};
+
+export async function exportConfig(path: string): Promise<string> {
+  if (!isTauriRuntime(window)) return path;
+  return invoke<string>("export_seed_cmd", { path });
+}
+
+export async function importConfig(path: string, preview: boolean): Promise<ImportSummary> {
+  if (!isTauriRuntime(window)) {
+    return {
+      providers: { created: 0, updated: 0 },
+      models: { created: 0, updated: 0 },
+      routes: { created: 0, updated: 0 },
+      virtualKeys: { created: 0, updated: 0 },
+    };
+  }
+  return invoke<ImportSummary>("import_seed_cmd", { path, preview });
 }
 
 export async function resetData(): Promise<void> {

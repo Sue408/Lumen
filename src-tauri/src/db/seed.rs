@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::path::Path;
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -17,6 +16,8 @@ struct SeedFile {
     upstream_models: Vec<SeedModel>,
     #[serde(default)]
     routes: Vec<SeedRoute>,
+    #[serde(default)]
+    virtual_keys: Vec<SeedVirtualKey>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -91,6 +92,37 @@ struct SeedTarget {
     enabled: bool,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SeedVirtualKey {
+    key: String,
+    name: String,
+    #[serde(default = "default_true")]
+    enabled: bool,
+    #[serde(default)]
+    quota_limit: Option<f64>,
+    #[serde(default = "default_quota_period")]
+    quota_period: String,
+}
+
+/// 单类配置的导入结果：新建与覆盖的条数。
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemSummary {
+    pub created: usize,
+    pub updated: usize,
+}
+
+/// 合并导入汇总，供前端展示。
+#[derive(Debug, Default, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportSummary {
+    pub providers: ItemSummary,
+    pub models: ItemSummary,
+    pub routes: ItemSummary,
+    pub virtual_keys: ItemSummary,
+}
+
 fn default_auth() -> String {
     AUTH_BEARER.to_string()
 }
@@ -107,50 +139,93 @@ fn default_true() -> bool {
     true
 }
 
-/// 首次启动（库为空）时从 `path` 导入示例配置，返回导入的路由数量。
-/// 文件不存在时静默跳过。
-pub fn seed_if_empty(conn: &Connection, path: &Path) -> Result<usize, AppError> {
-    let existing: i64 =
-        conn.query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0))?;
-    let route_count: i64 =
-        conn.query_row("SELECT COUNT(*) FROM routes", [], |row| row.get(0))?;
-    if existing > 0 || route_count > 0 {
-        return Ok(0);
-    }
-    if !path.exists() {
-        return Ok(0);
-    }
-    let raw = std::fs::read_to_string(path)?;
-    let seed: SeedFile = serde_json::from_str(&raw)?;
-    import(conn, &seed)
+fn default_quota_period() -> String {
+    "monthly".to_string()
 }
 
-fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
+/// 查询自然键命中的已存在主键；无匹配返回 `None`。
+fn existing_id<P: rusqlite::Params>(
+    tx: &rusqlite::Transaction,
+    sql: &str,
+    params: P,
+) -> Result<Option<String>, AppError> {
+    let mut stmt = tx.prepare(sql)?;
+    let mut rows = stmt.query_map(params, |row| row.get::<_, String>(0))?;
+    match rows.next() {
+        Some(row) => Ok(Some(row?)),
+        None => Ok(None),
+    }
+}
+
+/// 解析迁移 JSON 并在单事务内合并导入；`commit = false` 时仅预演并回滚。
+pub fn import_seed_json(
+    conn: &Connection,
+    raw: &str,
+    commit: bool,
+) -> Result<ImportSummary, AppError> {
+    let seed: SeedFile = serde_json::from_str(raw)?;
+    merge_seed(conn, &seed, commit)
+}
+
+/// 合并导入：按自然键覆盖已存在条目、追加新条目，未提及的条目保留。
+/// provider / upstream_models / routes 的引用按名称解析；全程单事务，任一步失败整体回滚。
+fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<ImportSummary, AppError> {
     let now = chrono::Utc::now().to_rfc3339();
     let tx = conn.unchecked_transaction()?;
+    let mut summary = ImportSummary::default();
     let mut provider_ids: HashMap<String, String> = HashMap::new();
     let mut provider_protocols: HashMap<String, String> = HashMap::new();
     for provider in &seed.providers {
-        let id = uuid::Uuid::new_v4().to_string();
         let extra_headers = serde_json::to_string(&provider.extra_headers)?;
-        tx.execute(
-            "INSERT INTO providers
-                (id, name, base_url, api_key, auth_scheme, protocol, extra_headers, icon, icon_tint, enabled, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![
-                id,
-                provider.name,
-                provider.base_url,
-                provider.api_key,
-                provider.auth_scheme,
-                provider.protocol,
-                extra_headers,
-                provider.icon,
-                provider.icon_tint,
-                provider.enabled as i64,
-                now,
-            ],
-        )?;
+        let id = match existing_id(
+            &tx,
+            "SELECT id FROM providers WHERE name = ?1",
+            params![provider.name],
+        )? {
+            Some(id) => {
+                tx.execute(
+                    "UPDATE providers SET base_url = ?1, api_key = ?2, auth_scheme = ?3,
+                        protocol = ?4, extra_headers = ?5, icon = ?6, icon_tint = ?7, enabled = ?8
+                     WHERE id = ?9",
+                    params![
+                        provider.base_url,
+                        provider.api_key,
+                        provider.auth_scheme,
+                        provider.protocol,
+                        extra_headers,
+                        provider.icon,
+                        provider.icon_tint,
+                        provider.enabled as i64,
+                        id,
+                    ],
+                )?;
+                summary.providers.updated += 1;
+                id
+            }
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO providers
+                        (id, name, base_url, api_key, auth_scheme, protocol, extra_headers, icon, icon_tint, enabled, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                    params![
+                        id,
+                        provider.name,
+                        provider.base_url,
+                        provider.api_key,
+                        provider.auth_scheme,
+                        provider.protocol,
+                        extra_headers,
+                        provider.icon,
+                        provider.icon_tint,
+                        provider.enabled as i64,
+                        now,
+                    ],
+                )?;
+                summary.providers.created += 1;
+                id
+            }
+        };
         provider_protocols.insert(provider.name.clone(), provider.protocol.clone());
         provider_ids.insert(provider.name.clone(), id);
     }
@@ -161,35 +236,68 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
         let provider_id = provider_ids.get(&model.provider).ok_or_else(|| {
             AppError::message(format!("seed 引用了不存在的提供商：{}", model.provider))
         })?;
-        let id = uuid::Uuid::new_v4().to_string();
         let display_name = if model.display_name.is_empty() {
             model.model_id.clone()
         } else {
             model.display_name.clone()
         };
         let capabilities = serde_json::to_string(&model.capabilities)?;
-        tx.execute(
-            "INSERT INTO upstream_models
-                (id, provider_id, model_id, display_name, input_price, output_price,
-                 cache_read_price, cache_creation_price, context_window, capabilities,
-                 icon, icon_tint, enabled)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-            params![
-                id,
-                provider_id,
-                model.model_id,
-                display_name,
-                model.input_price,
-                model.output_price,
-                model.cache_read_price,
-                model.cache_creation_price,
-                model.context_window,
-                capabilities,
-                model.icon,
-                model.icon_tint,
-                model.enabled as i64,
-            ],
-        )?;
+        let id = match existing_id(
+            &tx,
+            "SELECT id FROM upstream_models WHERE provider_id = ?1 AND model_id = ?2",
+            params![provider_id, model.model_id],
+        )? {
+            Some(id) => {
+                tx.execute(
+                    "UPDATE upstream_models SET display_name = ?1, input_price = ?2,
+                        output_price = ?3, cache_read_price = ?4, cache_creation_price = ?5,
+                        context_window = ?6, capabilities = ?7, icon = ?8, icon_tint = ?9, enabled = ?10
+                     WHERE id = ?11",
+                    params![
+                        display_name,
+                        model.input_price,
+                        model.output_price,
+                        model.cache_read_price,
+                        model.cache_creation_price,
+                        model.context_window,
+                        capabilities,
+                        model.icon,
+                        model.icon_tint,
+                        model.enabled as i64,
+                        id,
+                    ],
+                )?;
+                summary.models.updated += 1;
+                id
+            }
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO upstream_models
+                        (id, provider_id, model_id, display_name, input_price, output_price,
+                         cache_read_price, cache_creation_price, context_window, capabilities,
+                         icon, icon_tint, enabled)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                    params![
+                        id,
+                        provider_id,
+                        model.model_id,
+                        display_name,
+                        model.input_price,
+                        model.output_price,
+                        model.cache_read_price,
+                        model.cache_creation_price,
+                        model.context_window,
+                        capabilities,
+                        model.icon,
+                        model.icon_tint,
+                        model.enabled as i64,
+                    ],
+                )?;
+                summary.models.created += 1;
+                id
+            }
+        };
         model_protocols.insert(
             id.clone(),
             provider_protocols.get(&model.provider).cloned().unwrap_or_default(),
@@ -198,7 +306,6 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
         model_ids.entry(display_name).or_insert(id);
     }
 
-    let mut imported = 0;
     for route in &seed.routes {
         if !is_known_protocol(&route.protocol) {
             return Err(AppError::message(format!(
@@ -206,24 +313,43 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
                 route.alias, route.protocol
             )));
         }
-        let route_id = uuid::Uuid::new_v4().to_string();
         let display_name = if route.display_name.is_empty() {
             route.alias.clone()
         } else {
             route.display_name.clone()
         };
-        tx.execute(
-            "INSERT INTO routes (id, alias, display_name, protocol, enabled, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                route_id,
-                route.alias,
-                display_name,
-                route.protocol,
-                route.enabled as i64,
-                now
-            ],
-        )?;
+        let route_id = match existing_id(
+            &tx,
+            "SELECT id FROM routes WHERE alias = ?1",
+            params![route.alias],
+        )? {
+            Some(id) => {
+                tx.execute(
+                    "UPDATE routes SET display_name = ?1, protocol = ?2, enabled = ?3 WHERE id = ?4",
+                    params![display_name, route.protocol, route.enabled as i64, id],
+                )?;
+                tx.execute("DELETE FROM route_targets WHERE route_id = ?1", params![id])?;
+                summary.routes.updated += 1;
+                id
+            }
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO routes (id, alias, display_name, protocol, enabled, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        id,
+                        route.alias,
+                        display_name,
+                        route.protocol,
+                        route.enabled as i64,
+                        now
+                    ],
+                )?;
+                summary.routes.created += 1;
+                id
+            }
+        };
         for target in &route.targets {
             let model_id = model_ids.get(&target.upstream_model).ok_or_else(|| {
                 AppError::message(format!(
@@ -253,10 +379,53 @@ fn import(conn: &Connection, seed: &SeedFile) -> Result<usize, AppError> {
                 ],
             )?;
         }
-        imported += 1;
     }
-    tx.commit()?;
-    Ok(imported)
+
+    for virtual_key in &seed.virtual_keys {
+        match existing_id(
+            &tx,
+            "SELECT id FROM virtual_keys WHERE key = ?1",
+            params![virtual_key.key],
+        )? {
+            Some(id) => {
+                tx.execute(
+                    "UPDATE virtual_keys SET name = ?1, enabled = ?2, quota_limit = ?3, quota_period = ?4
+                     WHERE id = ?5",
+                    params![
+                        virtual_key.name,
+                        virtual_key.enabled as i64,
+                        virtual_key.quota_limit,
+                        virtual_key.quota_period,
+                        id,
+                    ],
+                )?;
+                summary.virtual_keys.updated += 1;
+            }
+            None => {
+                tx.execute(
+                    "INSERT INTO virtual_keys (id, key, name, enabled, quota_limit, quota_period, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        uuid::Uuid::new_v4().to_string(),
+                        virtual_key.key,
+                        virtual_key.name,
+                        virtual_key.enabled as i64,
+                        virtual_key.quota_limit,
+                        virtual_key.quota_period,
+                        now,
+                    ],
+                )?;
+                summary.virtual_keys.created += 1;
+            }
+        }
+    }
+
+    if commit {
+        tx.commit()?;
+    } else {
+        tx.rollback()?;
+    }
+    Ok(summary)
 }
 
 /// 把当前配置导出为 seed JSON 文本，格式与导入一致（不含日志、密钥偏好等运行时数据）。
@@ -371,23 +540,30 @@ pub fn export_seed(conn: &Connection) -> Result<String, AppError> {
         }
     }
 
+    let virtual_keys = {
+        let mut stmt = conn.prepare(
+            "SELECT key, name, enabled, quota_limit, quota_period
+             FROM virtual_keys ORDER BY created_at, name",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SeedVirtualKey {
+                key: row.get(0)?,
+                name: row.get(1)?,
+                enabled: row.get::<_, i64>(2)? != 0,
+                quota_limit: row.get(3)?,
+                quota_period: row.get(4)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
     let seed = SeedFile {
         providers,
         upstream_models,
         routes,
+        virtual_keys,
     };
     Ok(serde_json::to_string_pretty(&seed)?)
-}
-
-pub fn seed_path_candidates() -> Vec<std::path::PathBuf> {
-    let mut candidates = Vec::new();
-    // 开发态：源码树位置，编译期固化，最稳。
-    candidates.push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lumen.seed.json"));
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("lumen.seed.json"));
-        candidates.push(cwd.join("src-tauri").join("lumen.seed.json"));
-    }
-    candidates
 }
 
 #[cfg(test)]
@@ -410,13 +586,17 @@ mod tests {
       "routes": [
         { "alias": "lumen/main", "displayName": "Main", "enabled": true,
           "targets": [ { "upstreamModel": "gpt-4o", "priority": 0, "enabled": true } ] }
+      ],
+      "virtualKeys": [
+        { "key": "sk-lumen-a", "name": "手机", "enabled": true,
+          "quotaLimit": 5.0, "quotaPeriod": "monthly" }
       ]
     }"#;
 
     fn seed(db: &crate::db::Db) -> SeedFile {
         let seed: SeedFile = serde_json::from_str(SAMPLE).unwrap();
         let conn = db.lock().unwrap();
-        import(&conn, &seed).unwrap();
+        merge_seed(&conn, &seed, true).unwrap();
         seed
     }
 
@@ -434,6 +614,8 @@ mod tests {
         assert_eq!(value["upstreamModels"].as_array().unwrap().len(), 1);
         assert_eq!(value["routes"].as_array().unwrap().len(), 1);
         assert_eq!(value["routes"][0]["targets"][0]["upstreamModel"], "gpt-4o");
+        assert_eq!(value["virtualKeys"].as_array().unwrap().len(), 1);
+        assert_eq!(value["virtualKeys"][0]["quotaLimit"], 5.0);
         let openai = providers.iter().find(|item| item["name"] == "OpenAI").unwrap();
         let anthropic = providers.iter().find(|item| item["name"] == "Anthropic").unwrap();
         assert_eq!(openai["iconTint"], "brand");
@@ -470,5 +652,116 @@ mod tests {
             assert_eq!(settings.port, 9999);
             assert!(!settings.close_to_tray);
         }
+    }
+
+    #[test]
+    fn merge_reimport_updates_without_duplicating() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let seed: SeedFile = serde_json::from_str(SAMPLE).unwrap();
+
+        let first = merge_seed(&conn, &seed, true).unwrap();
+        assert_eq!(first.providers.created, 2);
+        assert_eq!(first.models.created, 1);
+        assert_eq!(first.routes.created, 1);
+        assert_eq!(first.virtual_keys.created, 1);
+
+        let second = merge_seed(&conn, &seed, true).unwrap();
+        assert_eq!(second.providers.created, 0);
+        assert_eq!(second.providers.updated, 2);
+        assert_eq!(second.models.updated, 1);
+        assert_eq!(second.routes.updated, 1);
+        assert_eq!(second.virtual_keys.updated, 1);
+
+        let providers: i64 =
+            conn.query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0)).unwrap();
+        let targets: i64 =
+            conn.query_row("SELECT COUNT(*) FROM route_targets", [], |row| row.get(0)).unwrap();
+        assert_eq!(providers, 2);
+        assert_eq!(targets, 1);
+    }
+
+    #[test]
+    fn merge_preserves_entries_not_in_file() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let base: SeedFile = serde_json::from_str(SAMPLE).unwrap();
+        merge_seed(&conn, &base, true).unwrap();
+
+        let extra: SeedFile = serde_json::from_str(
+            r#"{ "providers": [ { "name": "DeepSeek", "baseUrl": "https://api.deepseek.com" } ] }"#,
+        )
+        .unwrap();
+        let summary = merge_seed(&conn, &extra, true).unwrap();
+        assert_eq!(summary.providers.created, 1);
+
+        let providers: i64 =
+            conn.query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0)).unwrap();
+        let openai: i64 = conn
+            .query_row("SELECT COUNT(*) FROM providers WHERE name = 'OpenAI'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(providers, 3);
+        assert_eq!(openai, 1);
+    }
+
+    #[test]
+    fn merge_upserts_virtual_keys_by_key() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let first: SeedFile = serde_json::from_str(
+            r#"{ "virtualKeys": [ { "key": "sk-lumen-a", "name": "手机", "enabled": true,
+                 "quotaLimit": 5.0, "quotaPeriod": "monthly" } ] }"#,
+        )
+        .unwrap();
+        assert_eq!(merge_seed(&conn, &first, true).unwrap().virtual_keys.created, 1);
+
+        let second: SeedFile = serde_json::from_str(
+            r#"{ "virtualKeys": [ { "key": "sk-lumen-a", "name": "平板", "enabled": false,
+                 "quotaLimit": 12.5, "quotaPeriod": "weekly" } ] }"#,
+        )
+        .unwrap();
+        assert_eq!(merge_seed(&conn, &second, true).unwrap().virtual_keys.updated, 1);
+
+        let (name, enabled, limit, period): (String, i64, f64, String) = conn
+            .query_row(
+                "SELECT name, enabled, quota_limit, quota_period FROM virtual_keys WHERE key = 'sk-lumen-a'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(name, "平板");
+        assert_eq!(enabled, 0);
+        assert_eq!(limit, 12.5);
+        assert_eq!(period, "weekly");
+        let count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM virtual_keys", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn merge_rejects_dangling_reference_and_rolls_back() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let bad: SeedFile = serde_json::from_str(
+            r#"{ "providers": [ { "name": "OpenAI", "baseUrl": "https://x" } ],
+                 "upstreamModels": [ { "provider": "Ghost", "modelId": "m", "displayName": "M" } ] }"#,
+        )
+        .unwrap();
+        assert!(merge_seed(&conn, &bad, true).is_err());
+        let providers: i64 =
+            conn.query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0)).unwrap();
+        assert_eq!(providers, 0);
+    }
+
+    #[test]
+    fn preview_merge_rolls_back() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let seed: SeedFile = serde_json::from_str(SAMPLE).unwrap();
+        let preview = merge_seed(&conn, &seed, false).unwrap();
+        assert_eq!(preview.providers.created, 2);
+        let providers: i64 =
+            conn.query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0)).unwrap();
+        assert_eq!(providers, 0);
     }
 }

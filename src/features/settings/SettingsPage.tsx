@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Database, Download, FolderOpen, Palette, RotateCcw, Server } from "lucide-react";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { Database, Download, Palette, RotateCcw, Server, Upload } from "lucide-react";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   InlineError,
   LoadingLines,
@@ -12,12 +12,14 @@ import { isTauriRuntime } from "../../components/tauriRuntime";
 import { useGatewayStatus } from "../../app/useGatewayStatus";
 import type { Theme } from "../../app/useTheme";
 import {
-  exportSeed,
+  exportConfig,
   getAutostart,
   getSettings,
+  importConfig,
   resetData,
   saveSettings,
   setAutostart as setAutostartEnabled,
+  type ImportSummary,
 } from "../../services/settings";
 
 type SettingsPageProps = {
@@ -38,9 +40,12 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [exportPath, setExportPath] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const [pendingImport, setPendingImport] = useState<{
+    path: string;
+    summary: ImportSummary;
+  } | null>(null);
 
   const dirty = savedPort !== null && port.trim() !== String(savedPort);
 
@@ -131,13 +136,22 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
   };
 
   const runExport = async () => {
-    setBusy(true);
     setError(null);
     setNotice(null);
+    if (!isTauriRuntime(window)) {
+      setNotice("浏览器环境不支持文件对话框");
+      return;
+    }
     try {
-      const path = await exportSeed();
-      setExportPath(path);
-      setNotice("已导出当前配置");
+      const path = await save({
+        title: "导出配置",
+        defaultPath: "lumen.config.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!path) return;
+      setBusy(true);
+      await exportConfig(path);
+      setNotice("已导出配置（含 API Key 与虚拟密钥明文，请妥善保管）");
     } catch (err) {
       setError(String(err));
     } finally {
@@ -145,12 +159,42 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
     }
   };
 
-  const revealExport = async () => {
-    if (!exportPath || !isTauriRuntime(window)) return;
+  const chooseImport = async () => {
+    setError(null);
+    setNotice(null);
+    if (!isTauriRuntime(window)) {
+      setNotice("浏览器环境不支持文件对话框");
+      return;
+    }
     try {
-      await revealItemInDir(exportPath);
+      const path = await open({
+        title: "导入配置",
+        multiple: false,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!path || Array.isArray(path)) return;
+      setBusy(true);
+      const summary = await importConfig(path, true);
+      setPendingImport({ path, summary });
     } catch (err) {
       setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!pendingImport) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await importConfig(pendingImport.path, false);
+      setPendingImport(null);
+      setNotice("配置已合并导入，切换页面后生效");
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -314,19 +358,44 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
                       导出
                     </button>
                   </div>
-                  <span className="settings-row-note">写入应用数据目录的 lumen.seed.json</span>
+                  <span className="settings-row-note">导出为 JSON，含 API Key 与虚拟密钥明文，请妥善保管</span>
                 </div>
-                {exportPath ? (
-                  <div className="settings-row">
-                    <span className="settings-row-label settings-path" title={exportPath}>
-                      {exportPath}
+                <div className="settings-row">
+                  <span className="settings-row-label">导入配置</span>
+                  <div className="settings-row-control">
+                    <button className="quiet-button" type="button" disabled={busy} onClick={() => void chooseImport()}>
+                      <Upload aria-hidden="true" />
+                      导入
+                    </button>
+                  </div>
+                  <span className="settings-row-note">合并覆盖：同名提供商 / 模型 / 路由 / 密钥按文件更新，未提及的保留</span>
+                </div>
+                {pendingImport ? (
+                  <div className="confirm-bar">
+                    <span>
+                      将新增：提供商 {pendingImport.summary.providers.created}、模型{" "}
+                      {pendingImport.summary.models.created}、路由 {pendingImport.summary.routes.created}、
+                      密钥 {pendingImport.summary.virtualKeys.created}；覆盖：提供商{" "}
+                      {pendingImport.summary.providers.updated}、模型 {pendingImport.summary.models.updated}、
+                      路由 {pendingImport.summary.routes.updated}、密钥{" "}
+                      {pendingImport.summary.virtualKeys.updated}。确认导入？
                     </span>
-                    <div className="settings-row-control">
-                      <button className="quiet-button" type="button" onClick={() => void revealExport()}>
-                        <FolderOpen aria-hidden="true" />
-                        打开所在文件夹
-                      </button>
-                    </div>
+                    <button
+                      className="quiet-button is-primary"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void confirmImport()}
+                    >
+                      确认导入
+                    </button>
+                    <button
+                      className="quiet-button"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setPendingImport(null)}
+                    >
+                      取消
+                    </button>
                   </div>
                 ) : null}
                 <div className="settings-row">

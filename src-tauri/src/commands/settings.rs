@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tauri::State;
 
-use crate::db::seed::export_seed;
+use crate::db::seed::{export_seed, import_seed_json, ImportSummary};
 use crate::db::settings::{get_settings, save_settings, Settings};
 use crate::db::{clear_business_data, with_db};
 use crate::error::AppError;
@@ -29,14 +29,25 @@ pub async fn save_settings_cmd(
 }
 
 #[tauri::command]
-pub async fn export_seed_cmd(state: State<'_, Arc<AppState>>) -> Result<String, AppError> {
+pub async fn export_seed_cmd(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<String, AppError> {
     let state = state.inner().clone();
-    let dir = state.data_dir().to_path_buf();
     let json = with_db(&state.db, export_seed).await?;
-    tokio::fs::create_dir_all(&dir).await?;
-    let path = dir.join("lumen.seed.json");
     tokio::fs::write(&path, json).await?;
-    Ok(path.to_string_lossy().into_owned())
+    Ok(path)
+}
+
+#[tauri::command]
+pub async fn import_seed_cmd(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+    preview: bool,
+) -> Result<ImportSummary, AppError> {
+    let state = state.inner().clone();
+    let raw = tokio::fs::read_to_string(&path).await?;
+    with_db(&state.db, move |conn| import_seed_json(conn, &raw, !preview)).await
 }
 
 #[tauri::command]

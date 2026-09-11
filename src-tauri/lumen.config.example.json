@@ -60,5 +60,14 @@
         { "upstreamModel": "Claude Sonnet", "priority": 0, "enabled": true }
       ]
     }
+  ],
+  "virtualKeys": [
+    {
+      "key": "sk-lumen-REPLACE_ME",
+      "name": "示例密钥",
+      "enabled": true,
+      "quotaLimit": 20.0,
+      "quotaPeriod": "monthly"
+    }
   ]
 }

@@ -1,4 +1,3 @@
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -71,7 +70,6 @@ pub struct AppState {
     pub gateway: Mutex<Option<GatewayHandle>>,
     port: Mutex<u16>,
     close_to_tray: Mutex<bool>,
-    data_dir: PathBuf,
 }
 
 impl AppState {
@@ -80,7 +78,6 @@ impl AppState {
         http: reqwest::Client,
         events: Arc<dyn EventSink>,
         port: u16,
-        data_dir: PathBuf,
     ) -> Self {
         Self {
             db,
@@ -89,7 +86,6 @@ impl AppState {
             gateway: Mutex::new(None),
             port: Mutex::new(port),
             close_to_tray: Mutex::new(true),
-            data_dir,
         }
     }
 
@@ -104,10 +100,6 @@ impl AppState {
         if let Ok(mut guard) = self.close_to_tray.lock() {
             *guard = close_to_tray;
         }
-    }
-
-    pub fn data_dir(&self) -> &Path {
-        &self.data_dir
     }
 
     pub fn port(&self) -> u16 {

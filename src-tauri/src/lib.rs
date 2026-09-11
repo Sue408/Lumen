@@ -54,6 +54,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
@@ -68,23 +69,6 @@ pub fn run() {
             let db_path = data_dir.join("lumen.db");
             let db = db::open(&db_path)?;
 
-            {
-                let conn = db
-                    .lock()
-                    .map_err(|_| error::AppError::message("数据库锁已中毒"))?;
-                let mut candidates = db::seed::seed_path_candidates();
-                candidates.push(data_dir.join("lumen.seed.json"));
-                for path in candidates {
-                    if path.exists() {
-                        let imported = db::seed::seed_if_empty(&conn, &path)?;
-                        if imported > 0 {
-                            tracing::info!("已从 {} 导入 {} 条路由", path.display(), imported);
-                            break;
-                        }
-                    }
-                }
-            }
-
             let http = reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .build()?;
@@ -98,7 +82,7 @@ pub fn run() {
                 let settings = db::settings::get_settings(&conn)?;
                 (settings.port, settings.close_to_tray)
             };
-            let state = Arc::new(AppState::new(db, http, events, port, data_dir));
+            let state = Arc::new(AppState::new(db, http, events, port));
             state.set_close_to_tray(close_to_tray);
             app.manage(state);
 
@@ -150,6 +134,7 @@ pub fn run() {
             commands::get_settings_cmd,
             commands::save_settings_cmd,
             commands::export_seed_cmd,
+            commands::import_seed_cmd,
             commands::reset_data_cmd,
             commands::get_autostart_cmd,
             commands::set_autostart_cmd,

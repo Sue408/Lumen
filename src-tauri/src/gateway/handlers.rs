@@ -547,7 +547,6 @@ mod tests {
             reqwest::Client::new(),
             sink.clone(),
             0,
-            std::path::PathBuf::new(),
         ));
         let router = crate::gateway::build_router(state);
 
@@ -579,7 +578,7 @@ mod tests {
         let db = open_in_memory().unwrap();
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
-        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         let router = crate::gateway::build_router(state);
 
         let response = router
@@ -608,7 +607,7 @@ mod tests {
         seed_upstream(&db, &base_url, "anthropic", "lumen/claude");
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
-        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         let router = crate::gateway::build_router(state);
 
         let response = router
@@ -641,7 +640,7 @@ mod tests {
         seed_upstream(&db, "http://127.0.0.1:1", "anthropic", "lumen/claude");
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
-        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         let router = crate::gateway::build_router(state);
 
         let response = router
@@ -671,7 +670,7 @@ mod tests {
         seed_upstream(&db, "http://127.0.0.1:1", "openai", "lumen/gpt");
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
-        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         let router = crate::gateway::build_router(state);
 
         let response = router
@@ -696,7 +695,7 @@ mod tests {
         let db = open_in_memory().unwrap();
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
-        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         let router = crate::gateway::build_router(state);
 
         let response = router
@@ -723,7 +722,7 @@ mod tests {
         let db = open_in_memory().unwrap();
         seed_virtual_key(&db, TEST_KEY, false, None, "monthly");
         let sink = Arc::new(MockSink::default());
-        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         let router = crate::gateway::build_router(state);
 
         let response = router
@@ -741,7 +740,7 @@ mod tests {
         let db = open_in_memory().unwrap();
         seed_virtual_key(&db, TEST_KEY, true, Some(0.0), "monthly");
         let sink = Arc::new(MockSink::default());
-        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         let router = crate::gateway::build_router(state);
 
         let response = router
@@ -769,7 +768,7 @@ mod tests {
         seed_upstream(&db, &base_url, "openai", "lumen/mock");
         let key = seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
-        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0, std::path::PathBuf::new()));
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         let router = crate::gateway::build_router(state);
 
         let response = router
