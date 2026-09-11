@@ -50,7 +50,7 @@ macro_rules! register_handlers {
             commands::list_virtual_keys_cmd,
             commands::save_virtual_key_cmd,
             commands::delete_virtual_key_cmd,
-            commands::query_virtual_key_usage_cmd,
+            commands::query_virtual_keys_usage_cmd,
             commands::list_logs_cmd,
             commands::count_logs_cmd,
             commands::list_log_aliases_cmd,

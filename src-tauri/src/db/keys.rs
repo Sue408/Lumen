@@ -73,16 +73,6 @@ pub fn find_enabled_virtual_key(
     }
 }
 
-/// 按 id 查找虚拟密钥（含停用），供分户摘要使用。
-pub fn get_virtual_key(conn: &Connection, id: &str) -> Result<Option<VirtualKey>, AppError> {
-    let mut stmt = conn.prepare("SELECT * FROM virtual_keys WHERE id = ?1")?;
-    let mut rows = stmt.query_map([id], VirtualKey::from_row)?;
-    match rows.next() {
-        Some(row) => Ok(Some(row?)),
-        None => Ok(None),
-    }
-}
-
 /// 某密钥自周期起点以来的成功花费与调用次数。失败的调用不计入。
 pub fn virtual_key_usage(
     conn: &Connection,
@@ -232,5 +222,58 @@ mod tests {
 
         let spent = virtual_key_spend(&conn, "k1", start).unwrap();
         assert!((spent - 1.5).abs() < 1e-9, "spent was {spent}");
+    }
+
+    /// 手动跑的粗略基准：`cargo test bench_key_usage -- --nocapture --ignored`。
+    #[test]
+    #[ignore]
+    fn bench_key_usage() {
+        use crate::db::demo::{inject_demo, DemoScenario};
+        use crate::gateway::quota::{period_start, QuotaPeriod};
+        use chrono::Local;
+        use rusqlite::params;
+
+        let path = std::env::temp_dir().join("lumen-bench-key-usage.db");
+        let _ = std::fs::remove_file(&path);
+        let db = crate::db::open(&path).unwrap();
+        {
+            let conn = db.lock().unwrap();
+            inject_demo(&conn, DemoScenario::Rich).unwrap();
+        }
+        let conn = db.lock().unwrap();
+        let now = Local::now();
+        let start = period_start(QuotaPeriod::Monthly, now);
+        let start_iso = start.with_timezone(&Utc).to_rfc3339();
+
+        let sql = "SELECT COALESCE(SUM(cost), 0), COUNT(*) FROM request_logs
+             WHERE virtual_key_id = ?1 AND status = 'success' AND occurred_at >= ?2";
+        {
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let rows = stmt
+                .query_map(params!["x", &start_iso], |row| row.get::<_, String>(3))
+                .unwrap();
+            for row in rows {
+                println!("PLAN: {}", row.unwrap());
+            }
+        }
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM request_logs", [], |r| r.get(0))
+            .unwrap();
+        let key_ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT id FROM virtual_keys").unwrap();
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
+            rows.map(|r| r.unwrap()).collect()
+        };
+        println!("TOTAL ROWS: {total} / KEYS: {}", key_ids.len());
+
+        for round in 0..2 {
+            let t = std::time::Instant::now();
+            for id in &key_ids {
+                let _ = virtual_key_usage(&conn, id, start).unwrap();
+            }
+            println!("round {round} ({} keys): {:?}", key_ids.len(), t.elapsed());
+        }
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
     }
 }
