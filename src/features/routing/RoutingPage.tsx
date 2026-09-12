@@ -3,9 +3,9 @@ import {
   ChevronDown,
   ChevronUp,
   ListOrdered,
+  Pencil,
   Plus,
   Route,
-  SlidersHorizontal,
   Trash,
 } from "lucide-react";
 import {
@@ -14,14 +14,12 @@ import {
   InlineError,
   InlineWarning,
   LoadingLines,
-  SaveBar,
   SectionTitle,
   StatusDot,
   TogglePill,
 } from "../../components/ConfigControls";
 import { BrandGlyph } from "../brand/BrandMark";
 import { IconPicker } from "../brand/IconPicker";
-import { isBrandId, resolveBrand, type BrandId } from "../brand/brand";
 import { RegisterList } from "../../components/RegisterList";
 import {
   deleteRoute,
@@ -33,63 +31,21 @@ import {
   type IconTint,
   type Protocol,
   type Provider,
+  type RouteTargetInput,
   type RouteWithTargets,
   type UpstreamModel,
 } from "../../services/config";
+import { hasUsableBackup, moveTarget } from "./routingModel";
 import {
-  emptyRouteDraft,
-  hasUsableBackup,
-  isRouteDraftDirty,
-  makeTarget,
-  moveTarget,
-  routeToDraft,
-  validateRouteDraft,
-  type RouteDraft,
-} from "./routingModel";
+  buildBrandLookup,
+  markTint,
+  primaryModelMark,
+  routeAppearance,
+} from "./routingAppearance";
+import { ModelPicker } from "./ModelPicker";
 import { ProtocolHelp } from "./ProtocolHelp";
-import { useFlipList } from "./useFlipList";
+import { RouteBasicsModal, type RouteBasicsDraft } from "./RouteBasicsModal";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
-import { useRegisterSelection } from "../../hooks/useRegisterSelection";
-
-type ModelMark = { brand: BrandId | null; tint: IconTint; enabled: boolean };
-
-function buildBrandLookup(providers: Provider[], models: UpstreamModel[]): Map<string, ModelMark> {
-  const providerNames = new Map(providers.map((provider) => [provider.id, provider.name]));
-  const lookup = new Map<string, ModelMark>();
-  for (const model of models) {
-    lookup.set(model.id, {
-      brand: resolveBrand(model.icon, [providerNames.get(model.providerId), model.modelId]),
-      tint: model.iconTint,
-      enabled: model.enabled,
-    });
-  }
-  return lookup;
-}
-
-function markTint(mark: ModelMark | null | undefined): IconTint {
-  return mark && mark.enabled ? mark.tint : "ink";
-}
-
-/** 按 priority 取首选目标的模型标记；draft 目标无 priority，保持数组顺序。 */
-function primaryModelMark(
-  targets: Array<{ upstreamModelId: string; priority?: number }>,
-  brands: Map<string, ModelMark>,
-): ModelMark | null {
-  if (targets.length === 0) return null;
-  const primary = [...targets].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))[0];
-  return brands.get(primary.upstreamModelId) ?? null;
-}
-
-/** 图标优先自动取「首选目标上游模型」的品牌；着色未显式指定时继承该模型。 */
-function routeAppearance(
-  fields: { icon: string | null; iconTint: IconTint | null; enabled: boolean },
-  mark: ModelMark | null,
-): { brand: BrandId | null; auto: BrandId | null; tint: IconTint } {
-  const auto = mark?.brand ?? null;
-  const brand = isBrandId(fields.icon) ? fields.icon : auto;
-  const tint: IconTint = fields.enabled ? fields.iconTint ?? mark?.tint ?? "ink" : "ink";
-  return { brand, auto, tint };
-}
 
 function groupedModels(providers: Provider[], models: UpstreamModel[], protocol: Protocol) {
   return providers
@@ -102,169 +58,26 @@ function groupedModels(providers: Provider[], models: UpstreamModel[], protocol:
     .filter((group) => group.models.length > 0);
 }
 
-function RouteForm({
-  draft,
-  savedDraft,
-  providers,
-  models,
-  brands,
-  busy,
-  error,
-  onChange,
-  onDiscard,
-  onSubmit,
-}: {
-  draft: RouteDraft;
-  savedDraft: RouteDraft;
-  providers: Provider[];
-  models: UpstreamModel[];
-  brands: Map<string, ModelMark>;
-  busy: boolean;
-  error: string | null;
-  onChange: (draft: RouteDraft) => void;
-  onDiscard: () => void;
-  onSubmit: () => void;
-}) {
-  const set = (patch: Partial<RouteDraft>) => onChange({ ...draft, ...patch });
-  const setTarget = (index: number, patch: Partial<RouteDraft["targets"][number]>) =>
-    set({ targets: draft.targets.map((target, itemIndex) => (itemIndex === index ? { ...target, ...patch } : target)) });
-  // 协议创建后锁定；新建时切换协议会清空已选目标（先定协议，再选目标）。
-  const setProtocol = (protocol: Protocol) => {
-    onChange({ ...draft, protocol, targets: [] });
-  };
-  const groups = groupedModels(providers, models, draft.protocol);
-  const firstCompatible = groups[0]?.models[0]?.id ?? "";
-  const dirty = isRouteDraftDirty(draft, savedDraft);
-  const { containerRef, capture } = useFlipList<HTMLOListElement>();
-
-  return (
-    <form
-      className="entry-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit();
-      }}
-    >
-      <section className="sheet-section">
-        <SectionTitle icon={<SlidersHorizontal aria-hidden="true" />}>基础信息</SectionTitle>
-        <div className="field-grid">
-          <label className="field">
-            <span>路由别名</span>
-            <input value={draft.alias} onChange={(event) => set({ alias: event.target.value })} placeholder="deepseek/deepseek-v4-flash" spellCheck={false} />
-          </label>
-          <label className="field">
-            <span>展示名</span>
-            <input value={draft.displayName} onChange={(event) => set({ displayName: event.target.value })} placeholder="留空则同别名" />
-          </label>
-          <label className="field">
-            <span className="field-label">
-              协议
-              <ProtocolHelp />
-            </span>
-            {draft.id === null ? (
-              <select value={draft.protocol} onChange={(event) => setProtocol(event.target.value as Protocol)}>
-                <option value="openai">{protocolLabel.openai}</option>
-                <option value="anthropic">{protocolLabel.anthropic}</option>
-                <option value="responses">{protocolLabel.responses}</option>
-                <option value="gemini">{protocolLabel.gemini}</option>
-              </select>
-            ) : (
-              <span className="field-static">{protocolLabel[draft.protocol]}</span>
-            )}
-          </label>
-        </div>
-      </section>
-
-      <section className="sheet-section">
-        <SectionTitle
-          icon={<ListOrdered aria-hidden="true" />}
-          action={
-            <button
-              className="text-action"
-              type="button"
-              onClick={() => {
-                capture();
-                set({ targets: [...draft.targets, makeTarget(firstCompatible)] });
-              }}
-              disabled={busy || groups.length === 0}
-            >
-              ＋ 添加目标
-            </button>
-          }
-        >
-          上游目标
-        </SectionTitle>
-
-        {draft.targets.length === 0 ? (
-          <EmptyNote>
-            {models.length === 0
-              ? "还没有可用的上游模型，请先到上游提供商页登记。"
-              : groups.length === 0
-                ? `还没有 ${protocolLabel[draft.protocol]} 协议的上游模型，请先到上游提供商页登记。`
-                : "还没有添加目标，添加后才能保存。"}
-          </EmptyNote>
-        ) : (
-          <ol className="target-list" ref={containerRef}>
-            {draft.targets.map((target, index) => (
-              <li
-                key={target.uid}
-                className={target.enabled ? "target-row" : "target-row is-off"}
-                data-flip-key={target.uid}
-              >
-                <span className="target-rank">{index + 1}</span>
-                <span className="target-role">
-                  {index === 0 ? "首选" : `备用 ${index + 1}`}
-                </span>
-                <BrandGlyph
-                  brand={brands.get(target.upstreamModelId)?.brand ?? null}
-                  tint={markTint(brands.get(target.upstreamModelId))}
-                  size={18}
-                  fallback={<Route aria-hidden="true" />}
-                />
-                <select value={target.upstreamModelId} onChange={(event) => setTarget(index, { upstreamModelId: event.target.value })}>
-                  <option value="">选择上游模型…</option>
-                  {groups.map((group) => (
-                    <optgroup label={group.name} key={group.id}>
-                      {group.models.map((model) => (
-                        <option value={model.id} key={model.id}>
-                          {model.displayName} · {model.modelId}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                <TogglePill
-                  small
-                  checked={target.enabled}
-                  label={target.enabled ? "停用该目标" : "启用该目标"}
-                  disabled={busy}
-                  onChange={(next) => setTarget(index, { enabled: next })}
-                />
-                <div className="target-move">
-                  <GlyphButton label="上移" disabled={busy || index === 0} onClick={() => { capture(); set({ targets: moveTarget(draft.targets, index, -1) }); }}>
-                    <ChevronUp aria-hidden="true" />
-                  </GlyphButton>
-                  <GlyphButton label="下移" disabled={busy || index === draft.targets.length - 1} onClick={() => { capture(); set({ targets: moveTarget(draft.targets, index, 1) }); }}>
-                    <ChevronDown aria-hidden="true" />
-                  </GlyphButton>
-                  <GlyphButton label="移除目标" danger disabled={busy} onClick={() => { capture(); set({ targets: draft.targets.filter((_, itemIndex) => itemIndex !== index) }); }}>
-                    <Trash aria-hidden="true" />
-                  </GlyphButton>
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
-
-      {draft.targets.length > 0 && !hasUsableBackup(draft.targets) ? (
-        <InlineWarning message="没有备用目标，降级将不可用。" />
-      ) : null}
-      {error ? <InlineError message={error} /> : null}
-      <SaveBar dirty={dirty} busy={busy} label={draft.id ? "保存路由" : "创建路由"} onDiscard={onDiscard} />
-    </form>
-  );
+function sortedTargets(route: RouteWithTargets) {
+  return [...route.targets].sort((a, b) => a.priority - b.priority);
 }
+
+function targetInputs(targets: RouteWithTargets["targets"]): RouteTargetInput[] {
+  return targets.map((target, index) => ({
+    upstreamModelId: target.upstreamModelId,
+    priority: index,
+    enabled: target.enabled,
+  }));
+}
+
+type RoutePatch = {
+  alias?: string;
+  displayName?: string;
+  icon?: string | null;
+  iconTint?: IconTint | null;
+  enabled?: boolean;
+  targets?: RouteTargetInput[];
+};
 
 export function RoutingPage() {
   const [routes, setRoutes] = useState<RouteWithTargets[]>([]);
@@ -272,52 +85,33 @@ export function RoutingPage() {
   const [models, setModels] = useState<UpstreamModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [basicsDraft, setBasicsDraft] = useState<RouteBasicsDraft | null>(null);
+  const [basicsError, setBasicsError] = useState<string | null>(null);
   const { busy, run } = useAsyncAction();
 
-  const {
-    selectedId,
-    draft,
-    savedDraft,
-    pending,
-    confirmingDelete,
-    setDraft,
-    setSavedDraft,
-    setSelectedId,
-    setPending,
-    setConfirmingDelete,
-    select,
-    selectNew,
-    requestSelect,
-    requestNew,
-    applyPending,
-    saveAndSwitch,
-  } = useRegisterSelection<RouteWithTargets, RouteDraft>({
-    entities: routes,
-    toDraft: routeToDraft,
-    emptyDraft: emptyRouteDraft,
-    isDirty: isRouteDraftDirty,
-    onSelect: () => setFormError(null),
-  });
-
   const brands = useMemo(() => buildBrandLookup(providers, models), [providers, models]);
-  const draftMark = draft ? primaryModelMark(draft.targets, brands) : null;
-  const draftAppearance = draft ? routeAppearance(draft, draftMark) : null;
-  const modelProtocol = useMemo(() => {
-    const providerProtocol = new Map(providers.map((provider) => [provider.id, provider.protocol]));
-    return new Map(models.map((model) => [model.id, providerProtocol.get(model.providerId)]));
-  }, [providers, models]);
+  const modelById = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
+  const providerNameById = useMemo(
+    () => new Map(providers.map((provider) => [provider.id, provider.name])),
+    [providers],
+  );
+  const selected = routes.find((route) => route.id === selectedId) ?? null;
+  const targets = selected ? sortedTargets(selected) : [];
+  const appearance = selected
+    ? routeAppearance(selected, primaryModelMark(selected.targets, brands))
+    : null;
+  const groups = selected ? groupedModels(providers, models, selected.protocol) : [];
+  const taken = new Set(targets.map((target) => target.upstreamModelId));
+  const hasEnabledTarget = targets.some((target) => target.enabled);
+  const enabledCount = targets.filter((target) => target.enabled).length;
 
-  const refreshLists = async () => {
-    const [nextRoutes, nextProviders, nextModels] = await Promise.all([
-      listRoutes(),
-      listProviders(),
-      listUpstreamModels(),
-    ]);
-    setRoutes(nextRoutes);
-    setProviders(nextProviders);
-    setModels(nextModels);
-    return nextRoutes;
+  const refreshRoutes = async () => {
+    const next = await listRoutes();
+    setRoutes(next);
+    return next;
   };
 
   useEffect(() => {
@@ -335,8 +129,7 @@ export function RoutingPage() {
         setRoutes(nextRoutes);
         setProviders(nextProviders);
         setModels(nextModels);
-        if (nextRoutes.length > 0) select(nextRoutes[0]);
-        else selectNew();
+        setSelectedId(nextRoutes[0]?.id ?? null);
       } catch (err) {
         if (alive) setError(String(err));
       } finally {
@@ -348,97 +141,119 @@ export function RoutingPage() {
     };
   }, []);
 
-  const submit = async (): Promise<boolean> => {
-    if (!draft) return false;
-    const message = validateRouteDraft(draft, (id) => modelProtocol.get(id));
-    if (message) {
-      setFormError(message);
-      return false;
+  // 所有改动即改即存：从已保存实体出发，只覆盖 patch 里的字段。
+  const persist = (route: RouteWithTargets, patch: RoutePatch) =>
+    saveRoute({
+      id: route.id,
+      alias: patch.alias ?? route.alias,
+      displayName: patch.displayName ?? route.displayName,
+      protocol: route.protocol,
+      icon: patch.icon !== undefined ? patch.icon : route.icon,
+      iconTint: patch.iconTint !== undefined ? patch.iconTint : route.iconTint,
+      enabled: patch.enabled !== undefined ? patch.enabled : route.enabled,
+      targets: patch.targets ?? targetInputs(sortedTargets(route)),
+    });
+
+  const apply = (route: RouteWithTargets, patch: RoutePatch) =>
+    run(async () => {
+      await persist(route, patch);
+      await refreshRoutes();
+    }, setActionError);
+
+  const openBasicsNew = () => {
+    setBasicsError(null);
+    setBasicsDraft({ id: null, alias: "", displayName: "", protocol: "openai" });
+  };
+
+  const openBasicsEdit = (route: RouteWithTargets) => {
+    setBasicsError(null);
+    setBasicsDraft({
+      id: route.id,
+      alias: route.alias,
+      displayName: route.displayName,
+      protocol: route.protocol,
+    });
+  };
+
+  const submitBasics = async (draft: RouteBasicsDraft) => {
+    const alias = draft.alias.trim();
+    if (!alias) {
+      setBasicsError("请填写路由别名。");
+      return;
     }
-    const saved = await run(
-      async () => {
-        const route = await saveRoute({
-          id: draft.id,
-          alias: draft.alias.trim(),
-          displayName: draft.displayName.trim() || draft.alias.trim(),
+    if (/\s/.test(alias)) {
+      setBasicsError("别名不能包含空格。");
+      return;
+    }
+    const displayName = draft.displayName.trim() || alias;
+    const ok = await run(async () => {
+      if (draft.id === null) {
+        const created = await saveRoute({
+          id: null,
+          alias,
+          displayName,
           protocol: draft.protocol,
-          icon: draft.icon,
-          iconTint: draft.iconTint,
-          enabled: draft.enabled,
-          targets: draft.targets.map((target, index) => ({
-            upstreamModelId: target.upstreamModelId,
-            priority: index,
-            enabled: target.enabled,
-          })),
+          icon: null,
+          iconTint: null,
+          enabled: false,
+          targets: [],
         });
-        await refreshLists();
-        const nextDraft = routeToDraft(route);
-        setSelectedId(route.id);
-        setDraft(nextDraft);
-        setSavedDraft(structuredClone(nextDraft));
-        return route;
-      },
-      setFormError,
-    );
-    return saved !== undefined;
+        await refreshRoutes();
+        setSelectedId(created.id);
+      } else {
+        const current = routes.find((route) => route.id === draft.id);
+        if (current) await persist(current, { alias, displayName });
+        await refreshRoutes();
+      }
+      return true;
+    }, setBasicsError);
+    if (ok) setBasicsDraft(null);
   };
 
-  const discardDraft = () => {
-    if (!savedDraft) return;
-    setDraft({ ...savedDraft, targets: savedDraft.targets.map((target) => ({ ...target })) });
-    setFormError(null);
-  };
+  const toggleRoute = (route: RouteWithTargets) =>
+    apply(route, { enabled: !route.enabled });
 
-  // 图标/着色即改即存：只改这两项，其余字段取已保存的实体，避免把未保存的表单改动一并写库。
-  const setRouteAppearance = async (patch: { icon?: string | null; iconTint?: IconTint | null }) => {
-    if (!draft) return;
-    const icon = patch.icon !== undefined ? patch.icon : draft.icon;
-    const iconTint = patch.iconTint !== undefined ? patch.iconTint : draft.iconTint;
-    const previousDraft = draft;
-    const previousSaved = savedDraft;
-    setDraft({ ...draft, icon, iconTint });
-    if (selectedId === "new") return;
-    const current = routes.find((route) => route.id === selectedId);
-    if (!current) return;
-    setSavedDraft((prev) => (prev ? { ...prev, icon, iconTint } : prev));
-    await run(
-      async () => {
-        await saveRoute({
-          id: current.id,
-          alias: current.alias,
-          displayName: current.displayName,
-          protocol: current.protocol,
-          icon,
-          iconTint,
-          enabled: current.enabled,
-          targets: current.targets.map((target) => ({
-            upstreamModelId: target.upstreamModelId,
-            priority: target.priority,
-            enabled: target.enabled,
-          })),
-        });
-        await refreshLists();
-      },
-      setFormError,
-      () => {
-        setDraft(previousDraft);
-        setSavedDraft(previousSaved);
-      },
-    );
-  };
+  const toggleTarget = (route: RouteWithTargets, modelId: string) =>
+    apply(route, {
+      targets: sortedTargets(route).map((target, index) => ({
+        upstreamModelId: target.upstreamModelId,
+        priority: index,
+        enabled: target.upstreamModelId === modelId ? !target.enabled : target.enabled,
+      })),
+    });
+
+  const moveTargetBy = (route: RouteWithTargets, index: number, delta: number) =>
+    apply(route, { targets: targetInputs(moveTarget(sortedTargets(route), index, delta)) });
+
+  const removeTarget = (route: RouteWithTargets, modelId: string) =>
+    apply(route, {
+      targets: targetInputs(
+        sortedTargets(route).filter((target) => target.upstreamModelId !== modelId),
+      ),
+    });
+
+  const addTarget = (route: RouteWithTargets, modelId: string) =>
+    apply(route, {
+      targets: [
+        ...targetInputs(sortedTargets(route)),
+        { upstreamModelId: modelId, priority: sortedTargets(route).length, enabled: true },
+      ],
+    });
 
   const deleteSelected = async () => {
-    if (!selectedId || selectedId === "new") return;
-    await run(
-      async () => {
-        await deleteRoute(selectedId);
-        const nextRoutes = await refreshLists();
-        setConfirmingDelete(false);
-        if (nextRoutes.length > 0) select(nextRoutes[0]);
-        else selectNew();
-      },
-      setError,
-    );
+    if (!selected) return;
+    await run(async () => {
+      await deleteRoute(selected.id);
+      const next = await refreshRoutes();
+      setConfirmingDelete(false);
+      setSelectedId(next[0]?.id ?? null);
+    }, setError);
+  };
+
+  const selectRoute = (id: string) => {
+    setSelectedId(id);
+    setActionError(null);
+    setConfirmingDelete(false);
   };
 
   return (
@@ -449,6 +264,7 @@ export function RoutingPage() {
             <div className="eyebrow">ROUTING RECIPES</div>
             <h1>模型路由</h1>
           </div>
+          <ProtocolHelp />
         </header>
 
         {error ? <InlineError message={error} /> : null}
@@ -460,7 +276,7 @@ export function RoutingPage() {
             <section className="register-pane">
               <div className="register-head">
                 <span className="register-title">路由 · {routes.length} 条</span>
-                <GlyphButton label="新建路由" onClick={requestNew}>
+                <GlyphButton label="新建路由" onClick={openBasicsNew}>
                   <Plus aria-hidden="true" />
                 </GlyphButton>
               </div>
@@ -468,15 +284,12 @@ export function RoutingPage() {
               {routes.length === 0 ? (
                 <div className="register-empty">
                   <EmptyNote>还没有配置路由别名。</EmptyNote>
-                  <button className="text-action" type="button" onClick={requestNew}>
+                  <button className="text-action" type="button" onClick={openBasicsNew}>
                     创建第一个路由
                   </button>
                 </div>
               ) : (
-                <RegisterList
-                  ariaLabel="路由别名列表"
-                  selectedKey={selectedId === "new" ? null : selectedId}
-                >
+                <RegisterList ariaLabel="路由别名列表" selectedKey={selectedId}>
                   {routes.map((route) => {
                     const look = routeAppearance(route, primaryModelMark(route.targets, brands));
                     return (
@@ -486,7 +299,7 @@ export function RoutingPage() {
                         key={route.id}
                         data-register-key={route.id}
                         aria-current={selectedId === route.id ? "true" : undefined}
-                        onClick={() => requestSelect(route)}
+                        onClick={() => selectRoute(route.id)}
                       >
                         <BrandGlyph brand={look.brand} tint={look.tint} size={20} fallback={<Route aria-hidden="true" />} />
                         <span className="register-body">
@@ -506,52 +319,41 @@ export function RoutingPage() {
               )}
             </section>
 
-            <section className="workbench-sheet" aria-label="路由编辑">
-              {draft ? (
+            <section className="workbench-sheet" aria-label="路由详情">
+              {selected && appearance ? (
                 <>
                   <div className="sheet-head">
                     <IconPicker
-                      icon={draft.icon}
-                      auto={draftAppearance?.auto ?? null}
-                      tint={draftAppearance?.tint ?? "ink"}
+                      icon={selected.icon}
+                      auto={appearance.auto}
+                      tint={appearance.tint}
                       size={22}
-                      enabled={draft.enabled}
-                      glyphClassName={draft.enabled ? undefined : "is-off"}
+                      enabled={selected.enabled}
+                      glyphClassName={selected.enabled ? undefined : "is-off"}
                       fallback={<Route aria-hidden="true" />}
                       disabled={busy}
-                      onChange={(value) => void setRouteAppearance({ icon: value })}
-                      onTintChange={(value) => void setRouteAppearance({ iconTint: value })}
+                      onChange={(value) => void apply(selected, { icon: value })}
+                      onTintChange={(value) => void apply(selected, { iconTint: value })}
                     />
-                    <h2 className="sheet-title">{selectedId === "new" ? "新建路由" : draft.alias || "未命名路由"}</h2>
+                    <div className="sheet-title-block">
+                      <h2 className="sheet-title">{selected.displayName || selected.alias}</h2>
+                      <span className="protocol-tag">{protocolLabel[selected.protocol]}</span>
+                    </div>
                     <TogglePill
-                      checked={draft.enabled}
+                      checked={selected.enabled}
                       label="启用该路由"
-                      disabled={busy}
-                      onChange={(next) => setDraft({ ...draft, enabled: next })}
+                      disabled={busy || (!selected.enabled && !hasEnabledTarget)}
+                      onChange={() => void toggleRoute(selected)}
                     />
                     <div className="sheet-actions">
-                      {selectedId !== "new" ? (
-                        <GlyphButton label="删除该路由" danger disabled={busy} onClick={() => setConfirmingDelete(true)}>
-                          <Trash aria-hidden="true" />
-                        </GlyphButton>
-                      ) : null}
+                      <GlyphButton label="编辑基础信息" disabled={busy} onClick={() => openBasicsEdit(selected)}>
+                        <Pencil aria-hidden="true" />
+                      </GlyphButton>
+                      <GlyphButton label="删除该路由" danger disabled={busy} onClick={() => setConfirmingDelete(true)}>
+                        <Trash aria-hidden="true" />
+                      </GlyphButton>
                     </div>
                   </div>
-
-                  {pending ? (
-                    <div className="pending-bar">
-                      <span>有未保存的修改，切换前要保存吗？</span>
-                      <button className="quiet-button is-primary" type="button" onClick={() => void saveAndSwitch(submit)} disabled={busy}>
-                        保存并切换
-                      </button>
-                      <button className="quiet-button" type="button" onClick={applyPending} disabled={busy}>
-                        放弃并切换
-                      </button>
-                      <button className="quiet-button" type="button" onClick={() => setPending(null)} disabled={busy}>
-                        取消
-                      </button>
-                    </div>
-                  ) : null}
 
                   {confirmingDelete ? (
                     <div className="confirm-bar">
@@ -565,25 +367,121 @@ export function RoutingPage() {
                     </div>
                   ) : null}
 
-                  <RouteForm
-                    key={selectedId ?? "new"}
-                    draft={draft}
-                    savedDraft={savedDraft ?? draft}
-                    providers={providers}
-                    models={models}
-                    brands={brands}
-                    busy={busy}
-                    error={formError}
-                    onChange={setDraft}
-                    onDiscard={discardDraft}
-                    onSubmit={() => void submit()}
-                  />
+                  <section className="sheet-section">
+                    <SectionTitle
+                      icon={<ListOrdered aria-hidden="true" />}
+                      action={
+                        <ModelPicker
+                          groups={groups}
+                          brands={brands}
+                          taken={taken}
+                          disabled={busy}
+                          onSelect={(modelId) => void addTarget(selected, modelId)}
+                        />
+                      }
+                    >
+                      上游目标
+                    </SectionTitle>
+
+                    {targets.length === 0 ? (
+                      <EmptyNote>
+                        {models.length === 0
+                          ? "还没有可用的上游模型，请先到上游提供商页登记。"
+                          : groups.length === 0
+                            ? `还没有 ${protocolLabel[selected.protocol]} 协议的上游模型，请先到上游提供商页登记。`
+                            : "还没有添加目标。添加至少一个目标后才能启用。"}
+                      </EmptyNote>
+                    ) : (
+                      <ol className="target-list">
+                        {targets.map((target, index) => {
+                          const model = modelById.get(target.upstreamModelId) ?? null;
+                          const mark = brands.get(target.upstreamModelId) ?? null;
+                          return (
+                            <li
+                              key={target.id}
+                              className={target.enabled ? "target-row" : "target-row is-off"}
+                            >
+                              <span className="target-rank">{index + 1}</span>
+                              <BrandGlyph
+                                brand={mark?.brand ?? null}
+                                tint={markTint(mark)}
+                                size={18}
+                                fallback={<Route aria-hidden="true" />}
+                              />
+                              <span className="target-model">
+                                <span className="target-model-name">
+                                  {model?.displayName ?? target.upstreamModelId}
+                                </span>
+                                {model ? <code className="target-model-id">{model.modelId}</code> : null}
+                                {model ? (
+                                  <span className="target-provider">
+                                    {providerNameById.get(model.providerId) ?? ""}
+                                  </span>
+                                ) : null}
+                              </span>
+                              <TogglePill
+                                small
+                                checked={target.enabled}
+                                label={target.enabled ? "停用该目标" : "启用该目标"}
+                                disabled={busy || (target.enabled && selected.enabled && enabledCount === 1)}
+                                onChange={() => void toggleTarget(selected, target.upstreamModelId)}
+                              />
+                              <div className="target-move">
+                                <GlyphButton
+                                  label="上移"
+                                  disabled={busy || index === 0}
+                                  onClick={() => void moveTargetBy(selected, index, -1)}
+                                >
+                                  <ChevronUp aria-hidden="true" />
+                                </GlyphButton>
+                                <GlyphButton
+                                  label="下移"
+                                  disabled={busy || index === targets.length - 1}
+                                  onClick={() => void moveTargetBy(selected, index, 1)}
+                                >
+                                  <ChevronDown aria-hidden="true" />
+                                </GlyphButton>
+                                <GlyphButton
+                                  label="移除目标"
+                                  danger
+                                  disabled={busy || (target.enabled && selected.enabled && enabledCount === 1)}
+                                  onClick={() => void removeTarget(selected, target.upstreamModelId)}
+                                >
+                                  <Trash aria-hidden="true" />
+                                </GlyphButton>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    )}
+                  </section>
+
+                  {targets.length > 0 && !hasUsableBackup(targets) ? (
+                    <InlineWarning message="没有备用目标，降级将不可用。" />
+                  ) : null}
+                  {actionError ? <InlineError message={actionError} /> : null}
                 </>
-              ) : null}
+              ) : (
+                <EmptyNote>选择左侧的一条路由，或新建一个。</EmptyNote>
+              )}
             </section>
           </div>
         )}
       </div>
+
+      {basicsDraft ? (
+        <RouteBasicsModal
+          initial={basicsDraft}
+          busy={busy}
+          error={basicsError}
+          onSubmit={(draft) => void submitBasics(draft)}
+          onClose={() => {
+            setBasicsDraft(null);
+            setBasicsError(null);
+          }}
+        />
+      ) : null}
     </main>
   );
 }

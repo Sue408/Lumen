@@ -30,7 +30,8 @@ export function ProtocolHelp() {
       if (top + panelRect.height > window.innerHeight - margin) {
         top = Math.max(margin, rect.top - margin - panelRect.height);
       }
-      let left = rect.left;
+      let left = rect.right - panelRect.width;
+      if (left < margin) left = margin;
       if (left + panelRect.width > window.innerWidth - margin) {
         left = Math.max(margin, window.innerWidth - margin - panelRect.width);
       }

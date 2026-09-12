@@ -7,6 +7,39 @@
   overflow: hidden;
 }
 
+/* 左栏放宽到约 1.5×，详情栏相应收窄。 */
+.routing-page .config-workbench {
+  grid-template-columns: minmax(19.5rem, 24rem) minmax(0, 1fr);
+}
+
+/* 协议说明图标：与页面标题同排，靠右留出呼吸，底部与标题对齐。 */
+.routing-page .page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.routing-page .page-header .protocol-help-trigger {
+  align-self: flex-end;
+  width: 1.35rem;
+  height: 1.35rem;
+  margin-right: clamp(1.5rem, 4vw, 3rem);
+}
+
+.routing-page .page-header .protocol-help-trigger svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.routing-page .sheet-title-block {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 0.2rem;
+  justify-items: start;
+  min-width: 0;
+}
+
 .routing-page .register-meta {
   display: inline-flex;
   align-items: center;
@@ -20,12 +53,6 @@
   color: var(--ink-muted);
   font-size: 0.625rem;
   line-height: 1.4;
-}
-
-.routing-page .field-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
 }
 
 /* 协议说明图标：触发按钮与浮层都是顶层类——浮层 portal 到 body，
@@ -146,11 +173,6 @@
   border-bottom: 1px solid var(--line-faint);
 }
 
-.target-row.is-off .target-rank {
-  color: var(--ink-faint);
-  border-color: var(--line-strong);
-}
-
 .target-row .brand-mark {
   color: var(--ink-soft);
 }
@@ -164,23 +186,27 @@
   width: 1.4rem;
   height: 1.4rem;
   flex: 0 0 auto;
-  color: var(--ochre);
-  border: 1px solid var(--ochre);
+  color: var(--ink-muted);
+  background: var(--paper-deep);
+  border: 1px solid var(--line);
   border-radius: 50%;
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   place-items: center;
 }
 
-.target-role {
-  flex: 0 0 auto;
-  color: var(--ink-muted);
-  font-size: 0.6875rem;
-  letter-spacing: var(--tracking-label);
+/* 首位是降级链起点，用赭石描边点出；其余保持墨阶。 */
+.target-list > .target-row:first-child .target-rank {
+  color: var(--ochre);
+  background: transparent;
+  border-color: var(--ochre);
 }
 
-.target-row.is-off .target-role {
+.target-row.is-off .target-rank {
   color: var(--ink-faint);
+  background: transparent;
+  border-color: var(--line-faint);
 }
 
 .target-row select {
@@ -206,4 +232,168 @@
   align-items: center;
   gap: 0.3rem;
   margin-left: auto;
+}
+
+/* ---- target card body ---- */
+
+.target-model {
+  display: grid;
+  flex: 1 1 12rem;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.target-model-name {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-model-id {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-provider {
+  color: var(--ink-faint);
+  font-size: 0.6875rem;
+}
+
+.target-row.is-off .target-model-name {
+  color: var(--ink-muted);
+}
+
+.target-row.is-off .target-model-id,
+.target-row.is-off .target-provider {
+  color: var(--ink-faint);
+}
+
+/* ---- model picker: trigger + portal panel ---- */
+
+.model-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.model-picker-trigger svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+/* portal 到 body，无法被 .routing-page 作用域覆盖（与品牌图标选择器同理）。 */
+.model-picker {
+  position: fixed;
+  z-index: 70;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.5rem;
+  width: min(22rem, calc(100vw - 2rem));
+  max-height: min(26rem, calc(100vh - 2rem));
+  padding: 0.6rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow-float);
+}
+
+.model-picker-search {
+  width: 100%;
+  height: 2rem;
+  padding: 0 0.5rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line-control);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.model-picker-search:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.model-picker-list {
+  display: grid;
+  gap: 0.15rem;
+  min-height: 0;
+  overflow: hidden auto;
+}
+
+.model-picker-group {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.model-picker-group-name {
+  padding: 0.35rem 0.25rem 0.15rem;
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+  letter-spacing: var(--tracking-label);
+}
+
+.model-picker-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.4rem;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-picker-cell:hover:not([disabled]) {
+  background: var(--paper-deep);
+}
+
+.model-picker-cell:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: -2px;
+}
+
+.model-picker-cell[disabled] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.model-picker-name {
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-picker-id {
+  overflow: hidden;
+  max-width: 10rem;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-picker-used {
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+  font-size: 0.6875rem;
+}
+
+.model-picker-empty {
+  margin: 0;
+  padding: 0.75rem 0.4rem;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
 }
