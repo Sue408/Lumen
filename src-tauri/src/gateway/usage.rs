@@ -225,6 +225,7 @@ pub fn calculate_cost(usage: &UsageTotals, price: &Pricing) -> f64 {
     (cost * 1_000_000.0).round() / 1_000_000.0
 }
 
+#[derive(Clone)]
 pub struct LogContext {
     pub endpoint: String,
     pub alias: String,
@@ -237,6 +238,8 @@ pub struct LogContext {
     pub request_id: Option<String>,
     pub virtual_key_id: Option<String>,
     pub usage: UsageTotals,
+    /// 本次客户端请求内的上游尝试序号，从 0 起；降级时递增。
+    pub attempt_index: i64,
 }
 
 pub fn build_log(context: LogContext) -> RequestLog {
@@ -252,6 +255,7 @@ pub fn build_log(context: LogContext) -> RequestLog {
         request_id,
         virtual_key_id,
         usage,
+        attempt_index,
     } = context;
 
     // 只有拿到 input/output 或缓存计数时才能按 token 计价。仅有 total_tokens 的
@@ -303,6 +307,7 @@ pub fn build_log(context: LogContext) -> RequestLog {
         error_message,
         request_id,
         is_stream,
+        attempt_index,
     }
 }
 
@@ -561,6 +566,7 @@ mod tests {
             request_id: None,
             virtual_key_id: None,
             usage,
+            attempt_index: 0,
         });
         // 拆分未知 → 保守不结算，但保留 total 与 partial 标记。
         assert_eq!(log.cost, 0.0);

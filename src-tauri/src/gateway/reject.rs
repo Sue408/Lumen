@@ -26,6 +26,7 @@ pub async fn reject(
         request_id: None,
         virtual_key_id,
         usage: UsageTotals::missing(),
+        attempt_index: 0,
     });
     let _ = record(state, log).await;
 }

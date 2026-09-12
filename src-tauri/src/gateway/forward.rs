@@ -225,6 +225,7 @@ pub fn stream_response(
     alias: String,
     endpoint: String,
     virtual_key_id: Option<String>,
+    attempt_index: i64,
     response: reqwest::Response,
 ) -> Response {
     let status = response.status();
@@ -289,6 +290,7 @@ pub fn stream_response(
             request_id,
             virtual_key_id,
             usage: scanner.totals(),
+            attempt_index,
         });
         let _ = record(&state, log).await;
     });

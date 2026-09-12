@@ -39,6 +39,7 @@ export type RequestLog = {
   errorMessage: string | null;
   requestId: string | null;
   isStream: boolean;
+  attemptIndex: number;
 };
 
 const DEFAULT_PORT = 8787;

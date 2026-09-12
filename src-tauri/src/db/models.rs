@@ -337,6 +337,8 @@ pub struct RequestLog {
     pub error_message: Option<String>,
     pub request_id: Option<String>,
     pub is_stream: bool,
+    /// 本次客户端请求内的上游尝试序号，从 0 起。降级链中失败与成功的尝试各占一条。
+    pub attempt_index: i64,
 }
 
 impl RequestLog {
@@ -369,6 +371,7 @@ impl RequestLog {
             error_message: row.get("error_message")?,
             request_id: row.get("request_id")?,
             is_stream: row.get::<_, i64>("is_stream")? != 0,
+            attempt_index: row.get("attempt_index")?,
         })
     }
 }

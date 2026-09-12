@@ -152,6 +152,7 @@ mod tests {
             error_message: None,
             request_id: None,
             is_stream: false,
+            attempt_index: 0,
         }
     }
 

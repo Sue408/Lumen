@@ -90,6 +90,15 @@ export function InlineError({ message }: { message: string }) {
   );
 }
 
+/// 非阻断提示：不阻止操作，只提醒后果（如「降级将不可用」）。
+export function InlineWarning({ message }: { message: string }) {
+  return (
+    <p className="inline-warning" role="status">
+      {message}
+    </p>
+  );
+}
+
 export function LoadingLines({ rows = 3 }: { rows?: number }) {
   return (
     <div className="loading-lines" aria-hidden="true">

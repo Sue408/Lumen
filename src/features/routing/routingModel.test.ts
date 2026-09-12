@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   emptyRouteDraft,
+  hasUsableBackup,
   isRouteDraftDirty,
   moveTarget,
   routeToDraft,
@@ -65,6 +66,25 @@ test("isRouteDraftDirty detects field, target and order changes", () => {
       { ...base, targets: [base.targets[1], base.targets[0]] },
       base,
     ),
+    true,
+  );
+});
+
+test("hasUsableBackup requires at least two enabled targets", () => {
+  assert.equal(hasUsableBackup([]), false);
+  assert.equal(hasUsableBackup([{ uid: "u1", upstreamModelId: "m1", enabled: true }]), false);
+  assert.equal(
+    hasUsableBackup([
+      { uid: "u1", upstreamModelId: "m1", enabled: true },
+      { uid: "u2", upstreamModelId: "m2", enabled: false },
+    ]),
+    false,
+  );
+  assert.equal(
+    hasUsableBackup([
+      { uid: "u1", upstreamModelId: "m1", enabled: true },
+      { uid: "u2", upstreamModelId: "m2", enabled: true },
+    ]),
     true,
   );
 });

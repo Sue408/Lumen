@@ -26,7 +26,12 @@ pub struct ResolvedRoute {
     pub extra_headers: BTreeMap<String, String>,
 }
 
-pub fn resolve_route(conn: &Connection, alias: &str) -> Result<Option<ResolvedRoute>, AppError> {
+/// 解析别名对应的**全部启用候选**，按 `priority` 升序（同级按插入顺序）。
+/// 降级链即由此顺序决定；调用方按序尝试。
+pub fn resolve_candidates(
+    conn: &Connection,
+    alias: &str,
+) -> Result<Vec<ResolvedRoute>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT
             r.id            AS route_id,
@@ -53,10 +58,9 @@ pub fn resolve_route(conn: &Connection, alias: &str) -> Result<Option<ResolvedRo
            AND t.enabled = 1
            AND m.enabled = 1
            AND p.enabled = 1
-         ORDER BY t.priority ASC, t.rowid ASC
-         LIMIT 1",
+         ORDER BY t.priority ASC, t.rowid ASC",
     )?;
-    let mut rows = stmt.query_map([alias], |row| {
+    let rows = stmt.query_map([alias], |row| {
         let raw_headers: String = row.get("extra_headers")?;
         Ok(ResolvedRoute {
             route_id: row.get("route_id")?,
@@ -76,15 +80,17 @@ pub fn resolve_route(conn: &Connection, alias: &str) -> Result<Option<ResolvedRo
             extra_headers: serde_json::from_str(&raw_headers).unwrap_or_default(),
         })
     })?;
-    match rows.next() {
-        Some(row) => Ok(Some(row?)),
-        None => Ok(None),
+    let mut candidates = Vec::new();
+    for row in rows {
+        candidates.push(row?);
     }
+    Ok(candidates)
 }
 
-pub async fn resolve(state: &AppState, alias: &str) -> Result<Option<ResolvedRoute>, AppError> {
+/// 解析别名的全部有序候选，供降级链按序尝试。
+pub async fn resolve_all(state: &AppState, alias: &str) -> Result<Vec<ResolvedRoute>, AppError> {
     let alias = alias.to_string();
-    with_db(&state.db, move |conn| resolve_route(conn, &alias)).await
+    with_db(&state.db, move |conn| resolve_candidates(conn, &alias)).await
 }
 
 #[cfg(test)]
@@ -93,10 +99,9 @@ mod tests {
     use crate::db::models::{ProviderInput, RouteInput, RouteTargetInput, UpstreamModelInput};
     use crate::db::{open_in_memory, providers, routes, Db};
 
-    fn seed(db: &Db) {
-        let conn = db.lock().unwrap();
-        let provider = providers::save_provider(
-            &conn,
+    fn seed_provider(conn: &Connection) -> String {
+        providers::save_provider(
+            conn,
             &ProviderInput {
                 id: None,
                 name: "示例".into(),
@@ -110,14 +115,18 @@ mod tests {
                 enabled: true,
             },
         )
-        .unwrap();
-        let model = providers::save_upstream_model(
-            &conn,
+        .unwrap()
+        .id
+    }
+
+    fn seed_model(conn: &Connection, provider_id: &str, model_id: &str) -> String {
+        providers::save_upstream_model(
+            conn,
             &UpstreamModelInput {
                 id: None,
-                provider_id: provider.id,
-                model_id: "gpt-x".into(),
-                display_name: "GPT X".into(),
+                provider_id: provider_id.to_string(),
+                model_id: model_id.to_string(),
+                display_name: model_id.to_string(),
                 input_price: 1.0,
                 output_price: 2.0,
                 cache_read_price: 0.0,
@@ -129,23 +138,37 @@ mod tests {
                 enabled: true,
             },
         )
-        .unwrap();
+        .unwrap()
+        .id
+    }
+
+    fn save_targets(conn: &Connection, targets: Vec<RouteTargetInput>) {
         routes::save_route(
-            &conn,
+            conn,
             &RouteInput {
                 id: None,
                 alias: "lumen/x".into(),
                 display_name: "X".into(),
                 protocol: "openai".into(),
                 enabled: true,
-                targets: vec![RouteTargetInput {
-                    upstream_model_id: model.id,
-                    priority: 0,
-                    enabled: true,
-                }],
+                targets,
             },
         )
         .unwrap();
+    }
+
+    fn seed(db: &Db) {
+        let conn = db.lock().unwrap();
+        let provider = seed_provider(&conn);
+        let model = seed_model(&conn, &provider, "gpt-x");
+        save_targets(
+            &conn,
+            vec![RouteTargetInput {
+                upstream_model_id: model,
+                priority: 0,
+                enabled: true,
+            }],
+        );
     }
 
     #[test]
@@ -153,16 +176,98 @@ mod tests {
         let db = open_in_memory().unwrap();
         seed(&db);
         let conn = db.lock().unwrap();
-        let resolved = resolve_route(&conn, "lumen/x").unwrap().expect("应能解析");
-        assert_eq!(resolved.model_id, "gpt-x");
-        assert_eq!(resolved.input_price, 1.0);
-        assert_eq!(resolved.output_price, 2.0);
+        let candidates = resolve_candidates(&conn, "lumen/x").unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].model_id, "gpt-x");
+        assert_eq!(candidates[0].input_price, 1.0);
+        assert_eq!(candidates[0].output_price, 2.0);
     }
 
     #[test]
-    fn unknown_alias_returns_none() {
+    fn unknown_alias_yields_no_candidates() {
         let db = open_in_memory().unwrap();
         let conn = db.lock().unwrap();
-        assert!(resolve_route(&conn, "missing").unwrap().is_none());
+        assert!(resolve_candidates(&conn, "missing").unwrap().is_empty());
+    }
+
+    #[test]
+    fn candidates_follow_priority_order() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = seed_provider(&conn);
+        let primary = seed_model(&conn, &provider, "primary");
+        let backup = seed_model(&conn, &provider, "backup");
+        // 故意逆序传入：primary 优先级 0，backup 优先级 1。
+        save_targets(
+            &conn,
+            vec![
+                RouteTargetInput {
+                    upstream_model_id: backup,
+                    priority: 1,
+                    enabled: true,
+                },
+                RouteTargetInput {
+                    upstream_model_id: primary,
+                    priority: 0,
+                    enabled: true,
+                },
+            ],
+        );
+        let models: Vec<String> = resolve_candidates(&conn, "lumen/x")
+            .unwrap()
+            .into_iter()
+            .map(|candidate| candidate.model_id)
+            .collect();
+        assert_eq!(models, vec!["primary", "backup"]);
+    }
+
+    #[test]
+    fn disabled_targets_are_skipped() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = seed_provider(&conn);
+        let primary = seed_model(&conn, &provider, "primary");
+        let backup = seed_model(&conn, &provider, "backup");
+        save_targets(
+            &conn,
+            vec![
+                RouteTargetInput {
+                    upstream_model_id: primary,
+                    priority: 0,
+                    enabled: true,
+                },
+                RouteTargetInput {
+                    upstream_model_id: backup,
+                    priority: 1,
+                    enabled: false,
+                },
+            ],
+        );
+        let models: Vec<String> = resolve_candidates(&conn, "lumen/x")
+            .unwrap()
+            .into_iter()
+            .map(|candidate| candidate.model_id)
+            .collect();
+        assert_eq!(models, vec!["primary"]);
+    }
+
+    #[test]
+    fn route_without_enabled_targets_is_empty() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = seed_provider(&conn);
+        let model = seed_model(&conn, &provider, "primary");
+        save_targets(
+            &conn,
+            vec![RouteTargetInput {
+                upstream_model_id: model,
+                priority: 0,
+                enabled: true,
+            }],
+        );
+        // 保存校验要求启用路由至少一个启用目标，故直接停用以模拟全部不可用。
+        conn.execute("UPDATE route_targets SET enabled = 0", [])
+            .unwrap();
+        assert!(resolve_candidates(&conn, "lumen/x").unwrap().is_empty());
     }
 }

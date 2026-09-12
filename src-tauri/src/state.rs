@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tokio::sync::oneshot;
@@ -8,6 +10,34 @@ use crate::db::models::RequestLog;
 use crate::db::Db;
 
 pub const DEFAULT_PORT: u16 = 8787;
+
+/// 瞬时失败（5xx / 连接失败 / 短限流耗尽）后的目标冷却时长。
+pub const COOLDOWN_TRANSIENT: Duration = Duration::from_secs(60);
+/// 疑似额度耗尽（长 `Retry-After` / 额度类错误）后的目标冷却时长。
+pub const COOLDOWN_EXHAUSTED: Duration = Duration::from_secs(300);
+
+/// 降级链中目标的临时冷却表：内存态、带过期，重启即清空。
+#[derive(Default)]
+struct Cooldowns {
+    until: HashMap<String, Instant>,
+}
+
+impl Cooldowns {
+    fn is_cooling(&mut self, key: &str, now: Instant) -> bool {
+        match self.until.get(key) {
+            Some(&deadline) if deadline > now => true,
+            Some(_) => {
+                self.until.remove(key);
+                false
+            }
+            None => false,
+        }
+    }
+
+    fn mark(&mut self, key: &str, duration: Duration, now: Instant) {
+        self.until.insert(key.to_string(), now + duration);
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,6 +100,7 @@ pub struct AppState {
     pub gateway: Mutex<Option<GatewayHandle>>,
     port: Mutex<u16>,
     close_to_tray: Mutex<bool>,
+    cooldowns: Mutex<Cooldowns>,
 }
 
 impl AppState {
@@ -86,6 +117,7 @@ impl AppState {
             gateway: Mutex::new(None),
             port: Mutex::new(port),
             close_to_tray: Mutex::new(true),
+            cooldowns: Mutex::new(Cooldowns::default()),
         }
     }
 
@@ -112,6 +144,21 @@ impl AppState {
         }
     }
 
+    /// 该上游模型是否处于降级冷却中（过期即自动清理）。
+    pub fn is_cooling(&self, upstream_model_id: &str) -> bool {
+        self.cooldowns
+            .lock()
+            .map(|mut guard| guard.is_cooling(upstream_model_id, Instant::now()))
+            .unwrap_or(false)
+    }
+
+    /// 将某上游模型标记为冷却一段时间。
+    pub fn mark_cooling(&self, upstream_model_id: &str, duration: Duration) {
+        if let Ok(mut guard) = self.cooldowns.lock() {
+            guard.mark(upstream_model_id, duration, Instant::now());
+        }
+    }
+
     pub fn status(&self) -> GatewayStatus {
         let running = self
             .gateway
@@ -125,5 +172,31 @@ impl AppState {
             base_url: GatewayStatus::base_url_for(port),
             error: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn marks_and_reads_cooling() {
+        let mut cooldowns = Cooldowns::default();
+        let now = Instant::now();
+        cooldowns.mark("m1", Duration::from_secs(60), now);
+
+        assert!(cooldowns.is_cooling("m1", now));
+        assert!(cooldowns.is_cooling("m1", now + Duration::from_secs(59)));
+        assert!(!cooldowns.is_cooling("m1", now + Duration::from_secs(60)));
+        assert!(!cooldowns.is_cooling("m2", now));
+    }
+
+    #[test]
+    fn expired_cooldown_is_pruned() {
+        let mut cooldowns = Cooldowns::default();
+        let now = Instant::now();
+        cooldowns.mark("m1", Duration::from_secs(1), now);
+        assert!(!cooldowns.is_cooling("m1", now + Duration::from_secs(2)));
+        assert!(cooldowns.until.is_empty(), "过期项应被清理");
     }
 }

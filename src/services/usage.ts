@@ -68,6 +68,7 @@ function buildMockLogs(): RequestLog[] {
         errorMessage: failed ? "上游超时" : null,
         requestId: `req-${dayOffset}-${index}`,
         isStream: index % 3 === 0,
+        attemptIndex: 0,
       });
     }
   }

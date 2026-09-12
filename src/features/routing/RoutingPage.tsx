@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -12,6 +12,7 @@ import {
   EmptyNote,
   GlyphButton,
   InlineError,
+  InlineWarning,
   LoadingLines,
   SaveBar,
   SectionTitle,
@@ -36,6 +37,7 @@ import {
 } from "../../services/config";
 import {
   emptyRouteDraft,
+  hasUsableBackup,
   isRouteDraftDirty,
   makeTarget,
   moveTarget,
@@ -182,63 +184,60 @@ function RouteForm({
         ) : (
           <ol className="target-list" ref={containerRef}>
             {draft.targets.map((target, index) => (
-              <Fragment key={target.uid}>
-                {index > 0 ? (
-                  <li className="target-connector" aria-hidden="true">
-                    ↓
-                  </li>
-                ) : null}
-                <li
-                  className={target.enabled ? "target-row" : "target-row is-off"}
-                  data-flip-key={target.uid}
-                >
-                  <span className="target-rank">{index + 1}</span>
-                  <span className="target-role">
-                    {index === 0 ? "首选" : `备用 ${index + 1}`}
-                  </span>
-                  <BrandGlyph
-                    brand={brands.get(target.upstreamModelId)?.brand ?? null}
-                    tint={markTint(brands.get(target.upstreamModelId))}
-                    size={18}
-                    fallback={<Route aria-hidden="true" />}
-                  />
-                  <select value={target.upstreamModelId} onChange={(event) => setTarget(index, { upstreamModelId: event.target.value })}>
-                    <option value="">选择上游模型…</option>
-                    {groups.map((group) => (
-                      <optgroup label={group.name} key={group.id}>
-                        {group.models.map((model) => (
-                          <option value={model.id} key={model.id}>
-                            {model.displayName} · {model.modelId}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                  <TogglePill
-                    small
-                    checked={target.enabled}
-                    label={target.enabled ? "停用该目标" : "启用该目标"}
-                    disabled={busy}
-                    onChange={(next) => setTarget(index, { enabled: next })}
-                  />
-                  <div className="target-move">
-                    <GlyphButton label="上移" disabled={busy || index === 0} onClick={() => { capture(); set({ targets: moveTarget(draft.targets, index, -1) }); }}>
-                      <ChevronUp aria-hidden="true" />
-                    </GlyphButton>
-                    <GlyphButton label="下移" disabled={busy || index === draft.targets.length - 1} onClick={() => { capture(); set({ targets: moveTarget(draft.targets, index, 1) }); }}>
-                      <ChevronDown aria-hidden="true" />
-                    </GlyphButton>
-                    <GlyphButton label="移除目标" danger disabled={busy} onClick={() => { capture(); set({ targets: draft.targets.filter((_, itemIndex) => itemIndex !== index) }); }}>
-                      <Trash aria-hidden="true" />
-                    </GlyphButton>
-                  </div>
-                </li>
-              </Fragment>
+              <li
+                key={target.uid}
+                className={target.enabled ? "target-row" : "target-row is-off"}
+                data-flip-key={target.uid}
+              >
+                <span className="target-rank">{index + 1}</span>
+                <span className="target-role">
+                  {index === 0 ? "首选" : `备用 ${index + 1}`}
+                </span>
+                <BrandGlyph
+                  brand={brands.get(target.upstreamModelId)?.brand ?? null}
+                  tint={markTint(brands.get(target.upstreamModelId))}
+                  size={18}
+                  fallback={<Route aria-hidden="true" />}
+                />
+                <select value={target.upstreamModelId} onChange={(event) => setTarget(index, { upstreamModelId: event.target.value })}>
+                  <option value="">选择上游模型…</option>
+                  {groups.map((group) => (
+                    <optgroup label={group.name} key={group.id}>
+                      {group.models.map((model) => (
+                        <option value={model.id} key={model.id}>
+                          {model.displayName} · {model.modelId}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <TogglePill
+                  small
+                  checked={target.enabled}
+                  label={target.enabled ? "停用该目标" : "启用该目标"}
+                  disabled={busy}
+                  onChange={(next) => setTarget(index, { enabled: next })}
+                />
+                <div className="target-move">
+                  <GlyphButton label="上移" disabled={busy || index === 0} onClick={() => { capture(); set({ targets: moveTarget(draft.targets, index, -1) }); }}>
+                    <ChevronUp aria-hidden="true" />
+                  </GlyphButton>
+                  <GlyphButton label="下移" disabled={busy || index === draft.targets.length - 1} onClick={() => { capture(); set({ targets: moveTarget(draft.targets, index, 1) }); }}>
+                    <ChevronDown aria-hidden="true" />
+                  </GlyphButton>
+                  <GlyphButton label="移除目标" danger disabled={busy} onClick={() => { capture(); set({ targets: draft.targets.filter((_, itemIndex) => itemIndex !== index) }); }}>
+                    <Trash aria-hidden="true" />
+                  </GlyphButton>
+                </div>
+              </li>
             ))}
           </ol>
         )}
       </section>
 
+      {draft.targets.length > 0 && !hasUsableBackup(draft.targets) ? (
+        <InlineWarning message="没有备用目标，降级将不可用。" />
+      ) : null}
       {error ? <InlineError message={error} /> : null}
       <SaveBar dirty={dirty} busy={busy} label={draft.id ? "保存路由" : "创建路由"} onDiscard={onDiscard} />
     </form>

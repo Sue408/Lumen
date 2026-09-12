@@ -121,10 +121,11 @@ pub fn insert_log(conn: &Connection, log: &RequestLog) -> Result<(), AppError> {
             upstream_model_id, upstream_model_name, model_real, provider_id, virtual_key_id,
             kind, input_tokens, output_tokens, total_tokens,
             cache_read_tokens, cache_creation_tokens, cache_read_in_input, reasoning_tokens,
-            cost, usage_source, status, http_status, latency_ms, error_message, request_id, is_stream
+            cost, usage_source, status, http_status, latency_ms, error_message, request_id, is_stream,
+            attempt_index
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-            ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
+            ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
          )",
         params![
             log.id,
@@ -154,6 +155,7 @@ pub fn insert_log(conn: &Connection, log: &RequestLog) -> Result<(), AppError> {
             log.error_message,
             log.request_id,
             log.is_stream as i64,
+            log.attempt_index,
         ],
     )?;
     Ok(())
@@ -273,6 +275,7 @@ mod tests {
             error_message: if status == "error" { Some("上游超时".into()) } else { None },
             request_id: Some(format!("req-{n}")),
             is_stream: false,
+            attempt_index: 0,
         }
     }
 

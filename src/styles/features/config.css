@@ -1068,14 +1068,6 @@
   color: var(--ink-faint);
 }
 
-.target-connector {
-  padding: 0.1rem 0 0.1rem 0.45rem;
-  color: var(--line-strong);
-  font-size: 0.8rem;
-  line-height: 1;
-  list-style: none;
-}
-
 .target-row select {
   flex: 1 1 14rem;
   min-width: 0;
@@ -1106,6 +1098,12 @@
 .inline-error {
   margin: 0;
   color: var(--danger);
+  font-size: 0.8125rem;
+}
+
+.inline-warning {
+  margin: 0;
+  color: var(--ochre);
   font-size: 0.8125rem;
 }
 

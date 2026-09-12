@@ -28,6 +28,11 @@ export function makeTarget(upstreamModelId: string): RouteTargetDraft {
   return { uid: crypto.randomUUID(), upstreamModelId, enabled: true };
 }
 
+/// 启用目标 ≥ 2 才具备降级备用。单目标可保存，但降级不可用（仅告警，不阻断）。
+export function hasUsableBackup(targets: RouteTargetDraft[]): boolean {
+  return targets.filter((target) => target.enabled).length >= 2;
+}
+
 export function emptyRouteDraft(): RouteDraft {
   return { id: null, alias: "", displayName: "", protocol: "openai", enabled: true, targets: [] };
 }

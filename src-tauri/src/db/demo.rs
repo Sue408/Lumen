@@ -930,6 +930,7 @@ fn generate_logs(set: &DemoSet, profile: &Profile, now: DateTime<Local>) -> Vec<
                 error_message,
                 request_id: Some(format!("req_demo_{sequence}")),
                 is_stream,
+                attempt_index: 0,
             });
             sequence += 1;
         }
