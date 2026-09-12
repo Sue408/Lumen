@@ -1,11 +1,3 @@
-export type TrendDetail = {
-  label: string;
-  currentValue: number;
-  previousValue: number;
-  difference: number;
-  percentage: number | null;
-};
-
 export type TrendPeriodKey = "day" | "week" | "month";
 
 export function getNearestPointIndex(
@@ -17,22 +9,6 @@ export function getNearestPointIndex(
   if (pointCount <= 1 || plotWidth <= 0) return 0;
   const ratio = Math.min(Math.max((pointerX - plotLeft) / plotWidth, 0), 1);
   return Math.round(ratio * (pointCount - 1));
-}
-
-export function buildTrendDetail(
-  label: string,
-  currentValue: number,
-  previousValue: number,
-): TrendDetail {
-  const difference = currentValue - previousValue;
-  return {
-    label,
-    currentValue,
-    previousValue,
-    difference,
-    percentage:
-      previousValue === 0 ? null : Math.round((difference / previousValue) * 100),
-  };
 }
 
 const pad = (value: number) => String(value).padStart(2, "0");

@@ -17,6 +17,8 @@
 src/
   app/            应用外壳：导航注册表、侧边栏、页面框架、路由状态
   components/     无业务的通用 UI 原语（如 WindowChrome、运行时探测）
+  hooks/          跨页面的 React 逻辑（登记簿选择、异步操作），不依赖具体业务域
+  lib/            无 React 的通用工具（数字 / 金额格式化等）
   services/       跨业务的 IPC 封装：Tauri `invoke`/事件 + 浏览器 mock 回退
   features/<域>/  业务页面与其纯逻辑模块，测试与被测模块同目录
   styles/         全部样式，按 base / shell / features 分区
@@ -29,6 +31,7 @@ src/
 - 新增一个业务页面 = 在 `features/<域>/` 建组件与纯逻辑 + 在 `app/navigation.ts` 注册导航项 + 在 `App.tsx` 挂载。
 - 纯计算/格式化逻辑独立成不依赖 React 的模块，并配 `<module>.test.ts`（`node --test` 可跑）。
 - 通用、跨业务复用的 UI 才放 `components/`；只有一个域用的组件留在该 `features/<域>/` 内。
+- 跨页面复用的 React 逻辑（如登记簿选择/切换、异步操作）放 `hooks/`，不依赖具体业务域。
 
 ## 后端目录分层
 

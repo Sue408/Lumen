@@ -47,8 +47,8 @@ import {
 } from "./routingModel";
 import { ProtocolHelp } from "./ProtocolHelp";
 import { useFlipList } from "./useFlipList";
-
-type Pending = { kind: "existing"; id: string } | { kind: "new" };
+import { useAsyncAction } from "../../hooks/useAsyncAction";
+import { useRegisterSelection } from "../../hooks/useRegisterSelection";
 
 type ModelMark = { brand: BrandId | null; tint: IconTint; enabled: boolean };
 
@@ -250,49 +250,39 @@ export function RoutingPage() {
   const [models, setModels] = useState<UpstreamModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | "new" | null>(null);
-  const [draft, setDraft] = useState<RouteDraft | null>(null);
-  const [savedDraft, setSavedDraft] = useState<RouteDraft | null>(null);
-  const [pending, setPending] = useState<Pending | null>(null);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const { busy, run } = useAsyncAction();
 
-  const dirty = draft !== null && savedDraft !== null && isRouteDraftDirty(draft, savedDraft);
+  const {
+    selectedId,
+    draft,
+    savedDraft,
+    pending,
+    confirmingDelete,
+    setDraft,
+    setSavedDraft,
+    setSelectedId,
+    setPending,
+    setConfirmingDelete,
+    select,
+    selectNew,
+    requestSelect,
+    requestNew,
+    applyPending,
+    saveAndSwitch,
+  } = useRegisterSelection<RouteWithTargets, RouteDraft>({
+    entities: routes,
+    toDraft: routeToDraft,
+    emptyDraft: emptyRouteDraft,
+    isDirty: isRouteDraftDirty,
+    onSelect: () => setFormError(null),
+  });
+
   const brands = useMemo(() => buildBrandLookup(providers, models), [providers, models]);
   const modelProtocol = useMemo(() => {
     const providerProtocol = new Map(providers.map((provider) => [provider.id, provider.protocol]));
     return new Map(models.map((model) => [model.id, providerProtocol.get(model.providerId)]));
   }, [providers, models]);
-
-  const select = (route: RouteWithTargets) => {
-    const next = routeToDraft(route);
-    setSelectedId(route.id);
-    setDraft(next);
-    setSavedDraft(structuredClone(next));
-    setFormError(null);
-    setConfirmingDelete(false);
-    setPending(null);
-  };
-
-  const selectNew = () => {
-    setSelectedId("new");
-    setDraft(emptyRouteDraft());
-    setSavedDraft(emptyRouteDraft());
-    setFormError(null);
-    setConfirmingDelete(false);
-    setPending(null);
-  };
-
-  const requestSelect = (route: RouteWithTargets) => {
-    if (dirty) setPending({ kind: "existing", id: route.id });
-    else select(route);
-  };
-
-  const requestNew = () => {
-    if (dirty) setPending({ kind: "new" });
-    else selectNew();
-  };
 
   const refreshLists = async () => {
     const [nextRoutes, nextProviders, nextModels] = await Promise.all([
@@ -341,33 +331,30 @@ export function RoutingPage() {
       setFormError(message);
       return false;
     }
-    setBusy(true);
-    setFormError(null);
-    try {
-      const saved = await saveRoute({
-        id: draft.id,
-        alias: draft.alias.trim(),
-        displayName: draft.displayName.trim() || draft.alias.trim(),
-        protocol: draft.protocol,
-        enabled: draft.enabled,
-        targets: draft.targets.map((target, index) => ({
-          upstreamModelId: target.upstreamModelId,
-          priority: index,
-          enabled: target.enabled,
-        })),
-      });
-      await refreshLists();
-      const nextDraft = routeToDraft(saved);
-      setSelectedId(saved.id);
-      setDraft(nextDraft);
-      setSavedDraft(structuredClone(nextDraft));
-      return true;
-    } catch (err) {
-      setFormError(String(err));
-      return false;
-    } finally {
-      setBusy(false);
-    }
+    const saved = await run(
+      async () => {
+        const route = await saveRoute({
+          id: draft.id,
+          alias: draft.alias.trim(),
+          displayName: draft.displayName.trim() || draft.alias.trim(),
+          protocol: draft.protocol,
+          enabled: draft.enabled,
+          targets: draft.targets.map((target, index) => ({
+            upstreamModelId: target.upstreamModelId,
+            priority: index,
+            enabled: target.enabled,
+          })),
+        });
+        await refreshLists();
+        const nextDraft = routeToDraft(route);
+        setSelectedId(route.id);
+        setDraft(nextDraft);
+        setSavedDraft(structuredClone(nextDraft));
+        return route;
+      },
+      setFormError,
+    );
+    return saved !== undefined;
   };
 
   const discardDraft = () => {
@@ -376,36 +363,18 @@ export function RoutingPage() {
     setFormError(null);
   };
 
-  const applyPending = () => {
-    if (!pending) return;
-    if (pending.kind === "new") selectNew();
-    else {
-      const route = routes.find((item) => item.id === pending.id);
-      if (route) select(route);
-      else setPending(null);
-    }
-  };
-
-  const saveAndSwitch = async () => {
-    const ok = await submit();
-    if (ok) applyPending();
-  };
-
   const deleteSelected = async () => {
     if (!selectedId || selectedId === "new") return;
-    setBusy(true);
-    setError(null);
-    try {
-      await deleteRoute(selectedId);
-      const nextRoutes = await refreshLists();
-      setConfirmingDelete(false);
-      if (nextRoutes.length > 0) select(nextRoutes[0]);
-      else selectNew();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      async () => {
+        await deleteRoute(selectedId);
+        const nextRoutes = await refreshLists();
+        setConfirmingDelete(false);
+        if (nextRoutes.length > 0) select(nextRoutes[0]);
+        else selectNew();
+      },
+      setError,
+    );
   };
 
   return (
@@ -504,7 +473,7 @@ export function RoutingPage() {
                   {pending ? (
                     <div className="pending-bar">
                       <span>有未保存的修改，切换前要保存吗？</span>
-                      <button className="quiet-button is-primary" type="button" onClick={() => void saveAndSwitch()} disabled={busy}>
+                      <button className="quiet-button is-primary" type="button" onClick={() => void saveAndSwitch(submit)} disabled={busy}>
                         保存并切换
                       </button>
                       <button className="quiet-button" type="button" onClick={applyPending} disabled={busy}>

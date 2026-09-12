@@ -160,10 +160,10 @@ export function modelToDraft(model: UpstreamModel): ModelDraft {
     providerId: model.providerId,
     modelId: model.modelId,
     displayName: model.displayName,
-    inputPrice: formatPrice(model.inputPrice),
-    outputPrice: formatPrice(model.outputPrice),
-    cacheReadPrice: formatPrice(model.cacheReadPrice),
-    cacheCreationPrice: formatPrice(model.cacheCreationPrice),
+    inputPrice: String(model.inputPrice),
+    outputPrice: String(model.outputPrice),
+    cacheReadPrice: String(model.cacheReadPrice),
+    cacheCreationPrice: String(model.cacheCreationPrice),
     contextWindow: model.contextWindow > 0 ? String(model.contextWindow) : "",
     capabilities: model.capabilities.filter(isCapabilityId),
     enabled: model.enabled,
@@ -202,10 +202,6 @@ export function priceToNumber(value: string): number {
 export function contextWindowToNumber(value: string): number {
   const parsed = Number(value.trim());
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
-}
-
-export function formatPrice(value: number): string {
-  return String(value);
 }
 
 function trimDecimal(value: number): string {

@@ -9,7 +9,7 @@ import {
   validateRouteDraft,
   type RouteDraft,
 } from "./routingModel.ts";
-import type { RouteWithTargets } from "../../services/config.ts";
+import type { RouteWithTargets } from "../../services/config/index.ts";
 
 test("moveTarget swaps neighbours and ignores out-of-range moves", () => {
   assert.deepEqual(moveTarget(["a", "b", "c"], 0, 1), ["b", "a", "c"]);

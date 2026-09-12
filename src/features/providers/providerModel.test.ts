@@ -14,13 +14,13 @@ import {
   validateModelDraft,
   validateProviderDraft,
 } from "./providerModel.ts";
-import type { Provider } from "../../services/config.ts";
+import type { Provider } from "../../services/config/index.ts";
 
 const provider: Provider = {
   id: "p1",
   name: "DeepSeek",
   baseUrl: "https://api.deepseek.com/v1",
-  apiKey: "sk-0ec41ac990b642baa9769640310421f4",
+  apiKey: "sk-demo-deepseek-0000000000000000",
   authScheme: "x-api-key",
   protocol: "anthropic",
   extraHeaders: { "X-Trace": "1" },

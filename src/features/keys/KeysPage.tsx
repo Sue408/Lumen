@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLiveRevision } from "../../app/useLiveRevision";
+import { useAsyncAction } from "../../hooks/useAsyncAction";
 import { Check, Copy, KeyRound, Pencil, Plus, Trash } from "lucide-react";
 import {
   EmptyNote,
@@ -125,7 +126,7 @@ export function KeysPage() {
   const [usages, setUsages] = useState<Record<string, KeyUsage>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const { busy, run } = useAsyncAction();
 
   const [editor, setEditor] = useState<Editor | null>(null);
   const [draft, setDraft] = useState<KeyDraft | null>(null);
@@ -206,57 +207,48 @@ export function KeysPage() {
       return;
     }
     const isCreate = draft.id === null;
-    setBusy(true);
-    setFormError(null);
-    try {
-      await saveVirtualKey({
-        id: draft.id,
-        key: isCreate ? null : draft.key || null,
-        name: draft.name.trim(),
-        enabled: draft.enabled,
-        quotaLimit: quotaLimitToNumber(draft.quotaLimit),
-        quotaPeriod: draft.quotaPeriod,
-      });
-      await reload();
-      closeEditor();
-    } catch (err) {
-      setFormError(String(err));
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      async () => {
+        await saveVirtualKey({
+          id: draft.id,
+          key: isCreate ? null : draft.key || null,
+          name: draft.name.trim(),
+          enabled: draft.enabled,
+          quotaLimit: quotaLimitToNumber(draft.quotaLimit),
+          quotaPeriod: draft.quotaPeriod,
+        });
+        await reload();
+        closeEditor();
+      },
+      setFormError,
+    );
   };
 
   const toggleEnabled = async (key: VirtualKey) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await saveVirtualKey({
-        id: key.id,
-        name: key.name,
-        enabled: !key.enabled,
-        quotaLimit: key.quotaLimit,
-        quotaPeriod: key.quotaPeriod,
-      });
-      await reload();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      async () => {
+        await saveVirtualKey({
+          id: key.id,
+          name: key.name,
+          enabled: !key.enabled,
+          quotaLimit: key.quotaLimit,
+          quotaPeriod: key.quotaPeriod,
+        });
+        await reload();
+      },
+      setError,
+    );
   };
 
   const remove = async (id: string) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await deleteVirtualKey(id);
-      setConfirmDelete(null);
-      await reload();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      async () => {
+        await deleteVirtualKey(id);
+        setConfirmDelete(null);
+        await reload();
+      },
+      setError,
+    );
   };
 
   const copy = async (key: VirtualKey) => {

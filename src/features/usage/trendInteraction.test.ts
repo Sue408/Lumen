@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   buildPeriodAxisLabels,
   buildPeriodSampleLabels,
-  buildTrendDetail,
   getElapsedBucketCount,
   getNearestPointIndex,
   getVisiblePointCount,
@@ -14,17 +13,6 @@ test("nearest trend point clamps the pointer and selects the closest sample", ()
   assert.equal(getNearestPointIndex(-20, 0, 600, 5), 0);
   assert.equal(getNearestPointIndex(455, 0, 600, 5), 3);
   assert.equal(getNearestPointIndex(800, 0, 600, 5), 4);
-});
-
-test("trend detail reports signed comparison and handles a zero baseline", () => {
-  assert.deepEqual(buildTrendDetail("12:00", 36, 31), {
-    label: "12:00",
-    currentValue: 36,
-    previousValue: 31,
-    difference: 5,
-    percentage: 16,
-  });
-  assert.equal(buildTrendDetail("现在", 8, 0).percentage, null);
 });
 
 test("day axis ends at the supplied local time", () => {
@@ -67,4 +55,3 @@ test("elapsed buckets clip a series to the part of the period that happened", ()
   assert.equal(getElapsedBucketCount("week", now), 4);
   assert.equal(getElapsedBucketCount("month", now), 10);
 });
-

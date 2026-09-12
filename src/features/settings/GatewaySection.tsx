@@ -1,0 +1,105 @@
+import { Server } from "lucide-react";
+import { InlineError, SaveBar, SectionTitle, TogglePill } from "../../components/ConfigControls";
+
+type GatewaySectionProps = {
+  port: string;
+  savedPort: number | null;
+  running: boolean;
+  autostart: boolean | null;
+  closeToTray: boolean;
+  busy: boolean;
+  formError: string | null;
+  onPortChange: (value: string) => void;
+  onSubmitPort: () => void;
+  onDiscardPort: () => void;
+  onToggleAutostart: (next: boolean) => void;
+  onToggleCloseToTray: (next: boolean) => void;
+};
+
+export function GatewaySection({
+  port,
+  savedPort,
+  running,
+  autostart,
+  closeToTray,
+  busy,
+  formError,
+  onPortChange,
+  onSubmitPort,
+  onDiscardPort,
+  onToggleAutostart,
+  onToggleCloseToTray,
+}: GatewaySectionProps) {
+  const dirty = savedPort !== null && port.trim() !== String(savedPort);
+
+  return (
+    <form
+      className="settings-section"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmitPort();
+      }}
+    >
+      <SectionTitle icon={<Server aria-hidden="true" />}>网关</SectionTitle>
+      <div className="settings-list">
+        <div className="settings-row">
+          <label className="settings-row-label" htmlFor="settings-port">
+            监听端口
+          </label>
+          <input
+            id="settings-port"
+            className="settings-input"
+            inputMode="numeric"
+            value={port}
+            disabled={running || busy}
+            onChange={(event) => onPortChange(event.target.value)}
+          />
+          <span className="settings-row-note">
+            {running ? "网关运行中，需先停止后才能修改" : "回环地址 127.0.0.1，范围 1024–65535"}
+          </span>
+        </div>
+        <div className="settings-row">
+          <span className="settings-row-label">随系统启动</span>
+          <div className="settings-row-control">
+            {autostart === null ? (
+              <button
+                className="toggle-pill is-pending"
+                type="button"
+                role="switch"
+                aria-checked={false}
+                aria-label="随系统启动（读取中）"
+                title="读取中"
+                disabled
+              >
+                <span className="status-dot" aria-hidden="true" />
+                读取中
+              </button>
+            ) : (
+              <TogglePill
+                checked={autostart}
+                label="随系统启动"
+                disabled={busy}
+                onChange={onToggleAutostart}
+              />
+            )}
+          </div>
+          <span className="settings-row-note">开机后自动运行，并以最小化方式静默进入托盘</span>
+        </div>
+        <div className="settings-row">
+          <span className="settings-row-label">关闭窗口时收进托盘</span>
+          <div className="settings-row-control">
+            <TogglePill
+              checked={closeToTray}
+              label="关闭窗口时收进托盘"
+              disabled={busy || savedPort === null}
+              onChange={onToggleCloseToTray}
+            />
+          </div>
+          <span className="settings-row-note">关闭按钮不退出，仅从任务栏隐藏；退出请用托盘菜单</span>
+        </div>
+      </div>
+      {formError ? <InlineError message={formError} /> : null}
+      <SaveBar dirty={dirty} busy={busy} label="保存端口" onDiscard={onDiscardPort} />
+    </form>
+  );
+}

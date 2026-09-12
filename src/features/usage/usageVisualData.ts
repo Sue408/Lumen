@@ -6,7 +6,7 @@ export type HeatmapCell = {
   isFuture: boolean;
 };
 
-export function cumulativeToDistribution(values: number[]) {
+export function cumulativeToDistribution(values: number[]): number[] {
   return values.map((value, index) => Math.max(0, Number((value - (values[index - 1] ?? 0)).toFixed(2))));
 }
 

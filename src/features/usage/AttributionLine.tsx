@@ -1,9 +1,5 @@
 import type { Attribution, Mover } from "./usageData";
-
-const money = new Intl.NumberFormat("zh-CN", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+import { formatMoney } from "../../lib/format";
 
 function dominantMover(movers: Mover[], deltaCost: number): Mover | undefined {
   if (deltaCost === 0) return undefined;
@@ -26,7 +22,7 @@ export function AttributionLine({
 
   let sentence = `较${previousLabel}花费持平`;
   if (deltaCost !== 0) {
-    sentence = `较${previousLabel}${direction} $${money.format(Math.abs(deltaCost))}`;
+    sentence = `较${previousLabel}${direction} $${formatMoney(Math.abs(deltaCost))}`;
     if (dominant) sentence += `，主要在${dominant.name}${verb}`;
   }
   sentence += "。";
@@ -34,7 +30,7 @@ export function AttributionLine({
   const detail = topMovers
     .map(
       (mover) =>
-        `${mover.name} ${mover.deltaCost >= 0 ? "+" : "−"}$${money.format(Math.abs(mover.deltaCost))}`,
+        `${mover.name} ${mover.deltaCost >= 0 ? "+" : "−"}$${formatMoney(Math.abs(mover.deltaCost))}`,
     )
     .join("、");
 

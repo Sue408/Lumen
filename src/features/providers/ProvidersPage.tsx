@@ -1,24 +1,10 @@
 import { useEffect, useState } from "react";
-import {
-  Boxes,
-  Brain,
-  Eye,
-  FlaskConical,
-  Pencil,
-  Plus,
-  Server,
-  SlidersHorizontal,
-  Trash,
-  Wrench,
-  type LucideIcon,
-} from "lucide-react";
+import { Boxes, FlaskConical, Pencil, Plus, Server, Trash } from "lucide-react";
 import {
   EmptyNote,
-  FormActions,
   GlyphButton,
   InlineError,
   LoadingLines,
-  SaveBar,
   SectionTitle,
   StatusDot,
   TogglePill,
@@ -42,7 +28,6 @@ import {
 import {
   authSchemeLabel,
   capabilityLabel,
-  capabilityOrder,
   contextWindowToNumber,
   emptyModelDraft,
   emptyProviderDraft,
@@ -57,16 +42,14 @@ import {
   providerToDraft,
   validateModelDraft,
   validateProviderDraft,
-  type CapabilityId,
   type ModelDraft,
   type ProviderDraft,
 } from "./providerModel";
-
-const capabilityIcons: Record<CapabilityId, LucideIcon> = {
-  vision: Eye,
-  tools: Wrench,
-  reasoning: Brain,
-};
+import { capabilityIcons } from "./capabilityIcons";
+import { ModelForm } from "./ModelForm";
+import { ProviderForm } from "./ProviderForm";
+import { useAsyncAction } from "../../hooks/useAsyncAction";
+import { useRegisterSelection } from "../../hooks/useRegisterSelection";
 
 function hostLabel(baseUrl: string): string {
   try {
@@ -76,212 +59,46 @@ function hostLabel(baseUrl: string): string {
   }
 }
 
-type Pending = { kind: "existing"; id: string } | { kind: "new" };
-
-function ProviderForm({
-  draft,
-  savedDraft,
-  busy,
-  error,
-  onChange,
-  onDiscard,
-  onSubmit,
-}: {
-  draft: ProviderDraft;
-  savedDraft: ProviderDraft;
-  busy: boolean;
-  error: string | null;
-  onChange: (draft: ProviderDraft) => void;
-  onDiscard: () => void;
-  onSubmit: () => void;
-}) {
-  const [reveal, setReveal] = useState(false);
-  const set = (patch: Partial<ProviderDraft>) => onChange({ ...draft, ...patch });
-  const dirty = isProviderDraftDirty(draft, savedDraft);
-
-  return (
-    <form
-      className="entry-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit();
-      }}
-    >
-      <section className="sheet-section">
-        <SectionTitle icon={<SlidersHorizontal aria-hidden="true" />}>基础信息</SectionTitle>
-        <div className="field-grid">
-          <label className="field">
-            <span>名称</span>
-            <input value={draft.name} onChange={(event) => set({ name: event.target.value })} placeholder="例如 DeepSeek" />
-          </label>
-          <label className="field">
-            <span>上游地址</span>
-            <input value={draft.baseUrl} onChange={(event) => set({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" spellCheck={false} />
-          </label>
-          <label className="field field-wide">
-            <span>API Key</span>
-            <span className="key-field">
-              <input
-                type={reveal ? "text" : "password"}
-                value={draft.apiKey}
-                onChange={(event) => set({ apiKey: event.target.value })}
-                placeholder="sk-…"
-                spellCheck={false}
-                autoComplete="off"
-              />
-              <button className="text-action" type="button" onClick={() => setReveal((value) => !value)}>
-                {reveal ? "隐藏" : "显示"}
-              </button>
-            </span>
-          </label>
-          <label className="field">
-            <span>鉴权方式</span>
-            <select value={draft.authScheme} onChange={(event) => set({ authScheme: event.target.value as ProviderDraft["authScheme"] })}>
-              <option value="bearer">{authSchemeLabel.bearer}</option>
-              <option value="x-api-key">{authSchemeLabel["x-api-key"]}</option>
-              <option value="x-goog-api-key">{authSchemeLabel["x-goog-api-key"]}</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>协议</span>
-            {draft.id === null ? (
-              <select value={draft.protocol} onChange={(event) => set({ protocol: event.target.value as ProviderDraft["protocol"] })}>
-                <option value="openai">{protocolLabel.openai}</option>
-                <option value="anthropic">{protocolLabel.anthropic}</option>
-                <option value="responses">{protocolLabel.responses}</option>
-                <option value="gemini">{protocolLabel.gemini}</option>
-              </select>
-            ) : (
-              <span className="field-static">{protocolLabel[draft.protocol]}</span>
-            )}
-          </label>
-          <label className="field field-wide">
-            <span>额外请求头</span>
-            <textarea
-              rows={2}
-              value={draft.extraHeadersText}
-              onChange={(event) => set({ extraHeadersText: event.target.value })}
-              placeholder={"每行一条，例如\nX-Trace: 1"}
-              spellCheck={false}
-            />
-          </label>
-        </div>
-      </section>
-
-      {error ? <InlineError message={error} /> : null}
-      <SaveBar dirty={dirty} busy={busy} label={draft.id ? "保存上游" : "登记上游"} onDiscard={onDiscard} />
-    </form>
-  );
-}
-
-function ModelForm({
-  draft,
-  busy,
-  error,
-  onChange,
-  onSubmit,
-  onCancel,
-}: {
-  draft: ModelDraft;
-  busy: boolean;
-  error: string | null;
-  onChange: (draft: ModelDraft) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-}) {
-  const set = (patch: Partial<ModelDraft>) => onChange({ ...draft, ...patch });
-
-  return (
-    <form
-      className="entry-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit();
-      }}
-    >
-      <div className="field-grid">
-        <label className="field">
-          <span>上游模型名</span>
-          <input value={draft.modelId} onChange={(event) => set({ modelId: event.target.value })} placeholder="gpt-4o" spellCheck={false} autoFocus />
-        </label>
-        <label className="field">
-          <span>显示名</span>
-          <input value={draft.displayName} onChange={(event) => set({ displayName: event.target.value })} placeholder="留空则同上" />
-        </label>
-        <label className="field">
-          <span>输入单价 · $ / 百万</span>
-          <input inputMode="decimal" value={draft.inputPrice} onChange={(event) => set({ inputPrice: event.target.value })} />
-        </label>
-        <label className="field">
-          <span>输出单价 · $ / 百万</span>
-          <input inputMode="decimal" value={draft.outputPrice} onChange={(event) => set({ outputPrice: event.target.value })} />
-        </label>
-        <label className="field">
-          <span>缓存读单价 · $ / 百万</span>
-          <input inputMode="decimal" value={draft.cacheReadPrice} onChange={(event) => set({ cacheReadPrice: event.target.value })} />
-        </label>
-        <label className="field">
-          <span>缓存写单价 · $ / 百万</span>
-          <input inputMode="decimal" value={draft.cacheCreationPrice} onChange={(event) => set({ cacheCreationPrice: event.target.value })} />
-        </label>
-        <label className="field">
-          <span>上下文长度 · Tokens</span>
-          <input inputMode="numeric" value={draft.contextWindow} placeholder="128000" onChange={(event) => set({ contextWindow: event.target.value })} />
-        </label>
-        <div className="field field-wide">
-          <span>能力标签</span>
-          <div className="capability-group" role="group" aria-label="模型能力">
-            {capabilityOrder.map((id) => {
-              const Icon = capabilityIcons[id];
-              const active = draft.capabilities.includes(id);
-              return (
-                <button
-                  key={id}
-                  className={active ? "capability-pill is-on" : "capability-pill"}
-                  type="button"
-                  role="switch"
-                  aria-checked={active}
-                  disabled={busy}
-                  onClick={() =>
-                    set({
-                      capabilities: active
-                        ? draft.capabilities.filter((item) => item !== id)
-                        : [...draft.capabilities, id],
-                    })
-                  }
-                >
-                  <Icon aria-hidden="true" />
-                  {capabilityLabel[id]}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <div className="field-inline">
-          <TogglePill checked={draft.enabled} label="启用该模型" disabled={busy} onChange={(next) => set({ enabled: next })} />
-        </div>
-      </div>
-      {error ? <InlineError message={error} /> : null}
-      <FormActions busy={busy} submitLabel={draft.id ? "保存模型" : "登记模型"} onCancel={onCancel} />
-    </form>
-  );
-}
-
 export function ProvidersPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [models, setModels] = useState<UpstreamModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | "new" | null>(null);
-  const [draft, setDraft] = useState<ProviderDraft | null>(null);
-  const [savedDraft, setSavedDraft] = useState<ProviderDraft | null>(null);
   const [modelDraft, setModelDraft] = useState<ModelDraft | null>(null);
-  const [pending, setPending] = useState<Pending | null>(null);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmingModelId, setConfirmingModelId] = useState<string | null>(null);
+  const { busy, run } = useAsyncAction();
+
+  const {
+    selectedId,
+    draft,
+    savedDraft,
+    pending,
+    confirmingDelete,
+    setDraft,
+    setSavedDraft,
+    setSelectedId,
+    setPending,
+    setConfirmingDelete,
+    select,
+    selectNew,
+    requestSelect,
+    requestNew,
+    applyPending,
+    saveAndSwitch,
+  } = useRegisterSelection<Provider, ProviderDraft>({
+    entities: providers,
+    toDraft: providerToDraft,
+    emptyDraft: emptyProviderDraft,
+    isDirty: isProviderDraftDirty,
+    onSelect: () => {
+      setModelDraft(null);
+      setFormError(null);
+      setModelError(null);
+      setConfirmingModelId(null);
+    },
+  });
 
   const selectedProvider =
     selectedId && selectedId !== "new"
@@ -291,41 +108,6 @@ export function ProvidersPage() {
   const autoBrand = draft
     ? detectBrand([draft.name, draft.baseUrl, ...selectedModels.map((model) => model.modelId)])
     : null;
-  const dirty = draft !== null && savedDraft !== null && isProviderDraftDirty(draft, savedDraft);
-
-  const select = (provider: Provider) => {
-    setSelectedId(provider.id);
-    setDraft(providerToDraft(provider));
-    setSavedDraft(providerToDraft(provider));
-    setModelDraft(null);
-    setFormError(null);
-    setModelError(null);
-    setConfirmingDelete(false);
-    setConfirmingModelId(null);
-    setPending(null);
-  };
-
-  const selectNew = () => {
-    setSelectedId("new");
-    setDraft(emptyProviderDraft());
-    setSavedDraft(emptyProviderDraft());
-    setModelDraft(null);
-    setFormError(null);
-    setModelError(null);
-    setConfirmingDelete(false);
-    setConfirmingModelId(null);
-    setPending(null);
-  };
-
-  const requestSelect = (provider: Provider) => {
-    if (dirty) setPending({ kind: "existing", id: provider.id });
-    else select(provider);
-  };
-
-  const requestNew = () => {
-    if (dirty) setPending({ kind: "new" });
-    else selectNew();
-  };
 
   const refreshLists = async () => {
     const [nextProviders, nextModels] = await Promise.all([
@@ -370,33 +152,30 @@ export function ProvidersPage() {
       setFormError(message);
       return false;
     }
-    setBusy(true);
-    setFormError(null);
-    try {
-      const saved = await saveProvider({
-        id: draft.id,
-        name: draft.name.trim(),
-        baseUrl: draft.baseUrl.trim(),
-        apiKey: draft.apiKey,
-        authScheme: draft.authScheme,
-        protocol: draft.protocol,
-        extraHeaders: parseExtraHeaders(draft.extraHeadersText),
-        icon: draft.icon,
-        iconTint: draft.iconTint,
-        enabled: draft.enabled,
-      });
-      await refreshLists();
-      setSelectedId(saved.id);
-      setDraft(providerToDraft(saved));
-      setSavedDraft(providerToDraft(saved));
-      setModelDraft(null);
-      return true;
-    } catch (err) {
-      setFormError(String(err));
-      return false;
-    } finally {
-      setBusy(false);
-    }
+    const saved = await run(
+      async () => {
+        const result = await saveProvider({
+          id: draft.id,
+          name: draft.name.trim(),
+          baseUrl: draft.baseUrl.trim(),
+          apiKey: draft.apiKey,
+          authScheme: draft.authScheme,
+          protocol: draft.protocol,
+          extraHeaders: parseExtraHeaders(draft.extraHeadersText),
+          icon: draft.icon,
+          iconTint: draft.iconTint,
+          enabled: draft.enabled,
+        });
+        await refreshLists();
+        setSelectedId(result.id);
+        setDraft(providerToDraft(result));
+        setSavedDraft(providerToDraft(result));
+        setModelDraft(null);
+        return result;
+      },
+      setFormError,
+    );
+    return saved !== undefined;
   };
 
   const discardDraft = () => {
@@ -416,61 +195,42 @@ export function ProvidersPage() {
     setDraft({ ...draft, icon, iconTint });
     if (!selectedProvider) return;
     setSavedDraft((prev) => (prev ? { ...prev, icon, iconTint } : prev));
-    setBusy(true);
-    setFormError(null);
-    try {
-      await saveProvider({
-        id: selectedProvider.id,
-        name: selectedProvider.name,
-        baseUrl: selectedProvider.baseUrl,
-        apiKey: selectedProvider.apiKey,
-        authScheme: selectedProvider.authScheme,
-        protocol: selectedProvider.protocol,
-        extraHeaders: selectedProvider.extraHeaders,
-        icon,
-        iconTint,
-        enabled: selectedProvider.enabled,
-      });
-      await refreshLists();
-    } catch (err) {
-      setDraft(previousDraft);
-      setSavedDraft(previousSaved);
-      setFormError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const applyPending = () => {
-    if (!pending) return;
-    if (pending.kind === "new") selectNew();
-    else {
-      const provider = providers.find((item) => item.id === pending.id);
-      if (provider) select(provider);
-      else setPending(null);
-    }
-  };
-
-  const saveAndSwitch = async () => {
-    const ok = await submitProvider();
-    if (ok) applyPending();
+    await run(
+      async () => {
+        await saveProvider({
+          id: selectedProvider.id,
+          name: selectedProvider.name,
+          baseUrl: selectedProvider.baseUrl,
+          apiKey: selectedProvider.apiKey,
+          authScheme: selectedProvider.authScheme,
+          protocol: selectedProvider.protocol,
+          extraHeaders: selectedProvider.extraHeaders,
+          icon,
+          iconTint,
+          enabled: selectedProvider.enabled,
+        });
+        await refreshLists();
+      },
+      setFormError,
+      () => {
+        setDraft(previousDraft);
+        setSavedDraft(previousSaved);
+      },
+    );
   };
 
   const deleteSelected = async () => {
     if (!selectedProvider) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await deleteProvider(selectedProvider.id);
-      const nextProviders = await refreshLists();
-      setConfirmingDelete(false);
-      if (nextProviders.length > 0) select(nextProviders[0]);
-      else selectNew();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      async () => {
+        await deleteProvider(selectedProvider.id);
+        const nextProviders = await refreshLists();
+        setConfirmingDelete(false);
+        if (nextProviders.length > 0) select(nextProviders[0]);
+        else selectNew();
+      },
+      setError,
+    );
   };
 
   const submitModel = async () => {
@@ -480,99 +240,87 @@ export function ProvidersPage() {
       setModelError(message);
       return;
     }
-    setBusy(true);
-    setModelError(null);
-    try {
-      await saveUpstreamModel({
-        id: modelDraft.id,
-        providerId: modelDraft.providerId,
-        modelId: modelDraft.modelId.trim(),
-        displayName: modelDraft.displayName.trim() || modelDraft.modelId.trim(),
-        inputPrice: priceToNumber(modelDraft.inputPrice),
-        outputPrice: priceToNumber(modelDraft.outputPrice),
-        cacheReadPrice: priceToNumber(modelDraft.cacheReadPrice),
-        cacheCreationPrice: priceToNumber(modelDraft.cacheCreationPrice),
-        contextWindow: contextWindowToNumber(modelDraft.contextWindow),
-        capabilities: modelDraft.capabilities,
-        enabled: modelDraft.enabled,
-      });
-      setModelDraft(null);
-      await refreshLists();
-    } catch (err) {
-      setModelError(String(err));
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      async () => {
+        await saveUpstreamModel({
+          id: modelDraft.id,
+          providerId: modelDraft.providerId,
+          modelId: modelDraft.modelId.trim(),
+          displayName: modelDraft.displayName.trim() || modelDraft.modelId.trim(),
+          inputPrice: priceToNumber(modelDraft.inputPrice),
+          outputPrice: priceToNumber(modelDraft.outputPrice),
+          cacheReadPrice: priceToNumber(modelDraft.cacheReadPrice),
+          cacheCreationPrice: priceToNumber(modelDraft.cacheCreationPrice),
+          contextWindow: contextWindowToNumber(modelDraft.contextWindow),
+          capabilities: modelDraft.capabilities,
+          enabled: modelDraft.enabled,
+        });
+        setModelDraft(null);
+        await refreshLists();
+      },
+      setModelError,
+    );
   };
 
   const toggleModel = async (model: UpstreamModel) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await saveUpstreamModel({
-        id: model.id,
-        providerId: model.providerId,
-        modelId: model.modelId,
-        displayName: model.displayName,
-        inputPrice: model.inputPrice,
-        outputPrice: model.outputPrice,
-        cacheReadPrice: model.cacheReadPrice,
-        cacheCreationPrice: model.cacheCreationPrice,
-        contextWindow: model.contextWindow,
-        capabilities: model.capabilities,
-        enabled: !model.enabled,
-      });
-      await refreshLists();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      async () => {
+        await saveUpstreamModel({
+          id: model.id,
+          providerId: model.providerId,
+          modelId: model.modelId,
+          displayName: model.displayName,
+          inputPrice: model.inputPrice,
+          outputPrice: model.outputPrice,
+          cacheReadPrice: model.cacheReadPrice,
+          cacheCreationPrice: model.cacheCreationPrice,
+          contextWindow: model.contextWindow,
+          capabilities: model.capabilities,
+          enabled: !model.enabled,
+        });
+        await refreshLists();
+      },
+      setError,
+    );
   };
 
   const setModelAppearance = async (
     model: UpstreamModel,
     patch: { icon?: string | null; iconTint?: IconTint },
   ) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await saveUpstreamModel({
-        id: model.id,
-        providerId: model.providerId,
-        modelId: model.modelId,
-        displayName: model.displayName,
-        inputPrice: model.inputPrice,
-        outputPrice: model.outputPrice,
-        cacheReadPrice: model.cacheReadPrice,
-        cacheCreationPrice: model.cacheCreationPrice,
-        contextWindow: model.contextWindow,
-        capabilities: model.capabilities,
-        icon: patch.icon !== undefined ? patch.icon : model.icon,
-        iconTint: patch.iconTint ?? model.iconTint,
-        enabled: model.enabled,
-      });
-      await refreshLists();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      async () => {
+        await saveUpstreamModel({
+          id: model.id,
+          providerId: model.providerId,
+          modelId: model.modelId,
+          displayName: model.displayName,
+          inputPrice: model.inputPrice,
+          outputPrice: model.outputPrice,
+          cacheReadPrice: model.cacheReadPrice,
+          cacheCreationPrice: model.cacheCreationPrice,
+          contextWindow: model.contextWindow,
+          capabilities: model.capabilities,
+          icon: patch.icon !== undefined ? patch.icon : model.icon,
+          iconTint: patch.iconTint ?? model.iconTint,
+          enabled: model.enabled,
+        });
+        await refreshLists();
+      },
+      setError,
+    );
   };
 
   const removeModel = async (id: string) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await deleteUpstreamModel(id);
-      setConfirmingModelId(null);
-      if (modelDraft?.id === id) setModelDraft(null);
-      await refreshLists();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      async () => {
+        await deleteUpstreamModel(id);
+        setConfirmingModelId(null);
+        if (modelDraft?.id === id) setModelDraft(null);
+        await refreshLists();
+      },
+      setError,
+    );
   };
 
   return (
@@ -696,7 +444,7 @@ export function ProvidersPage() {
                   {pending ? (
                     <div className="pending-bar">
                       <span>有未保存的修改，切换前要保存吗？</span>
-                      <button className="quiet-button is-primary" type="button" onClick={() => void saveAndSwitch()} disabled={busy}>
+                      <button className="quiet-button is-primary" type="button" onClick={() => void saveAndSwitch(submitProvider)} disabled={busy}>
                         保存并切换
                       </button>
                       <button className="quiet-button" type="button" onClick={applyPending} disabled={busy}>

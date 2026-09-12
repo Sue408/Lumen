@@ -1,16 +1,12 @@
 import { useState, type CSSProperties, type PointerEvent } from "react";
 import { cumulativeToDistribution, buildMonthHeatmap } from "./usageVisualData";
 import { toneFor } from "./chartTone";
+import { formatMoney } from "../../lib/format";
 import { getNearestPointIndex } from "./trendInteraction";
 import { isCurrentPeriod } from "./period";
 import type { UsagePeriod } from "./usageData";
 
 const weekLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-
-const money = new Intl.NumberFormat("zh-CN", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
 
 export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
   const labels = weekLabels;
@@ -47,6 +43,7 @@ export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
   };
 
   const hoverTotal = hovered === null ? 0 : dayTotals[hovered] ?? 0;
+  const tooltipClass = `trend-tooltip${(anchor?.x ?? 0) > 66 ? " is-left" : ""}${(anchor?.y ?? 0) < 40 ? " is-below" : ""}`;
 
   return (
     <article className="chart-panel trend-panel">
@@ -68,28 +65,28 @@ export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
         onPointerOver={handlePointerOver}
         onPointerLeave={clearHover}
       >
-        {labels.map((label, index) => (
-          <div className={`bar-column${dayTotals[index] === 0 ? " is-empty" : ""}`} key={label}>
-            <div className="stack-track">
-              {period.layers.map((layer, layerIndex) => {
-                const value = distributed[layerIndex][index] ?? 0;
-                return (
-                  <i
-                    key={layer.name}
-                    className="stack-seg"
-                    style={{ height: `${(value / max) * 100}%`, background: toneFor(layer.tone) }}
-                  />
-                );
-              })}
+        {labels.map((label, index) => {
+          const columnClass = `bar-column${dayTotals[index] === 0 ? " is-empty" : ""}`;
+          return (
+            <div className={columnClass} key={label}>
+              <div className="stack-track">
+                {period.layers.map((layer, layerIndex) => {
+                  const value = distributed[layerIndex][index] ?? 0;
+                  return (
+                    <i
+                      key={layer.name}
+                      className="stack-seg"
+                      style={{ height: `${(value / max) * 100}%`, background: toneFor(layer.tone) }}
+                    />
+                  );
+                })}
+              </div>
+              <span>{label}</span>
             </div>
-            <span>{label}</span>
-          </div>
-        ))}
+          );
+        })}
         {hovered !== null ? (
-          <div
-            className={`trend-tooltip${(anchor?.x ?? 0) > 66 ? " is-left" : ""}${(anchor?.y ?? 0) < 40 ? " is-below" : ""}`}
-            role="status"
-          >
+          <div className={tooltipClass} role="status">
             <strong>{labels[hovered]}</strong>
             <dl>
               {period.layers.map((layer, layerIndex) => {
@@ -101,7 +98,7 @@ export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
                       <i style={{ background: toneFor(layer.tone) }} />
                       {layer.name}
                     </dt>
-                    <dd>${money.format(value)}</dd>
+                    <dd>${formatMoney(value)}</dd>
                   </div>
                 );
               })}
@@ -113,7 +110,7 @@ export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
             </dl>
             <div className="trend-tooltip-total">
               <span>合计</span>
-              <b>${money.format(hoverTotal)}</b>
+              <b>${formatMoney(hoverTotal)}</b>
             </div>
           </div>
         ) : null}
@@ -129,17 +126,55 @@ export function MonthlyUsageHeatmap({ period, anchor }: { period: UsagePeriod; a
     : new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0, 23, 59);
   const cells = buildMonthHeatmap(anchor, values, now);
   const [hovered, setHovered] = useState<number | null>(null);
-  return <article className="chart-panel trend-panel">
-    <header className="chart-heading"><h2>每日使用活跃度<span className="chart-unit">Token 强度</span></h2><span className="chart-meta">深色代表用量更高</span></header>
-    <div className="heatmap-wrap">
-      <div className="heatmap-weekdays">{"一二三四五六日".split("").map((day) => <span key={day}>周{day}</span>)}</div>
-      <div className="usage-heatmap" role="img" aria-label={`${anchor.getMonth() + 1}月每日 Token 用量热力图`}>
-        {cells.map((cell, index) => <div className={`heat-cell level-${cell.level}${cell.isFuture ? " is-future" : ""}${cell.day === null ? " is-blank" : ""}`} key={index} onPointerEnter={() => cell.day && setHovered(index)} onPointerLeave={() => setHovered(null)}>
-          {cell.day}<span className="sr-only">{cell.day ? `${cell.day}日 ${cell.value}万 Tokens` : ""}</span>
-          {hovered === index && cell.day ? <div className="heat-tooltip"><strong>{anchor.getMonth() + 1}月{cell.day}日</strong><span>{cell.isFuture ? "未来日期" : `${cell.value} 万 Tokens`}</span></div> : null}
-        </div>)}
+  const monthLabel = `${anchor.getMonth() + 1}月`;
+
+  return (
+    <article className="chart-panel trend-panel">
+      <header className="chart-heading">
+        <h2>
+          每日使用活跃度
+          <span className="chart-unit">Token 强度</span>
+        </h2>
+        <span className="chart-meta">深色代表用量更高</span>
+      </header>
+      <div className="heatmap-wrap">
+        <div className="heatmap-weekdays">
+          {"一二三四五六日".split("").map((day) => (
+            <span key={day}>周{day}</span>
+          ))}
+        </div>
+        <div className="usage-heatmap" role="img" aria-label={`${monthLabel}每日 Token 用量热力图`}>
+          {cells.map((cell, index) => (
+            <div
+              className={`heat-cell level-${cell.level}${cell.isFuture ? " is-future" : ""}${cell.day === null ? " is-blank" : ""}`}
+              key={index}
+              onPointerEnter={() => cell.day && setHovered(index)}
+              onPointerLeave={() => setHovered(null)}
+            >
+              {cell.day}
+              <span className="sr-only">
+                {cell.day ? `${cell.day}日 ${cell.value}万 Tokens` : ""}
+              </span>
+              {hovered === index && cell.day ? (
+                <div className="heat-tooltip">
+                  <strong>
+                    {monthLabel}
+                    {cell.day}日
+                  </strong>
+                  <span>{cell.isFuture ? "未来日期" : `${cell.value} 万 Tokens`}</span>
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+        <div className="heatmap-scale">
+          <span>少</span>
+          {[0, 1, 2, 3, 4].map((level) => (
+            <i className={`level-${level}`} key={level} />
+          ))}
+          <span>多</span>
+        </div>
       </div>
-      <div className="heatmap-scale"><span>少</span>{[0,1,2,3,4].map((level) => <i className={`level-${level}`} key={level} />)}<span>多</span></div>
-    </div>
-  </article>;
+    </article>
+  );
 }

@@ -13,7 +13,7 @@ function mondayOf(date: Date) {
   return result;
 }
 
-export function getPeriodBounds(period: PeriodKey, anchor: Date) {
+export function getPeriodBounds(period: PeriodKey, anchor: Date): { start: Date; end: Date } {
   const start = period === "day" ? startOfDay(anchor) : period === "week" ? mondayOf(anchor) : new Date(anchor.getFullYear(), anchor.getMonth(), 1);
   const end = new Date(start);
   if (period === "day") end.setDate(end.getDate() + 1);
@@ -22,7 +22,7 @@ export function getPeriodBounds(period: PeriodKey, anchor: Date) {
   return { start, end };
 }
 
-export function shiftPeriod(period: PeriodKey, anchor: Date, amount: number) {
+export function shiftPeriod(period: PeriodKey, anchor: Date, amount: number): Date {
   const result = new Date(anchor);
   if (period === "day") result.setDate(result.getDate() + amount);
   if (period === "week") result.setDate(result.getDate() + amount * 7);
@@ -30,7 +30,7 @@ export function shiftPeriod(period: PeriodKey, anchor: Date, amount: number) {
   return result;
 }
 
-export function formatPeriodCursor(period: PeriodKey, anchor: Date) {
+export function formatPeriodCursor(period: PeriodKey, anchor: Date): string {
   const { start, end } = getPeriodBounds(period, anchor);
   if (period === "day") return `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日`;
   if (period === "month") return `${start.getFullYear()}年${start.getMonth() + 1}月`;
@@ -39,7 +39,7 @@ export function formatPeriodCursor(period: PeriodKey, anchor: Date) {
   return `${start.getMonth() + 1}月${start.getDate()}日 – ${lastDay.getMonth() + 1}月${lastDay.getDate()}日`;
 }
 
-export function isCurrentPeriod(period: PeriodKey, anchor: Date, now = new Date()) {
+export function isCurrentPeriod(period: PeriodKey, anchor: Date, now = new Date()): boolean {
   const target = getPeriodBounds(period, anchor).start;
   const current = getPeriodBounds(period, now).start;
   return target.getTime() === current.getTime();

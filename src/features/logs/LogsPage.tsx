@@ -4,6 +4,7 @@ import { CalendarRange, Check, ChevronDown, Copy, X } from "lucide-react";
 import { InlineError, LoadingLines } from "../../components/ConfigControls";
 import type { RequestLog } from "../../services/gateway";
 import { listLogAliases, queryLogPage, type LogSummary } from "../../services/usage";
+import { formatCurrency, formatInteger } from "../../lib/format";
 import {
   ALL_ALIASES,
   buildLogFilter,
@@ -22,13 +23,7 @@ import {
 } from "./logQuery";
 
 const PAGE_SIZE = 100;
-const numberFormat = new Intl.NumberFormat("zh-CN");
-const currency = new Intl.NumberFormat("zh-CN", {
-  style: "currency",
-  currency: "USD",
-  currencyDisplay: "narrowSymbol",
-});
-const formatTokens = (value: number) => `${numberFormat.format(value)} Tokens`;
+const formatTokens = (value: number) => `${formatInteger(value)} Tokens`;
 
 export function LogsPage() {
   const [scope, setScope] = useState<LogScope>("attention");
@@ -169,7 +164,7 @@ export function LogsPage() {
         <p className="logs-summary" aria-live="polite">
           <strong>{rangeLabel}</strong>
           {summary
-            ? ` · 共 ${numberFormat.format(summary.all)} 次 · 失败 ${numberFormat.format(summary.failed)} · 用量存疑 ${numberFormat.format(summary.unreliable)}`
+            ? ` · 共 ${formatInteger(summary.all)} 次 · 失败 ${formatInteger(summary.failed)} · 用量存疑 ${formatInteger(summary.unreliable)}`
             : " · 正在整理记录…"}
         </p>
 
@@ -232,7 +227,7 @@ export function LogsPage() {
             </label>
 
             <span className="logs-count">
-              {loading ? "读取中…" : logs ? `${numberFormat.format(logs.length)} 条` : "读取中…"}
+              {loading ? "读取中…" : logs ? `${formatInteger(logs.length)} 条` : "读取中…"}
             </span>
           </div>
         </div>
@@ -306,7 +301,7 @@ function LogRow({
           </span>
         </span>
         <span className="logs-number">{formatTokens(log.totalTokens)}</span>
-        <span className="logs-number">{currency.format(log.cost)}</span>
+        <span className="logs-number">{formatCurrency(log.cost)}</span>
         <ChevronDown className="logs-chevron" aria-hidden="true" />
       </button>
       {expanded ? <LogDetail log={log} /> : null}
@@ -325,10 +320,10 @@ function LogDetail({ log }: { log: RequestLog }) {
       <DetailRow term="路由">{chain.length > 0 ? chain.join("  →  ") : "未匹配到路由"}</DetailRow>
       <DetailRow term="用量来源">{usageSourceLabels[log.usageSource] ?? log.usageSource}</DetailRow>
       <DetailRow term="Token">
-        {tokens.map((part) => `${part.label} ${numberFormat.format(part.value)}`).join(" · ")}
+        {tokens.map((part) => `${part.label} ${formatInteger(part.value)}`).join(" · ")}
       </DetailRow>
       <DetailRow term="耗时">
-        {log.latencyMs === null ? "—" : `${numberFormat.format(log.latencyMs)} ms`}
+        {log.latencyMs === null ? "—" : `${formatInteger(log.latencyMs)} ms`}
         {` · HTTP ${log.httpStatus ?? "—"}`}
         {` · ${log.isStream ? "流式" : "非流式"}`}
       </DetailRow>

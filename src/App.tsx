@@ -1,8 +1,7 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import "./App.css";
 import { AppShell } from "./app/AppShell";
-import { PlaceholderPage } from "./app/PlaceholderPage";
-import { navigationItems, type ViewId } from "./app/navigation";
+import type { ViewId } from "./app/navigation";
 import { useTheme } from "./app/useTheme";
 import { WindowChrome } from "./components/WindowChrome";
 import { UsagePage } from "./features/usage/UsagePage";
@@ -15,31 +14,19 @@ import { SettingsPage } from "./features/settings/SettingsPage";
 function App() {
   const [view, setView] = useState<ViewId>("usage");
   const { theme, toggle } = useTheme();
-  const currentLabel = navigationItems.find((item) => item.id === view)?.label ?? "";
-
-  const renderView = () => {
-    switch (view) {
-      case "usage":
-        return <UsagePage />;
-      case "logs":
-        return <LogsPage />;
-      case "providers":
-        return <ProvidersPage />;
-      case "routing":
-        return <RoutingPage />;
-      case "keys":
-        return <KeysPage />;
-      case "settings":
-        return <SettingsPage theme={theme} onToggleTheme={toggle} />;
-      default:
-        return <PlaceholderPage title={currentLabel} />;
-    }
+  const views: Record<ViewId, ReactNode> = {
+    usage: <UsagePage />,
+    logs: <LogsPage />,
+    providers: <ProvidersPage />,
+    routing: <RoutingPage />,
+    keys: <KeysPage />,
+    settings: <SettingsPage theme={theme} onToggleTheme={toggle} />,
   };
 
   return (
     <>
       <AppShell activeView={view} onNavigate={setView}>
-        {renderView()}
+        {views[view]}
       </AppShell>
       <WindowChrome />
     </>

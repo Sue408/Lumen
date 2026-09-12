@@ -127,3 +127,83 @@
   color: var(--ink-muted);
   font-size: 0.6875rem;
 }
+
+/* ---- target editor ---- */
+
+.target-list {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.target-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.6rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line-faint);
+}
+
+.target-row.is-off .target-rank {
+  color: var(--ink-faint);
+  border-color: var(--line-strong);
+}
+
+.target-row .brand-mark {
+  color: var(--ink-soft);
+}
+
+.target-row.is-off .brand-mark {
+  color: var(--ink-faint);
+}
+
+.target-rank {
+  display: inline-grid;
+  width: 1.4rem;
+  height: 1.4rem;
+  flex: 0 0 auto;
+  color: var(--ochre);
+  border: 1px solid var(--ochre);
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  place-items: center;
+}
+
+.target-role {
+  flex: 0 0 auto;
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+  letter-spacing: var(--tracking-label);
+}
+
+.target-row.is-off .target-role {
+  color: var(--ink-faint);
+}
+
+.target-row select {
+  flex: 1 1 14rem;
+  min-width: 0;
+  height: 2rem;
+  padding: 0 0.5rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line-control);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.target-row select:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.target-move {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+}

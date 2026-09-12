@@ -11,7 +11,7 @@ import {
   quotaTone,
   validateKeyDraft,
 } from "./keyModel.ts";
-import type { VirtualKey } from "../../services/config.ts";
+import type { VirtualKey } from "../../services/config/index.ts";
 
 const key: VirtualKey = {
   id: "k1",

@@ -16,6 +16,7 @@ import {
   getNearestPointIndex,
   resampleSeries,
 } from "./trendInteraction";
+import { formatMoney } from "../../lib/format";
 import { cumulativeToDistribution } from "./usageVisualData";
 import type { UsagePeriod } from "./usageData";
 import { isCurrentPeriod } from "./period";
@@ -29,11 +30,6 @@ const fallbackChartSize: ChartSize = { width: 600, height: 210 };
 
 /** 前缘淡出宽度（占整宽比例）：数据还没走完时，右端渐隐到纸面而非一刀切。 */
 const LEADING_FADE = 0.07;
-
-const money = new Intl.NumberFormat("zh-CN", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
 
 /** 细密阶梯（1/2/5 太粗会把峰顶压到半高）；峰值再留 5% 顶白，避免贴顶。 */
 const AXIS_STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
@@ -280,7 +276,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
             >
               <i style={{ background: toneFor(layer.tone) }} />
               {layer.name}
-              <b>${money.format(layer.amount)}</b>
+              <b>${formatMoney(layer.amount)}</b>
             </span>
           ))}
           {activeIndex !== null ? (
@@ -311,7 +307,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
                         <i style={{ background: toneFor(layer.tone) }} />
                         {layer.name}
                       </dt>
-                      <dd>${money.format(layer.values[activeIndex] ?? 0)}</dd>
+                      <dd>${formatMoney(layer.values[activeIndex] ?? 0)}</dd>
                     </div>
                   ))}
                   {hoverLayers.length === 0 ? (
@@ -322,7 +318,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
                 </dl>
                 <div className="trend-tooltip-total">
                   <span>合计</span>
-                  <b>${money.format(hoverTotal)}</b>
+                  <b>${formatMoney(hoverTotal)}</b>
                 </div>
               </div>
             </>

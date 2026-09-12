@@ -1,13 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Database, Download, FlaskConical, Palette, RotateCcw, Server, Upload } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import {
-  InlineError,
-  LoadingLines,
-  SaveBar,
-  SectionTitle,
-  TogglePill,
-} from "../../components/ConfigControls";
+import { InlineError, LoadingLines } from "../../components/ConfigControls";
 import { isTauriRuntime } from "../../components/tauriRuntime";
 import { useGatewayStatus } from "../../app/useGatewayStatus";
 import type { Theme } from "../../app/useTheme";
@@ -21,7 +14,11 @@ import {
   setAutostart as setAutostartEnabled,
   type ImportSummary,
 } from "../../services/settings";
-import { demoScenarios, injectDemo, type DemoScenario } from "../../services/demo";
+import { injectDemo, type DemoScenario } from "../../services/demo";
+import { AppearanceSection } from "./AppearanceSection";
+import { DataSection } from "./DataSection";
+import { DevToolsSection } from "./DevToolsSection";
+import { GatewaySection } from "./GatewaySection";
 
 type SettingsPageProps = {
   theme: Theme;
@@ -48,8 +45,6 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
     path: string;
     summary: ImportSummary;
   } | null>(null);
-
-  const dirty = savedPort !== null && port.trim() !== String(savedPort);
 
   useEffect(() => {
     let alive = true;
@@ -233,6 +228,12 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
     }
   };
 
+  const handlePortChange = (value: string) => {
+    setPort(value);
+    setFormError(null);
+    setNotice(null);
+  };
+
   return (
     <main className="settings-page">
       <div className="settings-column">
@@ -244,241 +245,56 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
         </header>
 
         <div className="settings-scroll">
-        {error ? <InlineError message={error} /> : null}
-        {notice ? (
-          <p className="settings-notice" role="status">
-            {notice}
-          </p>
-        ) : null}
+          {error ? <InlineError message={error} /> : null}
+          {notice ? (
+            <p className="settings-notice" role="status">
+              {notice}
+            </p>
+          ) : null}
 
-        {loading ? (
-          <LoadingLines rows={4} />
-        ) : (
-          <>
-            <form
-              className="settings-section"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void submitPort();
-              }}
-            >
-              <SectionTitle icon={<Server aria-hidden="true" />}>网关</SectionTitle>
-              <div className="settings-list">
-                <div className="settings-row">
-                  <label className="settings-row-label" htmlFor="settings-port">
-                    监听端口
-                  </label>
-                  <input
-                    id="settings-port"
-                    className="settings-input"
-                    inputMode="numeric"
-                    value={port}
-                    disabled={running || busy}
-                    onChange={(event) => {
-                      setPort(event.target.value);
-                      setFormError(null);
-                      setNotice(null);
-                    }}
-                  />
-                  <span className="settings-row-note">
-                    {running ? "网关运行中，需先停止后才能修改" : "回环地址 127.0.0.1，范围 1024–65535"}
-                  </span>
-                </div>
-                <div className="settings-row">
-                  <span className="settings-row-label">随系统启动</span>
-                  <div className="settings-row-control">
-                    {autostart === null ? (
-                      <button
-                        className="toggle-pill is-pending"
-                        type="button"
-                        role="switch"
-                        aria-checked={false}
-                        aria-label="随系统启动（读取中）"
-                        title="读取中"
-                        disabled
-                      >
-                        <span className="status-dot" aria-hidden="true" />
-                        读取中
-                      </button>
-                    ) : (
-                      <TogglePill
-                        checked={autostart}
-                        label="随系统启动"
-                        disabled={busy}
-                        onChange={(next) => void toggleAutostart(next)}
-                      />
-                    )}
-                  </div>
-                  <span className="settings-row-note">开机后自动运行，并以最小化方式静默进入托盘</span>
-                </div>
-                <div className="settings-row">
-                  <span className="settings-row-label">关闭窗口时收进托盘</span>
-                  <div className="settings-row-control">
-                    <TogglePill
-                      checked={closeToTray}
-                      label="关闭窗口时收进托盘"
-                      disabled={busy || savedPort === null}
-                      onChange={(next) => void toggleCloseToTray(next)}
-                    />
-                  </div>
-                  <span className="settings-row-note">
-                    关闭按钮不退出，仅从任务栏隐藏；退出请用托盘菜单
-                  </span>
-                </div>
-              </div>
-              {formError ? <InlineError message={formError} /> : null}
-              <SaveBar
-                dirty={dirty}
+          {loading ? (
+            <LoadingLines rows={4} />
+          ) : (
+            <>
+              <GatewaySection
+                port={port}
+                savedPort={savedPort}
+                running={running}
+                autostart={autostart}
+                closeToTray={closeToTray}
                 busy={busy}
-                label="保存端口"
-                onDiscard={() => {
+                formError={formError}
+                onPortChange={handlePortChange}
+                onSubmitPort={() => void submitPort()}
+                onDiscardPort={() => {
                   setPort(String(savedPort ?? ""));
                   setFormError(null);
                 }}
+                onToggleAutostart={(next) => void toggleAutostart(next)}
+                onToggleCloseToTray={(next) => void toggleCloseToTray(next)}
               />
-            </form>
 
-            <section className="settings-section">
-              <SectionTitle icon={<Palette aria-hidden="true" />}>外观</SectionTitle>
-              <div className="settings-list">
-                <div className="settings-row">
-                  <span className="settings-row-label">主题</span>
-                  <div className="settings-row-control">
-                    <div className="settings-segment" role="group" aria-label="主题">
-                      <button
-                        className={theme === "light" ? "is-selected" : ""}
-                        type="button"
-                        aria-pressed={theme === "light"}
-                        onClick={() => theme !== "light" && onToggleTheme()}
-                      >
-                        浅色
-                      </button>
-                      <button
-                        className={theme === "dark" ? "is-selected" : ""}
-                        type="button"
-                        aria-pressed={theme === "dark"}
-                        onClick={() => theme !== "dark" && onToggleTheme()}
-                      >
-                        深色
-                      </button>
-                    </div>
-                  </div>
-                  <span className="settings-row-note">随本机保存，重启后沿用</span>
-                </div>
-              </div>
-            </section>
+              <AppearanceSection theme={theme} onToggleTheme={onToggleTheme} />
 
-            <section className="settings-section">
-              <SectionTitle icon={<Database aria-hidden="true" />}>数据</SectionTitle>
-              <div className="settings-list">
-                <div className="settings-row">
-                  <span className="settings-row-label">导出配置</span>
-                  <div className="settings-row-control">
-                    <button className="quiet-button" type="button" disabled={busy} onClick={() => void runExport()}>
-                      <Download aria-hidden="true" />
-                      导出
-                    </button>
-                  </div>
-                  <span className="settings-row-note">导出为 JSON，含 API Key 与虚拟密钥明文，请妥善保管</span>
-                </div>
-                <div className="settings-row">
-                  <span className="settings-row-label">导入配置</span>
-                  <div className="settings-row-control">
-                    <button className="quiet-button" type="button" disabled={busy} onClick={() => void chooseImport()}>
-                      <Upload aria-hidden="true" />
-                      导入
-                    </button>
-                  </div>
-                  <span className="settings-row-note">合并覆盖：同名提供商 / 模型 / 路由 / 密钥按文件更新，未提及的保留</span>
-                </div>
-                {pendingImport ? (
-                  <div className="confirm-bar">
-                    <span>
-                      将新增：提供商 {pendingImport.summary.providers.created}、模型{" "}
-                      {pendingImport.summary.models.created}、路由 {pendingImport.summary.routes.created}、
-                      密钥 {pendingImport.summary.virtualKeys.created}；覆盖：提供商{" "}
-                      {pendingImport.summary.providers.updated}、模型 {pendingImport.summary.models.updated}、
-                      路由 {pendingImport.summary.routes.updated}、密钥{" "}
-                      {pendingImport.summary.virtualKeys.updated}。确认导入？
-                    </span>
-                    <button
-                      className="quiet-button is-primary"
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void confirmImport()}
-                    >
-                      确认导入
-                    </button>
-                    <button
-                      className="quiet-button"
-                      type="button"
-                      disabled={busy}
-                      onClick={() => setPendingImport(null)}
-                    >
-                      取消
-                    </button>
-                  </div>
-                ) : null}
-                <div className="settings-row">
-                  <span className="settings-row-label">重置数据</span>
-                  <div className="settings-row-control">
-                    <button
-                      className="quiet-button is-danger"
-                      type="button"
-                      disabled={busy || running}
-                      onClick={() => setConfirmingReset(true)}
-                    >
-                      <RotateCcw aria-hidden="true" />
-                      重置
-                    </button>
-                  </div>
-                  <span className="settings-row-note">
-                    {running ? "需先停止网关" : "清空上游、模型、路由、密钥、日志，保留设置"}
-                  </span>
-                </div>
-                {confirmingReset ? (
-                  <div className="confirm-bar">
-                    <span>将清空全部业务数据，此操作不可撤销。确认继续？</span>
-                    <button className="quiet-button is-danger" type="button" disabled={busy} onClick={() => void runReset()}>
-                      确认重置
-                    </button>
-                    <button className="quiet-button" type="button" disabled={busy} onClick={() => setConfirmingReset(false)}>
-                      取消
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            </section>
+              <DataSection
+                busy={busy}
+                running={running}
+                pendingImport={pendingImport}
+                confirmingReset={confirmingReset}
+                onExport={() => void runExport()}
+                onChooseImport={() => void chooseImport()}
+                onConfirmImport={() => void confirmImport()}
+                onCancelImport={() => setPendingImport(null)}
+                onRequestReset={() => setConfirmingReset(true)}
+                onConfirmReset={() => void runReset()}
+                onCancelReset={() => setConfirmingReset(false)}
+              />
 
-            {import.meta.env.DEV ? (
-              <section className="settings-section">
-                <SectionTitle icon={<FlaskConical aria-hidden="true" />}>开发工具</SectionTitle>
-                <div className="settings-list">
-                  <div className="settings-row">
-                    <span className="settings-row-label">演示数据</span>
-                    <div className="settings-row-control demo-scenarios">
-                      {demoScenarios.map((item) => (
-                        <button
-                          className="quiet-button"
-                          key={item.key}
-                          type="button"
-                          title={item.hint}
-                          disabled={demoBusy}
-                          onClick={() => void runDemo(item.key)}
-                        >
-                          {item.label}
-                        </button>
-                      ))}
-                    </div>
-                    <span className="settings-row-note">
-                      完全替换全部业务与用量数据，仅开发构建可见；注入后切换页面即可查看
-                    </span>
-                  </div>
-                </div>
-              </section>
-            ) : null}
-          </>
-        )}
+              {import.meta.env.DEV ? (
+                <DevToolsSection demoBusy={demoBusy} onRunDemo={(scenario) => void runDemo(scenario)} />
+              ) : null}
+            </>
+          )}
         </div>
       </div>
     </main>
