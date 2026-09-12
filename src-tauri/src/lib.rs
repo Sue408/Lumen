@@ -120,19 +120,22 @@ pub fn run() {
             tracing::info!("开发构建使用独立数据库：{}", db_path.display());
             let db = db::open(&db_path)?;
 
-            let http = reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .build()?;
             let events = Arc::new(TauriEventSink {
                 app: app.handle().clone(),
             });
-            let (port, close_to_tray, session_headers) = {
+            let (port, close_to_tray, session_headers, proxy_url) = {
                 let conn = db
                     .lock()
                     .map_err(|_| error::AppError::message("数据库锁已中毒"))?;
                 let settings = db::settings::get_settings(&conn)?;
-                (settings.port, settings.close_to_tray, settings.session_headers)
+                (
+                    settings.port,
+                    settings.close_to_tray,
+                    settings.session_headers,
+                    settings.proxy_url,
+                )
             };
+            let http = state::build_http_client(proxy_url.as_deref())?;
             let state = Arc::new(AppState::new(db, http, events, port));
             state.set_close_to_tray(close_to_tray);
             state.set_session_headers(session_headers);

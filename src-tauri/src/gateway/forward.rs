@@ -62,7 +62,7 @@ pub async fn send(
     let url = upstream_url(&route.base_url, upstream_path);
     let mapped = build_upstream_headers(client_headers, &route.header_rules, &route.extra_headers);
 
-    let mut request = state.http.post(url).json(body);
+    let mut request = state.http().post(url).json(body);
     if let Some(timeout) = timeout {
         request = request.timeout(timeout);
     }

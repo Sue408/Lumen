@@ -35,6 +35,8 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
   const [savedPort, setSavedPort] = useState<number | null>(null);
   const [closeToTray, setCloseToTray] = useState(true);
   const [sessionHeaders, setSessionHeaders] = useState<string[]>([...DEFAULT_SESSION_HEADERS]);
+  const [proxyUrl, setProxyUrl] = useState("");
+  const [savedProxyUrl, setSavedProxyUrl] = useState("");
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [appVersion, setAppVersion] = useState("");
   const closeToTraySaving = useRef(false);
@@ -63,6 +65,8 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
         setSavedPort(settings.port);
         setCloseToTray(settings.closeToTray);
         setSessionHeaders(settings.sessionHeaders ?? [...DEFAULT_SESSION_HEADERS]);
+        setProxyUrl(settings.proxyUrl ?? "");
+        setSavedProxyUrl(settings.proxyUrl ?? "");
       } catch (err) {
         if (alive) setError(String(err));
       } finally {
@@ -95,13 +99,20 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
     setBusy(true);
     setFormError(null);
     try {
-      const saved = await saveSettings({ port: value, closeToTray, sessionHeaders });
+      const saved = await saveSettings({
+        port: value,
+        closeToTray,
+        sessionHeaders,
+        proxyUrl: proxyUrl.trim() || null,
+      });
       setPort(String(saved.port));
       setSavedPort(saved.port);
       setCloseToTray(saved.closeToTray);
       setSessionHeaders(saved.sessionHeaders);
+      setProxyUrl(saved.proxyUrl ?? "");
+      setSavedProxyUrl(saved.proxyUrl ?? "");
       setError(null);
-      setNotice("端口已保存，下次启动生效");
+      setNotice("网关设置已保存：端口下次启动生效，代理即时生效");
     } catch (err) {
       setFormError(String(err));
     } finally {
@@ -115,7 +126,12 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
     const previous = closeToTray;
     setCloseToTray(next);
     try {
-      const saved = await saveSettings({ port: savedPort, closeToTray: next, sessionHeaders });
+      const saved = await saveSettings({
+        port: savedPort,
+        closeToTray: next,
+        sessionHeaders,
+        proxyUrl: savedProxyUrl.trim() || null,
+      });
       setCloseToTray(saved.closeToTray);
       setError(null);
     } catch (err) {
@@ -131,7 +147,12 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
     if (savedPort === null) return;
     setBusy(true);
     try {
-      const saved = await saveSettings({ port: savedPort, closeToTray, sessionHeaders: headers });
+      const saved = await saveSettings({
+        port: savedPort,
+        closeToTray,
+        sessionHeaders: headers,
+        proxyUrl: savedProxyUrl.trim() || null,
+      });
       setSessionHeaders(saved.sessionHeaders);
       setError(null);
       setNotice("会话识别头已保存");
@@ -287,15 +308,23 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
               <GatewaySection
                 port={port}
                 savedPort={savedPort}
+                proxyUrl={proxyUrl}
+                savedProxyUrl={savedProxyUrl}
                 running={running}
                 autostart={autostart}
                 closeToTray={closeToTray}
                 busy={busy}
                 formError={formError}
                 onPortChange={handlePortChange}
+                onProxyChange={(value) => {
+                  setProxyUrl(value);
+                  setFormError(null);
+                  setNotice(null);
+                }}
                 onSubmitPort={() => void submitPort()}
                 onDiscardPort={() => {
                   setPort(String(savedPort ?? ""));
+                  setProxyUrl(savedProxyUrl);
                   setFormError(null);
                 }}
                 onToggleAutostart={(next) => void toggleAutostart(next)}

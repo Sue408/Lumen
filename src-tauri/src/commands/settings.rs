@@ -6,7 +6,7 @@ use crate::db::seed::{export_seed, import_seed_json, ImportSummary};
 use crate::db::settings::{get_settings, save_settings, Settings};
 use crate::db::{clear_business_data, with_db};
 use crate::error::AppError;
-use crate::state::AppState;
+use crate::state::{build_http_client, AppState};
 
 #[tauri::command]
 pub async fn get_settings_cmd(state: State<'_, Arc<AppState>>) -> Result<Settings, AppError> {
@@ -22,10 +22,13 @@ pub async fn save_settings_cmd(
     if state.status().running && input.port != state.port() {
         return Err(AppError::AlreadyRunning);
     }
+    // 先校验代理并构建新 client（非法地址在落库前拒绝），保存成功后即时换入。
+    let client = build_http_client(input.proxy_url.as_deref())?;
     let saved = with_db(&state.db, move |conn| save_settings(conn, &input)).await?;
     state.set_port(saved.port);
     state.set_close_to_tray(saved.close_to_tray);
     state.set_session_headers(saved.session_headers.clone());
+    state.set_http(client);
     Ok(saved)
 }
 

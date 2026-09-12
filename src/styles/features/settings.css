@@ -112,6 +112,12 @@
   cursor: not-allowed;
 }
 
+.settings-page .settings-input-url {
+  width: clamp(14rem, 32vw, 24rem);
+  text-align: left;
+  font-variant-numeric: normal;
+}
+
 .settings-page .settings-segment {
   display: inline-grid;
   grid-template-columns: 1fr 1fr;

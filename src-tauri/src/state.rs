@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -9,6 +9,7 @@ use tokio::task::JoinHandle;
 use crate::db::models::RequestLog;
 use crate::db::settings::default_session_headers;
 use crate::db::Db;
+use crate::error::AppError;
 
 pub const DEFAULT_PORT: u16 = 8787;
 
@@ -96,7 +97,7 @@ pub struct GatewayHandle {
 
 pub struct AppState {
     pub db: Db,
-    pub http: reqwest::Client,
+    pub http: RwLock<reqwest::Client>,
     pub events: Arc<dyn EventSink>,
     pub gateway: Mutex<Option<GatewayHandle>>,
     port: Mutex<u16>,
@@ -104,6 +105,18 @@ pub struct AppState {
     /// 会话候选头名表（随设置保存刷新）。
     session_headers: Mutex<Vec<String>>,
     cooldowns: Mutex<Cooldowns>,
+}
+
+/// 统一构建出站 client：connect 超时固定 10s；传入非空代理 URL 时经该代理发出
+/// （HTTP/HTTPS 代理，`Proxy::all` 同时覆盖 http 与 https 目标）。
+pub fn build_http_client(proxy_url: Option<&str>) -> Result<reqwest::Client, AppError> {
+    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
+    if let Some(url) = proxy_url.map(str::trim).filter(|url| !url.is_empty()) {
+        let proxy = reqwest::Proxy::all(url)
+            .map_err(|error| AppError::message(format!("代理地址无效：{error}")))?;
+        builder = builder.proxy(proxy);
+    }
+    builder.build().map_err(AppError::from)
 }
 
 impl AppState {
@@ -115,13 +128,30 @@ impl AppState {
     ) -> Self {
         Self {
             db,
-            http,
+            http: RwLock::new(http),
             events,
             gateway: Mutex::new(None),
             port: Mutex::new(port),
             close_to_tray: Mutex::new(true),
             session_headers: Mutex::new(default_session_headers()),
             cooldowns: Mutex::new(Cooldowns::default()),
+        }
+    }
+
+    /// 取当前出站 client。`reqwest::Client` 内部是 Arc，clone 极廉价；在途请求继续持
+    /// 旧 client 直至结束，新请求立即用最新 client。
+    pub fn http(&self) -> reqwest::Client {
+        self.http
+            .read()
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|poison| poison.into_inner().clone())
+    }
+
+    /// 替换出站 client（代理设置保存后调用，即时生效）。
+    pub fn set_http(&self, client: reqwest::Client) {
+        match self.http.write() {
+            Ok(mut guard) => *guard = client,
+            Err(poison) => *poison.into_inner() = client,
         }
     }
 
@@ -215,5 +245,24 @@ mod tests {
         cooldowns.mark("m1", Duration::from_secs(1), now);
         assert!(!cooldowns.is_cooling("m1", now + Duration::from_secs(2)));
         assert!(cooldowns.until.is_empty(), "过期项应被清理");
+    }
+
+    #[test]
+    fn builds_client_without_proxy() {
+        assert!(build_http_client(None).is_ok());
+        assert!(build_http_client(Some("")).is_ok());
+        assert!(build_http_client(Some("   ")).is_ok());
+    }
+
+    #[test]
+    fn builds_client_with_http_proxy() {
+        assert!(build_http_client(Some("http://127.0.0.1:7890")).is_ok());
+        assert!(build_http_client(Some("https://127.0.0.1:7890")).is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_proxy_url() {
+        let error = build_http_client(Some("not a url")).unwrap_err();
+        assert!(matches!(error, AppError::Message(_)), "got {error:?}");
     }
 }

@@ -25,6 +25,9 @@ pub struct Settings {
     /// 会话候选头名表（按优先级）。客户端没带任何候选头时该次请求 `session_id` 为 NULL。
     #[serde(default = "default_session_headers")]
     pub session_headers: Vec<String>,
+    /// 出站代理 URL（如 `http://127.0.0.1:7890`）；`None` 或空串表示直连。
+    #[serde(default)]
+    pub proxy_url: Option<String>,
 }
 
 impl Default for Settings {
@@ -33,6 +36,7 @@ impl Default for Settings {
             port: DEFAULT_PORT,
             close_to_tray: true,
             session_headers: default_session_headers(),
+            proxy_url: None,
         }
     }
 }
@@ -63,11 +67,23 @@ pub fn get_settings(conn: &Connection) -> Result<Settings, AppError> {
         .and_then(|value| value.parse::<bool>().ok())
         .unwrap_or(true);
     let session_headers = read_session_headers(conn);
+    let proxy_url = read_value(conn, "proxy_url")?.and_then(|raw| normalize_proxy_url(&raw));
     Ok(Settings {
         port,
         close_to_tray,
         session_headers,
+        proxy_url,
     })
+}
+
+/// 代理 URL 归一：去空白，空串视为「未配置」（直连）。
+fn normalize_proxy_url(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 /// 读会话候选头名表：解析失败回落默认；解析成功则保留用户的选择（包括空表）。
@@ -100,6 +116,11 @@ pub fn save_settings(conn: &Connection, settings: &Settings) -> Result<Settings,
     )?;
     let headers = serde_json::to_string(&settings.session_headers)?;
     write_value(conn, "session_headers", &headers)?;
+    let proxy = settings
+        .proxy_url
+        .as_deref()
+        .and_then(normalize_proxy_url);
+    write_value(conn, "proxy_url", proxy.as_deref().unwrap_or(""))?;
     Ok(settings.clone())
 }
 
@@ -167,5 +188,50 @@ mod tests {
         )
         .unwrap();
         assert!(get_settings(&conn).unwrap().session_headers.is_empty());
+    }
+
+    #[test]
+    fn defaults_to_direct_connection() {
+        assert_eq!(settings().proxy_url, None);
+    }
+
+    #[test]
+    fn proxy_url_round_trip() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let input = Settings {
+            proxy_url: Some("http://127.0.0.1:7890".into()),
+            ..Settings::default()
+        };
+        save_settings(&conn, &input).unwrap();
+        assert_eq!(
+            get_settings(&conn).unwrap().proxy_url.as_deref(),
+            Some("http://127.0.0.1:7890")
+        );
+    }
+
+    #[test]
+    fn blank_proxy_url_means_direct() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        save_settings(
+            &conn,
+            &Settings {
+                proxy_url: Some("   ".into()),
+                ..Settings::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(get_settings(&conn).unwrap().proxy_url, None);
+
+        save_settings(
+            &conn,
+            &Settings {
+                proxy_url: None,
+                ..Settings::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(get_settings(&conn).unwrap().proxy_url, None);
     }
 }

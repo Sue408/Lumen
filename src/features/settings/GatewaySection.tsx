@@ -4,12 +4,15 @@ import { InlineError, SaveBar, SectionTitle, TogglePill } from "../../components
 type GatewaySectionProps = {
   port: string;
   savedPort: number | null;
+  proxyUrl: string;
+  savedProxyUrl: string;
   running: boolean;
   autostart: boolean | null;
   closeToTray: boolean;
   busy: boolean;
   formError: string | null;
   onPortChange: (value: string) => void;
+  onProxyChange: (value: string) => void;
   onSubmitPort: () => void;
   onDiscardPort: () => void;
   onToggleAutostart: (next: boolean) => void;
@@ -19,18 +22,23 @@ type GatewaySectionProps = {
 export function GatewaySection({
   port,
   savedPort,
+  proxyUrl,
+  savedProxyUrl,
   running,
   autostart,
   closeToTray,
   busy,
   formError,
   onPortChange,
+  onProxyChange,
   onSubmitPort,
   onDiscardPort,
   onToggleAutostart,
   onToggleCloseToTray,
 }: GatewaySectionProps) {
-  const dirty = savedPort !== null && port.trim() !== String(savedPort);
+  const dirty =
+    savedPort !== null &&
+    (port.trim() !== String(savedPort) || proxyUrl.trim() !== savedProxyUrl.trim());
 
   return (
     <form
@@ -56,6 +64,24 @@ export function GatewaySection({
           />
           <span className="settings-row-note">
             {running ? "网关运行中，需先停止后才能修改" : "回环地址 127.0.0.1，范围 1024–65535"}
+          </span>
+        </div>
+        <div className="settings-row">
+          <label className="settings-row-label" htmlFor="settings-proxy">
+            出站代理
+          </label>
+          <input
+            id="settings-proxy"
+            className="settings-input settings-input-url"
+            type="text"
+            placeholder="http://127.0.0.1:7890"
+            value={proxyUrl}
+            disabled={busy}
+            spellCheck={false}
+            onChange={(event) => onProxyChange(event.target.value)}
+          />
+          <span className="settings-row-note">
+            留空则直连；支持 http/https 代理，保存后即时生效
           </span>
         </div>
         <div className="settings-row">
@@ -99,7 +125,7 @@ export function GatewaySection({
         </div>
       </div>
       {formError ? <InlineError message={formError} /> : null}
-      <SaveBar dirty={dirty} busy={busy} label="保存端口" onDiscard={onDiscardPort} />
+      <SaveBar dirty={dirty} busy={busy} label="保存网关设置" onDiscard={onDiscardPort} />
     </form>
   );
 }

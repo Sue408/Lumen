@@ -6,6 +6,7 @@ export type Settings = {
   port: number;
   closeToTray: boolean;
   sessionHeaders: string[];
+  proxyUrl: string | null;
 };
 
 /** 与后端 `gateway::session::DEFAULT_SESSION_HEADERS` 保持一致。 */
@@ -26,6 +27,7 @@ let mockSettings: Settings = {
   port: 8787,
   closeToTray: true,
   sessionHeaders: [...DEFAULT_SESSION_HEADERS],
+  proxyUrl: null,
 };
 
 export async function getSettings(): Promise<Settings> {
