@@ -1,10 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { isTauriRuntime } from "../components/tauriRuntime";
 
 export type Settings = {
   port: number;
   closeToTray: boolean;
 };
+
+export async function getAppVersion(): Promise<string> {
+  if (!isTauriRuntime(window)) return __APP_VERSION__;
+  return getVersion();
+}
 
 let mockSettings: Settings = { port: 8787, closeToTray: true };
 

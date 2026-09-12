@@ -6,6 +6,7 @@ import { useGatewayStatus } from "../../app/useGatewayStatus";
 import type { Theme } from "../../app/useTheme";
 import {
   exportConfig,
+  getAppVersion,
   getAutostart,
   getSettings,
   importConfig,
@@ -32,6 +33,7 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
   const [savedPort, setSavedPort] = useState<number | null>(null);
   const [closeToTray, setCloseToTray] = useState(true);
   const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [appVersion, setAppVersion] = useState("");
   const closeToTraySaving = useRef(false);
   const autostartSaving = useRef(false);
   const [loading, setLoading] = useState(true);
@@ -67,6 +69,12 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
         if (alive) setAutostart(enabled);
       } catch (err) {
         if (alive) setError(String(err));
+      }
+      try {
+        const version = await getAppVersion();
+        if (alive) setAppVersion(version);
+      } catch {
+        // 版本展示失败不影响设置页其余功能。
       }
     })();
     return () => {
@@ -295,6 +303,10 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
               ) : null}
             </>
           )}
+
+          {appVersion ? (
+            <footer className="settings-footer">Lumen {appVersion}</footer>
+          ) : null}
         </div>
       </div>
     </main>

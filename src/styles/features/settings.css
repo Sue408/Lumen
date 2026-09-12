@@ -46,6 +46,14 @@
   font-size: 0.8125rem;
 }
 
+.settings-page .settings-footer {
+  padding-top: 0.25rem;
+  color: var(--ink-faint);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
 .settings-page .settings-section {
   display: grid;
   gap: 0.9rem;

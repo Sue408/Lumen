@@ -269,6 +269,100 @@ mod tests {
     }
 
     #[test]
+    fn migrates_from_legacy_version_without_losing_data() {
+        let conn = open_fresh();
+        // 构造 v7 旧库：先按最新结构建好，再拆掉 v8 / v9 / v10 引入的结构并回退版本号。
+        insert_provider(&conn, "p1");
+        conn.execute(
+            "INSERT INTO upstream_models
+                (id, provider_id, model_id, display_name, input_price, output_price)
+             VALUES ('m1', 'p1', 'gpt-4o', 'GPT-4o', 2.5, 10.0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO routes (id, alias, display_name, protocol, enabled, created_at)
+             VALUES ('r1', 'chat', 'Chat', 'openai', 1, '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        // v7 的 route_targets 无唯一索引，允许同一 (route, model) 重复。
+        conn.execute("DROP INDEX idx_route_targets_route_model", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO route_targets (id, route_id, upstream_model_id, priority, enabled)
+             VALUES ('t1', 'r1', 'm1', 0, 1), ('t2', 'r1', 'm1', 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO virtual_keys
+                (id, key, name, enabled, quota_limit, quota_period, created_at)
+             VALUES ('k1', 'sk-lumen-x', 'K', 1, 20.0, 'monthly', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('gateway_port', '8787')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO request_logs (id, occurred_at, endpoint, method, status, cost)
+             VALUES ('l1', '2026-01-02T00:00:00Z', '/v1/chat/completions', 'POST', 'success', 0.5),
+                    ('l2', '2026-01-03T00:00:00Z', '/v1/chat/completions', 'POST', 'error', 1.25)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute("ALTER TABLE request_logs DROP COLUMN attempt_index", [])
+            .unwrap();
+        conn.execute("ALTER TABLE routes DROP COLUMN icon", [])
+            .unwrap();
+        conn.execute("ALTER TABLE routes DROP COLUMN icon_tint", [])
+            .unwrap();
+        conn.pragma_update(None, "user_version", 7).unwrap();
+
+        configure(&conn).unwrap();
+
+        assert_eq!(user_version(&conn), SCHEMA_VERSION);
+
+        let table_count = |table: &str| -> i64 {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(table_count("providers"), 1);
+        assert_eq!(table_count("upstream_models"), 1);
+        assert_eq!(table_count("routes"), 1);
+        assert_eq!(table_count("virtual_keys"), 1);
+        assert_eq!(table_count("settings"), 1);
+        assert_eq!(table_count("request_logs"), 2);
+        // v8 迁移把重复目标去重为一条。
+        assert_eq!(table_count("route_targets"), 1);
+
+        let (sum, attempt_max): (f64, i64) = conn
+            .query_row(
+                "SELECT COALESCE(SUM(cost), 0), COALESCE(MAX(attempt_index), -1) FROM request_logs",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!((sum - 1.75).abs() < 1e-9, "金额不得随升级丢失，got {sum}");
+        assert_eq!(attempt_max, 0, "v9 新列按默认值补齐");
+
+        let port: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'gateway_port'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(port, "8787", "设置不得随升级丢失");
+    }
+
+    #[test]
     fn rejects_future_version() {
         let conn = open_fresh();
         conn.pragma_update(None, "user_version", SCHEMA_VERSION + 1)

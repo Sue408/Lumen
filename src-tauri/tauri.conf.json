@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "lumen",
-  "version": "0.1.0",
-  "identifier": "com.tauri-app.lumen",
+  "productName": "Lumen",
+  "version": "../package.json",
+  "identifier": "com.apnea.lumen",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -22,12 +22,23 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "connect-src": "ipc: http://ipc.localhost",
+        "img-src": "'self' data: blob:",
+        "style-src": "'self' 'unsafe-inline'",
+        "font-src": "'self' data:"
+      }
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Apnea",
+    "copyright": "Copyright © 2026 Apnea",
+    "category": "DeveloperTool",
+    "shortDescription": "本机个人 LLM 网关与用量账本",
+    "longDescription": "Lumen 把多个上游 LLM 提供商聚合成统一的本地 OpenAI 兼容接口，按模型别名把请求路由到对应的上游模型，并记录每一次调用的 token 与花费。",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -35,5 +46,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQwM0EyODhBMkVDQTNGNkEKUldScVA4b3VpaWc2UU04QkFla0pNcGlVdEo1NUgyUk8yRE52OUdrU0xWb1ZMcFpkU1gzNUsrQWQK",
+      "endpoints": [
+        "https://updates.example.com/lumen/latest.json"
+      ]
+    }
   }
 }
