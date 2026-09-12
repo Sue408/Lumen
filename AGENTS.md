@@ -59,7 +59,7 @@ src-tauri/src/
 - **删列 / 改类型 / 去约束走重建表**：SQLite 不支持改类型，删列限制也多。需要时用「建新表 → `INSERT ... SELECT` → `DROP` 旧表 → `RENAME` → 重建索引」的重建套路，整段写进一条迁移（`apply` 已包事务）。
 - **外键每连接开关**：`configure` 负责 `PRAGMA foreign_keys = ON`；重建带外键的表时，需在事务外先关、迁移后开并 `foreign_key_check`（事务内设置该 pragma 无效）。
 - **迁移必配测试**：模拟旧版本库，断言升级后数据保留，参考 `db/migrations.rs` 的 `migrates_without_losing_rows`。
-- **dev / release 数据库隔离**：debug 构建用 `lumen-dev.db`，release 用 `lumen.db`（同一 `app_data_dir`）。开发 / 演示数据只进 dev 库，真实账本在 release 库；调试时别指望 dev 能看到 `lumen.db` 的数据。数据库版本号描述的是**表结构**，与 app 版本无关。
+- **dev / release 隔离**：`pnpm tauri:dev` 用 `src-tauri/tauri.dev.conf.json` 把 identifier 覆盖为 `com.apnea.lumen.dev`（productName `Lumen Dev`），因此 dev 与 release 的 `app_data_dir`、单实例锁、自启动项互相独立，**可同时运行**（release 当网关、dev 开发）。debug 构建库名 `lumen-dev.db`（落在 `%APPDATA%\com.apnea.lumen.dev\`），release 为 `lumen.db`（落在 `%APPDATA%\com.apnea.lumen\`）。开发 / 演示数据只进 dev 库，真实账本在 release 库。数据库版本号描述的是**表结构**，与 app 版本无关。
 
 ## 样式与主题
 

@@ -27,10 +27,15 @@
 
 ```bash
 pnpm install
-pnpm tauri dev
+pnpm tauri:dev
 ```
 
-dev 构建使用 `lumen-dev.db`，演示数据不会污染真实账本。
+`tauri:dev` 会用 `src-tauri/tauri.dev.conf.json` 把 identifier 覆盖为 `com.apnea.lumen.dev`（productName `Lumen Dev`），因此：
+
+- dev 与已安装的 release 版**identifier 不同**，可**同时运行**（单实例锁、自启动、窗口状态互不干扰）——方便一边用 release 版当网关给 agent 用，一边开发。
+- dev 数据落在 `%APPDATA%\com.apnea.lumen.dev\lumen-dev.db`，与真实账本 `%APPDATA%\com.apnea.lumen\lumen.db` 完全隔离。
+
+`pnpm tauri dev`（不带覆盖）会与 release 版共用 identifier，两者不能同时开。
 
 ## 构建
 
