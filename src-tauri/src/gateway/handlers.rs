@@ -991,6 +991,67 @@ mod tests {
         assert!(logs[0].cost > 0.0);
     }
 
+    /// 每 20ms 推送一块的 SSE 上游，用于模拟客户端中途断开。
+    async fn start_slow_sse_upstream() -> String {
+        let app = axum::Router::new().route(
+            "/chat/completions",
+            axum::routing::post(|| async {
+                let stream = futures_util::stream::unfold(0u32, |index| async move {
+                    if index >= 50 {
+                        return None;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    let chunk =
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n".to_string();
+                    Some((Ok::<_, std::io::Error>(chunk), index + 1))
+                });
+                (
+                    [(header::CONTENT_TYPE, "text/event-stream")],
+                    Body::from_stream(stream),
+                )
+            }),
+        );
+        serve(app).await
+    }
+
+    #[tokio::test]
+    async fn client_disconnect_is_recorded_as_error() {
+        let base_url = start_slow_sse_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "openai", "lumen/mock");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "stream": true, "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // 只读一块就断开客户端连接，后台扫描任务随后应察觉下游关闭。
+        let mut body = response.into_body().into_data_stream();
+        let _ = futures_util::StreamExt::next(&mut body).await;
+        drop(body);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].status, "error", "log: {logs:?}");
+        assert!(logs[0]
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("客户端中断"));
+    }
+
     #[tokio::test]
     async fn unknown_model_returns_404_and_records_failure() {
         let db = open_in_memory().unwrap();

@@ -300,6 +300,8 @@ pub fn stream_response(
                 Ok(bytes) => {
                     scanner.push(&bytes);
                     if tx.send(Ok(bytes)).await.is_err() {
+                        // 下游（客户端）提前断开：既不能记为成功，也没必要继续读上游。
+                        failure = Some("客户端中断连接，响应未完整送达".to_string());
                         break;
                     }
                 }
