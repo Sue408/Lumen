@@ -15,6 +15,17 @@ use tauri_plugin_window_state::StateFlags;
 use crate::db::models::RequestLog;
 use crate::state::{AppState, EventSink, GatewayStatus};
 
+/// dev 与 release 使用不同的数据库文件：开发构建落在 `lumen-dev.db`，发布构建落在
+/// `lumen.db`。两者共用同一个 `app_data_dir`，若不隔离，`tauri dev` 时的调试 / 演示
+/// 注入（会清空全部业务数据）将污染真实账本。
+const fn db_file_name() -> &'static str {
+    if cfg!(debug_assertions) {
+        "lumen-dev.db"
+    } else {
+        "lumen.db"
+    }
+}
+
 /// 把网关事件桥接到 Tauri 事件总线，使 `gateway/` 保持与 Tauri 解耦。
 struct TauriEventSink {
     app: tauri::AppHandle,
@@ -103,7 +114,9 @@ pub fn run() {
         )
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
-            let db_path = data_dir.join("lumen.db");
+            let db_path = data_dir.join(db_file_name());
+            #[cfg(debug_assertions)]
+            tracing::info!("开发构建使用独立数据库：{}", db_path.display());
             let db = db::open(&db_path)?;
 
             let http = reqwest::Client::builder()
@@ -172,4 +185,18 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::db_file_name;
+
+    #[test]
+    fn database_file_follows_the_build_profile() {
+        if cfg!(debug_assertions) {
+            assert_eq!(db_file_name(), "lumen-dev.db");
+        } else {
+            assert_eq!(db_file_name(), "lumen.db");
+        }
+    }
 }
