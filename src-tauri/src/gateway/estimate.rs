@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::collections::HashSet;
 
 use crate::db::models::{
     PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
@@ -35,9 +36,24 @@ pub fn count_tokens(model: &str, text: &str) -> i64 {
     heuristic_tokens(text)
 }
 
+/// 预热指定上游模型会用到的 tokenizer：把词表一次性加载进全局缓存，返回实际
+/// 加载的编码种数。供网关启动时在后台线程调用，避免首个请求同步等待加载。
+pub fn prewarm(models: &[String]) -> usize {
+    let mut loaded = 0;
+    let mut seen: HashSet<&'static str> = HashSet::new();
+    for model in models {
+        let name = tiktoken::model_to_encoding(model).or_else(|| fallback_encoding(model));
+        if let Some(name) = name {
+            if seen.insert(name) && tiktoken::get_encoding(name).is_some() {
+                loaded += 1;
+            }
+        }
+    }
+    loaded
+}
+
 /// 词表库未直接收录上游别名时的关键词归一：把常见模型名映射到对应编码。
-fn fallback_encoding(model: &str) -> Option<&'static str> {
-    let model = model.to_ascii_lowercase();
+fn fallback_encoding(model: &str) -> Option<&'static str> {    let model = model.to_ascii_lowercase();
     let name = if model.contains("claude") {
         "cl100k_base"
     } else if model.contains("gemini") {
@@ -269,6 +285,23 @@ mod tests {
     }
 
     #[test]
+    fn prewarm_loads_known_encodings_and_skips_unknown() {
+        let models = vec![
+            "gpt-4o".to_string(),
+            "deepseek-chat".to_string(),
+            "totally-unknown-xyz".to_string(),
+        ];
+        // gpt-4o → o200k_base，deepseek-chat → deepseek_v4；未知模型不加载。
+        assert_eq!(prewarm(&models), 2);
+        // 同族模型共享编码，去重后只算一种。
+        assert_eq!(
+            prewarm(&["gpt-4o".to_string(), "gpt-4o-mini".to_string()]),
+            1
+        );
+        assert_eq!(prewarm(&["totally-unknown-xyz".to_string()]), 0);
+    }
+
+    #[test]
     fn unknown_model_uses_heuristic() {
         let text = "hello world";
         assert_eq!(count_tokens("totally-unknown-xyz", text), heuristic_tokens(text));
@@ -357,5 +390,21 @@ mod tests {
             &mut gemini,
         );
         assert_eq!(gemini, "hi");
+    }
+
+    /// 手动跑的首次加载基准：`cargo test bench_prewarm -- --ignored --nocapture`。
+    #[test]
+    #[ignore]
+    fn bench_prewarm() {
+        for name in ["o200k_base", "cl100k_base", "deepseek_v3", "qwen2"] {
+            let start = std::time::Instant::now();
+            let _ = tiktoken::get_encoding(name);
+            println!("first load {name}: {:?}", start.elapsed());
+        }
+        let start = std::time::Instant::now();
+        for name in tiktoken::list_encodings() {
+            let _ = tiktoken::get_encoding(name);
+        }
+        println!("load remaining all: {:?}", start.elapsed());
     }
 }

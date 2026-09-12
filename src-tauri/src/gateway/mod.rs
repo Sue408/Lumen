@@ -18,6 +18,8 @@ use axum::routing::{get, post};
 use axum::Router;
 use tokio::sync::oneshot;
 
+use crate::db::providers::list_enabled_model_ids;
+use crate::db::with_db;
 use crate::error::AppError;
 use crate::state::{AppState, GatewayHandle, GatewayStatus};
 
@@ -74,6 +76,25 @@ pub async fn start(state: Arc<AppState>) -> Result<(), AppError> {
     }
 
     state.events.status(&GatewayStatus::running(port));
+
+    // 后台预热 tokenizer：只加载已配置上游用到的编码，不阻塞网关就绪与转发。
+    // 词表首次构造是百毫秒级的一次性开销，预热后请求路径上的计数是微秒级。
+    let prewarm_state = state.clone();
+    tokio::spawn(async move {
+        let models = match with_db(&prewarm_state.db, list_enabled_model_ids).await {
+            Ok(models) => models,
+            Err(error) => {
+                tracing::warn!("tokenizer 预热跳过：读取上游模型失败：{error}");
+                return;
+            }
+        };
+        let started = std::time::Instant::now();
+        let loaded = tokio::task::spawn_blocking(move || estimate::prewarm(&models))
+            .await
+            .unwrap_or(0);
+        tracing::info!("tokenizer 预热完成：{loaded} 种编码，用时 {:?}", started.elapsed());
+    });
+
     Ok(())
 }
 

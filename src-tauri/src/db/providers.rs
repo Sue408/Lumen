@@ -112,6 +112,18 @@ pub fn list_upstream_models(conn: &Connection) -> Result<Vec<UpstreamModel>, App
     Ok(models)
 }
 
+/// 所有启用上游模型的真实模型名（去重），供网关启动时后台预热 tokenizer。
+pub fn list_enabled_model_ids(conn: &Connection) -> Result<Vec<String>, AppError> {
+    let mut stmt =
+        conn.prepare("SELECT DISTINCT model_id FROM upstream_models WHERE enabled = 1")?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    let mut ids = Vec::new();
+    for row in rows {
+        ids.push(row?);
+    }
+    Ok(ids)
+}
+
 pub fn save_upstream_model(
     conn: &Connection,
     input: &UpstreamModelInput,
