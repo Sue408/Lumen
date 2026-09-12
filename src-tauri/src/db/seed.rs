@@ -156,8 +156,25 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
     let now = chrono::Utc::now().to_rfc3339();
     let tx = conn.unchecked_transaction()?;
     let mut summary = ImportSummary::default();
+    // 先载入库中已有的 provider / model：这样「只含部分条目」的文件也能引用
+    // 未在本次文件里出现的既有 provider 与 model，而不是只能整包导入。
     let mut provider_ids: HashMap<String, String> = HashMap::new();
     let mut provider_protocols: HashMap<String, String> = HashMap::new();
+    {
+        let mut stmt = tx.prepare("SELECT id, name, protocol FROM providers")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, name, protocol) = row?;
+            provider_ids.insert(name.clone(), id);
+            provider_protocols.insert(name, protocol);
+        }
+    }
     for provider in &seed.providers {
         let extra_headers = serde_json::to_string(&provider.extra_headers)?;
         let id = match existing_id(
@@ -215,6 +232,27 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
 
     let mut model_ids: HashMap<String, String> = HashMap::new();
     let mut model_protocols: HashMap<String, String> = HashMap::new();
+    {
+        let mut stmt = tx.prepare(
+            "SELECT m.id, m.model_id, m.display_name, p.protocol
+               FROM upstream_models m
+               JOIN providers p ON p.id = m.provider_id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, model_id, display_name, protocol) = row?;
+            model_protocols.insert(id.clone(), protocol);
+            model_ids.insert(model_id, id.clone());
+            model_ids.entry(display_name).or_insert(id);
+        }
+    }
     for model in &seed.upstream_models {
         let provider_id = provider_ids.get(&model.provider).ok_or_else(|| {
             AppError::message(format!("seed 引用了不存在的提供商：{}", model.provider))
@@ -685,6 +723,41 @@ mod tests {
             .unwrap();
         assert_eq!(providers, 3);
         assert_eq!(openai, 1);
+    }
+
+    #[test]
+    fn partial_import_can_reference_existing_entities() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        // 首次导入建立 provider + model。
+        let base: SeedFile = serde_json::from_str(SAMPLE).unwrap();
+        merge_seed(&conn, &base, true).unwrap();
+
+        // 只给一条 route，引用本次文件之外、库中已存在的模型。
+        let route_only: SeedFile = serde_json::from_str(
+            r#"{ "routes": [ { "alias": "lumen/extra", "protocol": "openai",
+                 "targets": [ { "upstreamModel": "gpt-4o", "priority": 0, "enabled": true } ] } ] }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            merge_seed(&conn, &route_only, true).unwrap().routes.created,
+            1
+        );
+
+        // 只给一个 model，引用本次文件之外、库中已存在的 provider。
+        let model_only: SeedFile = serde_json::from_str(
+            r#"{ "upstreamModels": [ { "provider": "OpenAI", "modelId": "gpt-4o-mini" } ] }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            merge_seed(&conn, &model_only, true).unwrap().models.created,
+            1
+        );
+
+        let routes: i64 = conn
+            .query_row("SELECT COUNT(*) FROM routes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(routes, 2);
     }
 
     #[test]

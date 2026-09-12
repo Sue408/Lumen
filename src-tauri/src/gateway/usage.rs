@@ -14,8 +14,9 @@ pub const PER_MILLION: f64 = 1_000_000.0;
 pub enum UsageSource {
     /// 上游明确返回，可直接结算。
     Provider,
-    /// 网关 tokenizer 估算，仅用于限额与展示。
-    #[allow(dead_code)]
+    /// 网关 tokenizer 估算。**当前预留**：网关不做本地估算，仅作为对外契约
+    /// （`docs/后端接口文档.md` 的 `UsageSource`）保留的取值之一。
+    #[allow(dead_code, reason = "对前端保留的契约取值，待接入本地估算后才会构造")]
     Estimated,
     /// 上游未返回任何可用用量。
     #[default]
@@ -226,9 +227,7 @@ pub fn calculate_cost(usage: &UsageTotals, price: &Pricing) -> f64 {
 
 pub struct LogContext {
     pub endpoint: String,
-    pub method: String,
     pub alias: String,
-    pub kind: String,
     pub is_stream: bool,
     pub route: Option<ResolvedRoute>,
     pub latency_ms: i64,
@@ -243,9 +242,7 @@ pub struct LogContext {
 pub fn build_log(context: LogContext) -> RequestLog {
     let LogContext {
         endpoint,
-        method,
         alias,
-        kind,
         is_stream,
         route,
         latency_ms,
@@ -282,7 +279,7 @@ pub fn build_log(context: LogContext) -> RequestLog {
         id: uuid::Uuid::new_v4().to_string(),
         occurred_at: chrono::Utc::now().to_rfc3339(),
         endpoint,
-        method,
+        method: "POST".to_string(),
         route_alias: Some(alias),
         route_id: route.as_ref().map(|route| route.route_id.clone()),
         upstream_model_id: route.as_ref().map(|route| route.upstream_model_id.clone()),
@@ -290,7 +287,7 @@ pub fn build_log(context: LogContext) -> RequestLog {
         model_real: route.as_ref().map(|route| route.model_id.clone()),
         provider_id: route.as_ref().map(|route| route.provider_id.clone()),
         virtual_key_id,
-        kind,
+        kind: "chat".to_string(),
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
         total_tokens: usage.total_tokens,
@@ -554,9 +551,7 @@ mod tests {
 
         let log = build_log(LogContext {
             endpoint: "/v1/chat/completions".into(),
-            method: "POST".into(),
             alias: "lumen/x".into(),
-            kind: "chat".into(),
             is_stream: false,
             route: Some(sample_route()),
             latency_ms: 1,

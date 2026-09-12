@@ -16,9 +16,7 @@ pub async fn reject(
 ) {
     let log = build_log(LogContext {
         endpoint: endpoint.to_string(),
-        method: "POST".to_string(),
         alias: alias.to_string(),
-        kind: "chat".to_string(),
         is_stream,
         route,
         latency_ms: 0,

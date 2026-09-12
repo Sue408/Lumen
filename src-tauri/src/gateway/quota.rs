@@ -1,9 +1,9 @@
-use chrono::{DateTime, Datelike, Duration, Local};
+use chrono::{DateTime, Datelike, Local};
 
 use crate::db::models::{
     QUOTA_PERIOD_DAILY, QUOTA_PERIOD_MONTHLY, QUOTA_PERIOD_TOTAL, QUOTA_PERIOD_WEEKLY,
 };
-use crate::util::{start_of_date, start_of_day};
+use crate::util::{add_days_to_start, start_of_date, start_of_day};
 
 /// 额度计量周期。未知取值回退到自然月，保证配置损坏时行为可预测。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +32,7 @@ pub fn period_start(period: QuotaPeriod, now: DateTime<Local>) -> DateTime<Local
         QuotaPeriod::Daily => start_of_day(now),
         QuotaPeriod::Weekly => {
             let offset = now.weekday().num_days_from_monday() as i64;
-            start_of_day(now) - Duration::days(offset)
+            add_days_to_start(start_of_day(now), -offset)
         }
         QuotaPeriod::Monthly => start_of_date(now.year(), now.month(), 1, now),
         QuotaPeriod::Total => start_of_date(1970, 1, 1, now),
@@ -49,11 +49,12 @@ pub fn period_label(period: QuotaPeriod) -> &'static str {
     }
 }
 
-/// 是否已达 / 超过额度。无上限（`None`）永远放行；恰好等于上限视为超限。
-pub fn is_over_quota(spent: f64, limit: Option<f64>) -> bool {
+/// 已达 / 超过额度时返回该上限，否则（含无上限 `None`）返回 `None`。
+/// 恰好等于上限视为超限。
+pub fn exceeded_limit(spent: f64, limit: Option<f64>) -> Option<f64> {
     match limit {
-        Some(limit) => spent >= limit,
-        None => false,
+        Some(limit) if spent >= limit => Some(limit),
+        _ => None,
     }
 }
 
@@ -124,18 +125,18 @@ mod tests {
 
     #[test]
     fn unlimited_never_blocks() {
-        assert!(!is_over_quota(1_000_000.0, None));
+        assert_eq!(exceeded_limit(1_000_000.0, None), None);
     }
 
     #[test]
     fn reaching_the_limit_blocks() {
-        assert!(!is_over_quota(4.99, Some(5.0)));
-        assert!(is_over_quota(5.0, Some(5.0)));
-        assert!(is_over_quota(5.01, Some(5.0)));
+        assert_eq!(exceeded_limit(4.99, Some(5.0)), None);
+        assert_eq!(exceeded_limit(5.0, Some(5.0)), Some(5.0));
+        assert_eq!(exceeded_limit(5.01, Some(5.0)), Some(5.0));
     }
 
     #[test]
     fn zero_limit_blocks_everything() {
-        assert!(is_over_quota(0.0, Some(0.0)));
+        assert_eq!(exceeded_limit(0.0, Some(0.0)), Some(0.0));
     }
 }

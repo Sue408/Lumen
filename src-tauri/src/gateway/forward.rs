@@ -275,9 +275,7 @@ pub fn stream_response(
 
         let log = build_log(LogContext {
             endpoint,
-            method: "POST".to_string(),
             alias,
-            kind: "chat".to_string(),
             is_stream: true,
             route: Some(route),
             latency_ms: started.elapsed().as_millis() as i64,

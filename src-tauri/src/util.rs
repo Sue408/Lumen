@@ -25,6 +25,13 @@ pub fn start_of_date(
         .unwrap_or(fallback)
 }
 
+/// 在本地日历上加减天数后再归零到当天起点。跨 DST 时按日历天推进，
+/// 不会像固定 24 小时那样把起点偏移到前一天 23:00 或当天 01:00。
+pub fn add_days_to_start(start: DateTime<Local>, days: i64) -> DateTime<Local> {
+    let target = start.date_naive() + chrono::Duration::days(days);
+    start_of_date(target.year(), target.month(), target.day(), start)
+}
+
 /// 当月天数。
 pub fn days_in_month(date: DateTime<Local>) -> u32 {
     let first = chrono::NaiveDate::from_ymd_opt(date.year(), date.month(), 1).expect("月份合法");

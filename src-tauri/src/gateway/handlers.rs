@@ -19,7 +19,7 @@ use crate::gateway::auth::authenticate;
 use crate::gateway::forward::{
     ensure_include_usage, error_response, request_id, send, stream_response, upstream_path,
 };
-use crate::gateway::quota::{is_over_quota, period_label, period_start, QuotaPeriod};
+use crate::gateway::quota::{exceeded_limit, period_label, period_start, QuotaPeriod};
 use crate::gateway::reject::reject;
 use crate::gateway::resolve::resolve;
 use crate::gateway::usage::{build_log, extract_usage, record, LogContext, UsageTotals};
@@ -201,26 +201,24 @@ async fn forward(
                 return error.into_response();
             }
         };
-    if let Some(limit) = virtual_key.quota_limit {
-        if is_over_quota(spent, virtual_key.quota_limit) {
-            let error = AppError::QuotaExceeded {
-                name: virtual_key.name.clone(),
-                spent,
-                limit,
-                period: period_label(period).to_string(),
-            };
-            reject(
-                &state,
-                endpoint,
-                &alias,
-                is_stream,
-                None,
-                Some(key_id.clone()),
-                &error,
-            )
-            .await;
-            return error.into_response();
-        }
+    if let Some(limit) = exceeded_limit(spent, virtual_key.quota_limit) {
+        let error = AppError::QuotaExceeded {
+            name: virtual_key.name.clone(),
+            spent,
+            limit,
+            period: period_label(period).to_string(),
+        };
+        reject(
+            &state,
+            endpoint,
+            &alias,
+            is_stream,
+            None,
+            Some(key_id.clone()),
+            &error,
+        )
+        .await;
+        return error.into_response();
     }
 
     let route = match resolve(&state, &alias).await {
@@ -291,9 +289,7 @@ async fn forward(
         Err(error) => {
             let log = build_log(LogContext {
                 endpoint: endpoint.to_string(),
-                method: "POST".to_string(),
                 alias: alias.clone(),
-                kind: "chat".to_string(),
                 is_stream,
                 route: Some(route.clone()),
                 latency_ms: started.elapsed().as_millis() as i64,
@@ -326,9 +322,7 @@ async fn forward(
 
     let log = build_log(LogContext {
         endpoint: endpoint.to_string(),
-        method: "POST".to_string(),
         alias,
-        kind: "chat".to_string(),
         is_stream: false,
         route: Some(route),
         latency_ms: started.elapsed().as_millis() as i64,

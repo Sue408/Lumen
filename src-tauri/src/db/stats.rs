@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Datelike, Duration, Local, Months, Utc};
+use chrono::{DateTime, Datelike, Local, Months, Utc};
 use rusqlite::Connection;
 use serde::Serialize;
 
@@ -8,7 +8,9 @@ use crate::db::attribution::{build_attribution, Attribution};
 use crate::db::with_db;
 use crate::db::Db;
 use crate::error::AppError;
-use crate::util::{days_in_month, round2, round4, start_of_date, start_of_day};
+use crate::util::{
+    add_days_to_start, days_in_month, round2, round4, start_of_date, start_of_day,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Period {
@@ -167,7 +169,7 @@ pub fn period_start(period: Period, anchor: DateTime<Local>) -> DateTime<Local> 
         Period::Day => start_of_day(anchor),
         Period::Week => {
             let offset = anchor.weekday().num_days_from_monday() as i64;
-            start_of_day(anchor) - Duration::days(offset)
+            add_days_to_start(start_of_day(anchor), -offset)
         }
         Period::Month => start_of_date(anchor.year(), anchor.month(), 1, anchor),
     }
@@ -175,21 +177,21 @@ pub fn period_start(period: Period, anchor: DateTime<Local>) -> DateTime<Local> 
 
 fn period_end(period: Period, start: DateTime<Local>) -> DateTime<Local> {
     match period {
-        Period::Day => start + Duration::days(1),
-        Period::Week => start + Duration::days(7),
+        Period::Day => add_days_to_start(start, 1),
+        Period::Week => add_days_to_start(start, 7),
         Period::Month => start
             .checked_add_months(Months::new(1))
-            .unwrap_or(start + Duration::days(31)),
+            .unwrap_or_else(|| add_days_to_start(start, 31)),
     }
 }
 
 fn previous_start(period: Period, start: DateTime<Local>) -> DateTime<Local> {
     match period {
-        Period::Day => start - Duration::days(1),
-        Period::Week => start - Duration::days(7),
+        Period::Day => add_days_to_start(start, -1),
+        Period::Week => add_days_to_start(start, -7),
         Period::Month => start
             .checked_sub_months(Months::new(1))
-            .unwrap_or(start - Duration::days(30)),
+            .unwrap_or_else(|| add_days_to_start(start, -30)),
     }
 }
 
@@ -742,6 +744,7 @@ mod tests {
     use crate::db::logs::insert_log;
     use crate::db::models::{RequestLog, VirtualKeyInput};
     use crate::db::open_in_memory;
+    use chrono::Duration;
 
     fn sample_log(occurred: DateTime<Local>, input: i64, output: i64, cost: f64, model: &str) -> RequestLog {
         RequestLog {
