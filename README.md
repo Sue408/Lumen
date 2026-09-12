@@ -56,22 +56,12 @@ cargo clippy -- -D warnings   # 后端静态检查（于 src-tauri/）
 - dev：`lumen-dev.db`
 - release：`lumen.db`
 
-## 发布与自动更新
+## 发布
 
 - **应用标识符**：`com.apnea.lumen`。它决定 `app_data_dir`，发布后不要更改（改则账本换目录）。
 - **版本号单一来源**：`package.json` 的 `version`。`src-tauri/tauri.conf.json` 的 `version` 指向 `../package.json`，因此 `getVersion()` 与前端 `__APP_VERSION__` 同源，无需三处手动同步。
-- **自动更新器**已接入（`tauri-plugin-updater`），分发端点仍为占位：
-  - `tauri.conf.json > plugins.updater.endpoints` 现为 `https://updates.example.com/...`，发布前替换为真实地址（GitHub Releases 或自建静态服务器，返回 `latest.json`）。
-  - 更新签名公钥已写入 `plugins.updater.pubkey`；私钥在 `~/.tauri/lumen.key`（**务必保管，丢失后无法再签发更新**）。
-- **生成更新产物**：将 `tauri.conf.json > bundle.createUpdaterArtifacts` 设为 `true`，并在构建时提供私钥：
-
-  ```powershell
-  $env:TAURI_SIGNING_PRIVATE_KEY_PATH = "$env:USERPROFILE\.tauri\lumen.key"
-  pnpm tauri build
-  ```
-
-  该开关默认关闭，以免未配置密钥时构建失败。
-- **Windows Authenticode 签名暂缓**：安装包会触发 SmartScreen 提示。
+- **发布构建**：`pnpm tauri build`，产物在 `src-tauri/target/release/bundle/`。release 构建使用 `lumen.db`。
+- **自动更新与代码签名暂缓**：暂未接入更新器（避免在尚无发布渠道时引入额外依赖与体积）；Windows 安装包会触发 SmartScreen 提示。将来需要时见 `docs/后续功能计划备忘.md`。
 
 ## 文档
 
