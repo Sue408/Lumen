@@ -92,6 +92,20 @@ body {
   min-height: 100vh;
   overflow: hidden;
   background: var(--paper);
+  /* 展示性文字（标题 / 标签 / 数值）默认不可选中，像原生应用而非网页。 */
+  user-select: none;
+}
+
+/* 可编辑控件保留选择与原生编辑能力。 */
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+}
+
+/* 显式允许复制的展示内容（如需要手动选取的 ID / 地址）。 */
+.is-selectable {
+  user-select: text;
 }
 
 button {
