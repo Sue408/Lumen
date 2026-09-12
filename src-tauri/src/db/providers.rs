@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection};
 
-use super::models::{Provider, ProviderInput, UpstreamModel, UpstreamModelInput};
+use super::models::{is_known_capability, Provider, ProviderInput, UpstreamModel, UpstreamModelInput};
 use crate::error::AppError;
 
 pub fn list_providers(conn: &Connection) -> Result<Vec<Provider>, AppError> {
@@ -110,6 +110,14 @@ pub fn save_upstream_model(
     conn: &Connection,
     input: &UpstreamModelInput,
 ) -> Result<UpstreamModel, AppError> {
+    // 能力标签以 `MODEL_CAPABILITIES` 为权威词表，拒绝词表外的取值，避免脏数据落库。
+    if let Some(value) = input
+        .capabilities
+        .iter()
+        .find(|value| !is_known_capability(value))
+    {
+        return Err(AppError::message(format!("未知能力标签：{value}")));
+    }
     let id = input
         .id
         .clone()
@@ -265,5 +273,46 @@ mod tests {
         let provider = seed_provider(&conn, "openai");
         let saved = change_protocol(&conn, &provider, "anthropic").unwrap();
         assert_eq!(saved.protocol, "anthropic");
+    }
+
+    fn model_input(provider_id: &str, capabilities: Vec<&str>) -> UpstreamModelInput {
+        UpstreamModelInput {
+            id: None,
+            provider_id: provider_id.to_string(),
+            model_id: "m".into(),
+            display_name: "M".into(),
+            input_price: 0.0,
+            output_price: 0.0,
+            cache_read_price: 0.0,
+            cache_creation_price: 0.0,
+            context_window: 0,
+            capabilities: capabilities.into_iter().map(str::to_string).collect(),
+            icon: None,
+            icon_tint: "ink".into(),
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn save_upstream_model_accepts_known_capabilities() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = seed_provider(&conn, "openai");
+        let saved = save_upstream_model(
+            &conn,
+            &model_input(&provider.id, vec!["vision", "tools", "reasoning"]),
+        )
+        .unwrap();
+        assert_eq!(saved.capabilities, vec!["vision", "tools", "reasoning"]);
+    }
+
+    #[test]
+    fn save_upstream_model_rejects_unknown_capability() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = seed_provider(&conn, "openai");
+        let error =
+            save_upstream_model(&conn, &model_input(&provider.id, vec!["audio"])).unwrap_err();
+        assert!(matches!(error, AppError::Message(_)), "got {error:?}");
     }
 }

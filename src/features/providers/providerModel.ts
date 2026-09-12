@@ -110,6 +110,8 @@ export function validateProviderDraft(draft: ProviderDraft): string | null {
 
 export type CapabilityId = "vision" | "tools" | "reasoning";
 
+// 镜像后端权威词表 `MODEL_CAPABILITIES`（src-tauri/src/db/models.rs）；
+// 变更时需两侧同步，后端会拒绝词表外的取值。
 export const capabilityOrder: CapabilityId[] = ["vision", "tools", "reasoning"];
 
 export const capabilityLabel: Record<CapabilityId, string> = {

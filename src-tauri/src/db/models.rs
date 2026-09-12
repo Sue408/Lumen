@@ -12,6 +12,18 @@ pub const QUOTA_PERIOD_WEEKLY: &str = "weekly";
 pub const QUOTA_PERIOD_MONTHLY: &str = "monthly";
 pub const QUOTA_PERIOD_TOTAL: &str = "total";
 
+/// 上游模型能力标签的权威词表。前端 `providerModel.ts` 的 `capabilityOrder` 是它的
+/// 镜像，变更需两侧同步（`save_upstream_model` 会拒绝词表外的取值）。
+pub const CAPABILITY_VISION: &str = "vision";
+pub const CAPABILITY_TOOLS: &str = "tools";
+pub const CAPABILITY_REASONING: &str = "reasoning";
+pub const MODEL_CAPABILITIES: [&str; 3] =
+    [CAPABILITY_VISION, CAPABILITY_TOOLS, CAPABILITY_REASONING];
+
+pub fn is_known_capability(value: &str) -> bool {
+    MODEL_CAPABILITIES.contains(&value)
+}
+
 /// 入站协议是否受网关支持。路由保存与种子导入时据此校验。
 pub fn is_known_protocol(protocol: &str) -> bool {
     matches!(
@@ -385,5 +397,16 @@ mod tests {
         assert!(contains_cache_read(PROTOCOL_OPENAI));
         assert!(contains_cache_read(PROTOCOL_RESPONSES));
         assert!(contains_cache_read(PROTOCOL_GEMINI));
+    }
+
+    #[test]
+    fn known_capabilities_match_pinned_list() {
+        // 前端 providerModel.ts 的 capabilityOrder 必须与此一致。
+        assert_eq!(MODEL_CAPABILITIES, ["vision", "tools", "reasoning"]);
+        for value in MODEL_CAPABILITIES {
+            assert!(is_known_capability(value));
+        }
+        assert!(!is_known_capability("audio"));
+        assert!(!is_known_capability(""));
     }
 }

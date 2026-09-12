@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  capabilityOrder,
   contextWindowToNumber,
   emptyModelDraft,
   formatContextWindow,
   formatExtraHeaders,
+  isCapabilityId,
   isProviderDraftDirty,
   parseExtraHeaders,
   priceToNumber,
@@ -27,6 +29,15 @@ const provider: Provider = {
   enabled: true,
   createdAt: "2026-09-01T02:00:00+00:00",
 };
+
+test("capabilityOrder mirrors the backend vocabulary", () => {
+  // 与 src-tauri/src/db/models.rs 的 MODEL_CAPABILITIES 保持一致。
+  assert.deepEqual(capabilityOrder, ["vision", "tools", "reasoning"]);
+  for (const id of capabilityOrder) {
+    assert.equal(isCapabilityId(id), true);
+  }
+  assert.equal(isCapabilityId("audio"), false);
+});
 
 test("extra header text round-trips through parse and format", () => {
   const headers = { "X-Trace": "1", Authorization: "Bearer abc" };
