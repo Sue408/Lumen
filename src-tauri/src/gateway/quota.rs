@@ -3,6 +3,7 @@ use chrono::{DateTime, Datelike, Duration, Local};
 use crate::db::models::{
     QUOTA_PERIOD_DAILY, QUOTA_PERIOD_MONTHLY, QUOTA_PERIOD_TOTAL, QUOTA_PERIOD_WEEKLY,
 };
+use crate::util::{start_of_date, start_of_day};
 
 /// 额度计量周期。未知取值回退到自然月，保证配置损坏时行为可预测。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,24 +24,6 @@ impl QuotaPeriod {
             _ => QuotaPeriod::Monthly,
         }
     }
-}
-
-fn start_of_day(date: DateTime<Local>) -> DateTime<Local> {
-    let naive = date.date_naive().and_hms_opt(0, 0, 0).expect("零点合法");
-    naive
-        .and_local_timezone(Local)
-        .earliest()
-        .unwrap_or(date)
-}
-
-fn start_of_date(year: i32, month: u32, day: u32, fallback: DateTime<Local>) -> DateTime<Local> {
-    chrono::NaiveDate::from_ymd_opt(year, month, day)
-        .expect("日期合法")
-        .and_hms_opt(0, 0, 0)
-        .expect("零点合法")
-        .and_local_timezone(Local)
-        .earliest()
-        .unwrap_or(fallback)
 }
 
 /// 当前额度周期的起点（本地时区）。周一起始，与 `db/stats.rs` 的周口径一致。

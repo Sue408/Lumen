@@ -369,16 +369,6 @@ fn error_message(value: &Value, fallback: &str) -> String {
         })
 }
 
-fn reject_status(error: &AppError) -> i64 {
-    match error {
-        AppError::ModelNotFound(_) => 404,
-        AppError::ProtocolMismatch { .. } => 400,
-        AppError::Unauthorized => 401,
-        AppError::QuotaExceeded { .. } => 429,
-        _ => 500,
-    }
-}
-
 fn header_key(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get(name)
@@ -445,7 +435,7 @@ async fn reject(
         route,
         latency_ms: 0,
         status: "error".to_string(),
-        http_status: Some(reject_status(error)),
+        http_status: Some(error.status_code().as_u16() as i64),
         error_message: Some(error.to_string()),
         request_id: None,
         virtual_key_id,

@@ -52,6 +52,18 @@ impl AppError {
             AppError::Db(error)
         }
     }
+
+    /// 该错误对应的 HTTP 状态码。IPC 与网关响应共用此映射，避免两处漂移。
+    pub fn status_code(&self) -> StatusCode {
+        match self {
+            AppError::ModelNotFound(_) => StatusCode::NOT_FOUND,
+            AppError::ProtocolMismatch { .. } => StatusCode::BAD_REQUEST,
+            AppError::Unauthorized => StatusCode::UNAUTHORIZED,
+            AppError::QuotaExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
+            AppError::NotRunning | AppError::AlreadyRunning => StatusCode::CONFLICT,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
 }
 
 /// SQLite 唯一约束（UNIQUE / PRIMARY KEY）冲突。
@@ -74,14 +86,7 @@ impl serde::Serialize for AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let status = match &self {
-            AppError::ModelNotFound(_) => StatusCode::NOT_FOUND,
-            AppError::ProtocolMismatch { .. } => StatusCode::BAD_REQUEST,
-            AppError::Unauthorized => StatusCode::UNAUTHORIZED,
-            AppError::QuotaExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
-            AppError::NotRunning | AppError::AlreadyRunning => StatusCode::CONFLICT,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
-        };
+        let status = self.status_code();
         let body = json!({
             "error": {
                 "message": self.to_string(),

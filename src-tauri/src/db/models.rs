@@ -64,19 +64,19 @@ pub struct ProviderInput {
     pub enabled: bool,
 }
 
-fn default_auth_scheme() -> String {
+pub(crate) fn default_auth_scheme() -> String {
     AUTH_BEARER.to_string()
 }
 
-fn default_protocol() -> String {
+pub(crate) fn default_protocol() -> String {
     PROTOCOL_OPENAI.to_string()
 }
 
-fn default_icon_tint() -> String {
+pub(crate) fn default_icon_tint() -> String {
     ICON_TINT_INK.to_string()
 }
 
-fn default_true() -> bool {
+pub(crate) fn default_true() -> bool {
     true
 }
 
@@ -275,7 +275,7 @@ pub struct VirtualKeyInput {
     pub quota_period: String,
 }
 
-fn default_quota_period() -> String {
+pub(crate) fn default_quota_period() -> String {
     QUOTA_PERIOD_MONTHLY.to_string()
 }
 

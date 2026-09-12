@@ -4,7 +4,10 @@ use std::collections::HashMap;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-use super::models::{is_known_protocol, AUTH_BEARER, ICON_TINT_INK, PROTOCOL_OPENAI};
+use super::models::{
+    default_auth_scheme, default_icon_tint, default_protocol, default_quota_period, default_true,
+    is_known_protocol,
+};
 use crate::error::AppError;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -27,7 +30,7 @@ struct SeedProvider {
     base_url: String,
     #[serde(default)]
     api_key: String,
-    #[serde(default = "default_auth")]
+    #[serde(default = "default_auth_scheme")]
     auth_scheme: String,
     #[serde(default = "default_protocol")]
     protocol: String,
@@ -121,26 +124,6 @@ pub struct ImportSummary {
     pub models: ItemSummary,
     pub routes: ItemSummary,
     pub virtual_keys: ItemSummary,
-}
-
-fn default_auth() -> String {
-    AUTH_BEARER.to_string()
-}
-
-fn default_protocol() -> String {
-    PROTOCOL_OPENAI.to_string()
-}
-
-fn default_icon_tint() -> String {
-    ICON_TINT_INK.to_string()
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_quota_period() -> String {
-    "monthly".to_string()
 }
 
 /// 查询自然键命中的已存在主键；无匹配返回 `None`。

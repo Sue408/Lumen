@@ -4,6 +4,7 @@ mod error;
 mod gateway;
 mod state;
 mod tray;
+mod util;
 
 use std::sync::Arc;
 

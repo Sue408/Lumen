@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
+use crate::util::{round2, round4};
+
 /// 某一层（密钥或模型）相对上期的花费变化。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,14 +29,6 @@ pub struct Attribution {
     pub delta_cost: f64,
     pub top_movers: Vec<Mover>,
     pub cache: Option<CacheShift>,
-}
-
-fn round2(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
-}
-
-fn round4(value: f64) -> f64 {
-    (value * 10_000.0).round() / 10_000.0
 }
 
 /// 组装归因。每期入参为 `(层名, 花费)` 与 `(缓存读取, 输入侧总量)`。

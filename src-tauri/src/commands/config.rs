@@ -21,6 +21,7 @@ use crate::db::with_db;
 use crate::error::AppError;
 use crate::gateway::quota::{period_start, QuotaPeriod};
 use crate::state::AppState;
+use crate::util::round2;
 
 #[tauri::command]
 pub async fn list_providers_cmd(
@@ -144,7 +145,7 @@ fn build_key_usages(conn: &Connection, now: DateTime<Local>) -> Result<Vec<KeyUs
         let (spent, calls) = virtual_key_usage(conn, &key.id, start)?;
         usages.push(KeyUsageDto {
             key_id: key.id,
-            spent: (spent * 100.0).round() / 100.0,
+            spent: round2(spent),
             calls,
             limit: key.quota_limit,
             period: key.quota_period,

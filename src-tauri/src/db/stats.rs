@@ -8,6 +8,7 @@ use crate::db::attribution::{build_attribution, Attribution};
 use crate::db::with_db;
 use crate::db::Db;
 use crate::error::AppError;
+use crate::util::{days_in_month, round2, round4, start_of_date, start_of_day};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Period {
@@ -155,30 +156,11 @@ pub struct UsageOverview {
 const TONES: [&str; 4] = ["ochre", "indigo", "moss", "yellow"];
 const MAX_MODEL_SLICES: usize = 4;
 
-fn days_in_month(date: DateTime<Local>) -> u32 {
-    let (year, month) = (date.year(), date.month());
-    let first = chrono::NaiveDate::from_ymd_opt(year, month, 1)
-        .expect("月份合法")
-        .and_hms_opt(0, 0, 0)
-        .expect("零点合法");
-    let next = if month == 12 {
-        chrono::NaiveDate::from_ymd_opt(year + 1, 1, 1)
-    } else {
-        chrono::NaiveDate::from_ymd_opt(year, month + 1, 1)
-    }
-    .expect("下月合法")
-    .and_hms_opt(0, 0, 0)
-    .expect("零点合法");
-    (next - first).num_days() as u32
-}
-
-fn start_of_day(date: DateTime<Local>) -> DateTime<Local> {
-    let naive = date.date_naive().and_hms_opt(0, 0, 0).expect("零点合法");
-    naive
-        .and_local_timezone(Local)
-        .earliest()
-        .unwrap_or(date)
-}
+/// 缓存命中率的分母（输入侧总量）：已含命中时只补缓存写入，否则命中与写入都计入。
+/// 口径与 `db/models.rs::contains_cache_read` 一致。
+const CACHE_DENOM_SQL: &str = "CASE WHEN cache_read_in_input = 1
+             THEN input_tokens + cache_creation_tokens
+             ELSE input_tokens + cache_read_tokens + cache_creation_tokens END";
 
 pub fn period_start(period: Period, anchor: DateTime<Local>) -> DateTime<Local> {
     match period {
@@ -187,13 +169,7 @@ pub fn period_start(period: Period, anchor: DateTime<Local>) -> DateTime<Local> 
             let offset = anchor.weekday().num_days_from_monday() as i64;
             start_of_day(anchor) - Duration::days(offset)
         }
-        Period::Month => chrono::NaiveDate::from_ymd_opt(anchor.year(), anchor.month(), 1)
-            .expect("月初合法")
-            .and_hms_opt(0, 0, 0)
-            .expect("零点合法")
-            .and_local_timezone(Local)
-            .earliest()
-            .unwrap_or(anchor),
+        Period::Month => start_of_date(anchor.year(), anchor.month(), 1, anchor),
     }
 }
 
@@ -288,9 +264,7 @@ fn period_stats(
                 SUM(output_tokens),
                 COUNT(*),
                 SUM(cache_read_tokens),
-                SUM(CASE WHEN cache_read_in_input = 1
-                         THEN input_tokens + cache_creation_tokens
-                         ELSE input_tokens + cache_read_tokens + cache_creation_tokens END)
+                SUM({CACHE_DENOM_SQL})
          FROM request_logs
          LEFT JOIN virtual_keys k ON k.id = request_logs.virtual_key_id
          WHERE request_logs.status = 'success'
@@ -454,9 +428,7 @@ fn quality_totals(
         "SELECT COUNT(*),
                 COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(cache_read_tokens), 0),
-                COALESCE(SUM(CASE WHEN cache_read_in_input = 1
-                                  THEN input_tokens + cache_creation_tokens
-                                  ELSE input_tokens + cache_read_tokens + cache_creation_tokens END), 0),
+                COALESCE(SUM({CACHE_DENOM_SQL}), 0),
                 COALESCE(SUM(reasoning_tokens), 0),
                 COALESCE(SUM(output_tokens), 0)
          FROM request_logs
@@ -500,14 +472,6 @@ fn quality_totals(
             0.0
         },
     })
-}
-
-fn round4(value: f64) -> f64 {
-    (value * 10_000.0).round() / 10_000.0
-}
-
-fn round2(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
 }
 
 pub fn nice_axis_max(value: f64) -> f64 {
@@ -621,9 +585,7 @@ fn period_layer_totals(
                 SUM(output_tokens),
                 COUNT(*),
                 SUM(cache_read_tokens),
-                SUM(CASE WHEN cache_read_in_input = 1
-                         THEN input_tokens + cache_creation_tokens
-                         ELSE input_tokens + cache_read_tokens + cache_creation_tokens END)
+                SUM({CACHE_DENOM_SQL})
          FROM request_logs
          LEFT JOIN virtual_keys k ON k.id = request_logs.virtual_key_id
          WHERE request_logs.status = 'success'
