@@ -69,7 +69,10 @@ export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
           const columnClass = `bar-column${dayTotals[index] === 0 ? " is-empty" : ""}`;
           return (
             <div className={columnClass} key={label}>
-              <div className="stack-track">
+              <div
+                className="stack-track"
+                style={{ "--column-index": index } as CSSProperties}
+              >
                 {period.layers.map((layer, layerIndex) => {
                   const value = distributed[layerIndex][index] ?? 0;
                   return (
@@ -148,6 +151,7 @@ export function MonthlyUsageHeatmap({ period, anchor }: { period: UsagePeriod; a
             <div
               className={`heat-cell level-${cell.level}${cell.isFuture ? " is-future" : ""}${cell.day === null ? " is-blank" : ""}`}
               key={index}
+              style={{ "--cell-index": index } as CSSProperties}
               onPointerEnter={() => cell.day && setHovered(index)}
               onPointerLeave={() => setHovered(null)}
             >

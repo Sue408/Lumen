@@ -232,25 +232,35 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
             </defs>
             <g mask={isLive ? `url(#${maskId})` : undefined}>
               <g clipPath={`url(#${clipId})`}>
-                {series.map(({ layer, area }) => (
-                  <path key={`area-${layer.name}`} className="trend-area" d={area} fill={toneFor(layer.tone)} />
+                {series.map(({ layer, area }, index) => (
+                  <path
+                    key={`area-${layer.name}`}
+                    className="trend-area"
+                    d={area}
+                    fill={toneFor(layer.tone)}
+                    style={{ "--series-index": index } as CSSProperties}
+                  />
                 ))}
               </g>
-              {series.map(({ layer, line }) => (
+              {series.map(({ layer, line }, index) => (
                 <path
                   key={`casing-${layer.name}`}
                   className="trend-line-casing"
                   d={line}
+                  pathLength={1}
                   clipPath={`url(#${clipId})`}
+                  style={{ "--series-index": index } as CSSProperties}
                 />
               ))}
-              {series.map(({ layer, line }) => (
+              {series.map(({ layer, line }, index) => (
                 <path
                   key={`line-${layer.name}`}
                   className="trend-line"
                   d={line}
+                  pathLength={1}
                   stroke={toneFor(layer.tone)}
                   clipPath={`url(#${clipId})`}
+                  style={{ "--series-index": index } as CSSProperties}
                 />
               ))}
             </g>

@@ -132,6 +132,38 @@
   overflow: visible;
 }
 
+/* ---- day chart entrance: the ink is drawn in from the left ---- */
+
+.trend-area {
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: area-reveal 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--series-index, 0) * 60ms);
+}
+
+.trend-line,
+.trend-line-casing {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: draw-line 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--series-index, 0) * 60ms);
+}
+
+@keyframes draw-line {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes area-reveal {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 /* ---- day chart hover: guide line, marker dot, tooltip ---- */
 
 .hover-guide {
@@ -296,8 +328,16 @@
 
 @media (prefers-reduced-motion: reduce) {
   .donut-arcs,
-  .donut-segment {
+  .donut-segment,
+  .trend-area,
+  .trend-line,
+  .trend-line-casing {
     animation: none;
+  }
+
+  .trend-line,
+  .trend-line-casing {
+    stroke-dashoffset: 0;
   }
 
   .hover-guide,

@@ -94,6 +94,7 @@
   transform: scale(1);
   transition: transform 100ms ease, border-color 100ms ease;
   animation: heat-cell-in 220ms ease-out backwards;
+  animation-delay: calc(var(--cell-index, 0) * 8ms);
 }
 
 .heat-cell:hover:not(.is-blank):not(.is-future) {
@@ -108,6 +109,8 @@
 .heat-cell.level-4 { color: var(--heat-text-strong); background: var(--heat-4); }
 .heat-cell.is-future { color: var(--ink-faint); background: transparent; border-style: dashed; }
 .heat-cell.is-blank { visibility: hidden; }
+.heat-cell.is-future,
+.heat-cell.is-blank { animation: none; }
 
 .heat-tooltip {
   left: 50%;
@@ -150,8 +153,11 @@
 }
 
 @keyframes heat-cell-in {
-  from { opacity: 0; transform: scale(0.9); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    background-color: var(--heat-0);
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
 }
 
 @keyframes tooltip-in {
@@ -161,7 +167,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .heat-cell,
-  .heat-tooltip {
+  .heat-tooltip,
+  .stack-track {
     animation: none;
   }
 }
@@ -178,11 +185,23 @@
   margin: 0 auto;
   border-radius: 2px 2px 0 0;
   overflow: hidden;
+  transform-origin: center bottom;
+  animation: bar-rise 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--column-index, 0) * 40ms);
 }
 
 .stack-seg {
   display: block;
   width: 100%;
   min-height: 0;
+}
+
+.bar-column.is-empty .stack-track {
+  animation: none;
+}
+
+@keyframes bar-rise {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
 }
 
