@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useId,
   useLayoutEffect,
   useMemo,
@@ -9,6 +10,7 @@ import {
 } from "react";
 import { buildAreaPath, buildSmoothPath } from "./chartGeometry";
 import { toneFor } from "./chartTone";
+import { growCeiling, initialCeiling } from "./trendScale";
 import {
   buildPeriodAxisLabels,
   buildPeriodSampleLabels,
@@ -30,18 +32,6 @@ const fallbackChartSize: ChartSize = { width: 600, height: 210 };
 
 /** 前缘淡出宽度（占整宽比例）：数据还没走完时，右端渐隐到纸面而非一刀切。 */
 const LEADING_FADE = 0.07;
-
-/** 细密阶梯（1/2/5 太粗会把峰顶压到半高）；峰值再留 5% 顶白，避免贴顶。 */
-const AXIS_STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
-
-function niceMax(value: number): number {
-  if (value <= 0) return 10;
-  const exponent = Math.floor(Math.log10(value));
-  const base = 10 ** exponent;
-  const target = (value / base) * 1.05;
-  const step = AXIS_STEPS.find((candidate) => target <= candidate) ?? 10;
-  return Number((step * base).toPrecision(12));
-}
 
 function formatAxis(value: number): string {
   return String(Number(value.toFixed(4)));
@@ -123,7 +113,11 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
       [],
     )
     .reduce((max, value) => Math.max(max, value), 0);
-  const yMax = niceMax(hourlyPeak);
+  // 迟滞上界：峰值触到当前上界的 CEILING_TRIGGER 才抬一次，避免刷新时整图缩放抖动。
+  const [yMax, setYMax] = useState(() => initialCeiling(hourlyPeak));
+  useEffect(() => {
+    setYMax((prev) => growCeiling(prev, hourlyPeak));
+  }, [hourlyPeak]);
   const series = useMemo(
     () =>
       layers.map((layer) => ({
