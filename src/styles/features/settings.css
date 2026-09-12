@@ -23,7 +23,7 @@
   gap: var(--page-gap);
   align-content: start;
   min-height: 0;
-  padding-right: 0.25rem;
+  padding: 5px 0.5rem var(--page-gutter-y) 5px;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
