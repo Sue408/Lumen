@@ -6,6 +6,7 @@ pub mod usage;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::routing::{get, post};
 use axum::Router;
@@ -13,6 +14,9 @@ use tokio::sync::oneshot;
 
 use crate::error::AppError;
 use crate::state::{AppState, GatewayHandle, GatewayStatus};
+
+/// 停止网关时等待在途连接优雅收尾的上限；超过则强制中止服务任务。
+const STOP_GRACE: Duration = Duration::from_secs(10);
 
 pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
@@ -82,7 +86,13 @@ pub async fn stop(state: &Arc<AppState>) -> Result<(), AppError> {
     if let Some(shutdown) = handle.shutdown.take() {
         let _ = shutdown.send(());
     }
-    let _ = handle.task.await;
+    match tokio::time::timeout(STOP_GRACE, &mut handle.task).await {
+        Ok(_) => {}
+        Err(_) => {
+            tracing::warn!("网关未在 {STOP_GRACE:?} 内优雅关闭，已强制中止");
+            handle.task.abort();
+        }
+    }
     state.events.status(&GatewayStatus::stopped(handle.port));
     Ok(())
 }

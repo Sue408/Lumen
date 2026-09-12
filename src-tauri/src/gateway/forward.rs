@@ -6,6 +6,7 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use serde_json::Value;
+use tokio::time::timeout;
 
 use crate::db::models::{
     contains_cache_read, PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
@@ -16,6 +17,9 @@ use crate::gateway::usage::{
     build_log, extract_fields, finalize, record, LogContext, UsageFields, UsageSource, UsageTotals,
 };
 use crate::state::AppState;
+
+/// 流式上游两次数据之间的最大静默时长；超过即视为挂起，主动收尾并记为失败。
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub fn upstream_url(base_url: &str, path: &str) -> String {
     format!(
@@ -229,7 +233,24 @@ pub fn stream_response(
             protocol: route.upstream_protocol.clone(),
             ..UsageScanner::default()
         };
-        while let Some(chunk) = stream.next().await {
+        // 上游长时间不吐字节即视为挂起：主动中止并把该次调用记为失败，
+        // 避免连接与扫描任务被永久占住。
+        let mut failure: Option<String> = None;
+        loop {
+            let item = match timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
+                Ok(item) => item,
+                Err(_) => {
+                    failure = Some("上游流式响应超时（长时间无数据）".to_string());
+                    let _ = tx
+                        .send(Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "上游流式响应超时",
+                        )))
+                        .await;
+                    break;
+                }
+            };
+            let Some(chunk) = item else { break };
             match chunk {
                 Ok(bytes) => {
                     scanner.push(&bytes);
@@ -238,6 +259,7 @@ pub fn stream_response(
                     }
                 }
                 Err(error) => {
+                    failure = Some(error.to_string());
                     let _ = tx.send(Err(std::io::Error::other(error.to_string()))).await;
                     break;
                 }
@@ -253,13 +275,13 @@ pub fn stream_response(
             is_stream: true,
             route: Some(route),
             latency_ms: started.elapsed().as_millis() as i64,
-            status: if status.is_success() {
+            status: if failure.is_none() && status.is_success() {
                 "success".to_string()
             } else {
                 "error".to_string()
             },
             http_status: Some(status.as_u16() as i64),
-            error_message: None,
+            error_message: failure,
             request_id,
             virtual_key_id,
             usage: scanner.totals(),
