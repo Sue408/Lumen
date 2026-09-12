@@ -206,6 +206,22 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
               <clipPath id={clipId}>
                 <rect x="0" y="0" width={chartSize.width} height={chartSize.height} />
               </clipPath>
+              {series.map(({ layer }, index) => (
+                <clipPath
+                  key={`reveal-${layer.name}`}
+                  id={`trend-reveal-${id}-${index}`}
+                  clipPathUnits="userSpaceOnUse"
+                >
+                  <rect
+                    className="trend-reveal"
+                    x="0"
+                    y="0"
+                    width={chartSize.width}
+                    height={chartSize.height}
+                    style={{ "--series-index": index } as CSSProperties}
+                  />
+                </clipPath>
+              ))}
               <linearGradient
                 id={fadeId}
                 gradientUnits="userSpaceOnUse"
@@ -229,25 +245,21 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
               </mask>
             </defs>
             <g mask={isLive ? `url(#${maskId})` : undefined}>
-              <g clipPath={`url(#${clipId})`}>
-                {series.map(({ layer, area }, index) => (
-                  <path
-                    key={`area-${layer.name}`}
-                    className="trend-area"
-                    d={area}
-                    fill={toneFor(layer.tone)}
-                    style={{ "--series-index": index } as CSSProperties}
-                  />
-                ))}
-              </g>
+              {series.map(({ layer, area }, index) => (
+                <path
+                  key={`area-${layer.name}`}
+                  className="trend-area"
+                  d={area}
+                  fill={toneFor(layer.tone)}
+                  clipPath={`url(#trend-reveal-${id}-${index})`}
+                />
+              ))}
               {series.map(({ layer, line }, index) => (
                 <path
                   key={`casing-${layer.name}`}
                   className="trend-line-casing"
                   d={line}
-                  pathLength={1}
-                  clipPath={`url(#${clipId})`}
-                  style={{ "--series-index": index } as CSSProperties}
+                  clipPath={`url(#trend-reveal-${id}-${index})`}
                 />
               ))}
               {series.map(({ layer, line }, index) => (
@@ -255,10 +267,8 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
                   key={`line-${layer.name}`}
                   className="trend-line"
                   d={line}
-                  pathLength={1}
                   stroke={toneFor(layer.tone)}
-                  clipPath={`url(#${clipId})`}
-                  style={{ "--series-index": index } as CSSProperties}
+                  clipPath={`url(#trend-reveal-${id}-${index})`}
                 />
               ))}
             </g>
