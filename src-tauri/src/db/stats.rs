@@ -128,7 +128,9 @@ pub struct UsageLayer {
     pub amount: f64,
 }
 
-/// 用量质量：命中率 / 失败率 / 推理占比。统计覆盖全部记录（含失败）。
+/// 用量质量：命中率 / 失败率 / 推理占比。失败率覆盖全部记录（含失败与估算）；
+/// 命中率与推理占比只统计有上游上报细节的记录，排除 `estimated`——估算值不携带
+/// 缓存与推理字段，混入会稀释真实比率。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Quality {
@@ -428,10 +430,10 @@ fn quality_totals(
     let sql = format!(
         "SELECT COUNT(*),
                 COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0),
-                COALESCE(SUM(cache_read_tokens), 0),
-                COALESCE(SUM({CACHE_DENOM_SQL}), 0),
-                COALESCE(SUM(reasoning_tokens), 0),
-                COALESCE(SUM(output_tokens), 0)
+                COALESCE(SUM(CASE WHEN usage_source != 'estimated' THEN cache_read_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN usage_source != 'estimated' THEN {CACHE_DENOM_SQL} ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN usage_source != 'estimated' THEN reasoning_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN usage_source != 'estimated' THEN output_tokens ELSE 0 END), 0)
          FROM request_logs
          WHERE occurred_at >= ?1 AND occurred_at < ?2{}",
         scope.clause()
@@ -945,6 +947,42 @@ mod tests {
             "got {}",
             overview.quality.cache_hit_rate
         );
+    }
+
+    #[test]
+    fn quality_excludes_estimated_from_cache_and_reasoning() {
+        let db = open_in_memory().unwrap();
+        let now = Local::now();
+        let today = period_start(Period::Day, now);
+        {
+            let conn = db.lock().unwrap();
+            // 上游上报的真实记录（Anthropic 边界）：命中 60、输入 40 → 分母 100，推理 2、输出 10。
+            let mut provider = sample_log(today + Duration::hours(1), 40, 10, 0.5, "gpt");
+            provider.cache_read_tokens = 60;
+            provider.reasoning_tokens = 2;
+            insert_log(&conn, &provider).unwrap();
+
+            // 估算记录：输入很大但无缓存 / 推理细节，不得稀释真实比率。
+            let mut estimated = sample_log(today + Duration::hours(2), 10_000, 500, 0.5, "local");
+            estimated.usage_source = "estimated".to_string();
+            insert_log(&conn, &estimated).unwrap();
+        }
+        let conn = db.lock().unwrap();
+        let overview = build_overview(&conn, Period::Day, now, &KeyScope::All).unwrap();
+        // 命中率 = 60 / 100；若把估算的 10_000 计入会掉到约 0.006。
+        assert!(
+            (overview.quality.cache_hit_rate - 0.6).abs() < 1e-9,
+            "got {}",
+            overview.quality.cache_hit_rate
+        );
+        // 推理占比 = 2 / 10；估算的 output=500 不计入分母。
+        assert!(
+            (overview.quality.reasoning_share - 0.2).abs() < 1e-9,
+            "got {}",
+            overview.quality.reasoning_share
+        );
+        // 失败率仍覆盖全部记录（含估算）。
+        assert!((overview.quality.error_rate - 0.0).abs() < 1e-9);
     }
 
     /// 手动跑的粗略基准：`cargo test bench_overview -- --nocapture --ignored`。
