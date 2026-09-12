@@ -139,7 +139,12 @@ const MIGRATIONS: &[(i64, &str)] = &[(
 /// - `0 < v < SCHEMA_VERSION`：逐级执行 `MIGRATIONS`；
 /// - `v > SCHEMA_VERSION`：程序过旧，拒绝启动（不清库）；
 /// - 最后幂等执行 `SCHEMA` 补建新增索引 / 表，并把版本推到最新。
+///
+/// 外键约束是**每连接**的、默认关闭，必须在建库 / 迁移前显式打开。若将来某条迁移
+/// 需要重建带外键的表，需在 `apply` 的事务外先关外键、迁移后再打开并
+/// `PRAGMA foreign_key_check`（见 SQLite 官方重建表步骤）。
 pub fn configure(conn: &Connection) -> Result<(), AppError> {
+    conn.pragma_update(None, "foreign_keys", "ON")?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version > SCHEMA_VERSION {
         return Err(AppError::message(format!(
@@ -249,5 +254,42 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn configure_enables_foreign_keys() {
+        let conn = open_fresh();
+        let on: i64 = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert_eq!(on, 1, "外键约束必须在建库 / 迁移前打开");
+    }
+
+    #[test]
+    fn foreign_keys_cascade_and_reject_dangling_refs() {
+        let conn = open_fresh();
+        insert_provider(&conn, "p1");
+        conn.execute(
+            "INSERT INTO upstream_models (id, provider_id, model_id, display_name)
+             VALUES ('m1', 'p1', 'gpt', 'GPT')",
+            [],
+        )
+        .unwrap();
+
+        // 删除 provider 应级联删除其 model。
+        conn.execute("DELETE FROM providers WHERE id = 'p1'", [])
+            .unwrap();
+        let models: i64 = conn
+            .query_row("SELECT COUNT(*) FROM upstream_models", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(models, 0, "ON DELETE CASCADE 应生效");
+
+        // 引用不存在的 provider 应被外键拒绝。
+        let dangling = conn.execute(
+            "INSERT INTO upstream_models (id, provider_id, model_id, display_name)
+             VALUES ('m2', 'missing', 'x', 'X')",
+            [],
+        );
+        assert!(dangling.is_err(), "悬空外键应被拒绝");
     }
 }

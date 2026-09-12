@@ -50,6 +50,14 @@ src-tauri/src/
 - **DB 访问统一走 `db::with_db`**（`spawn_blocking` 包装），不在 handler 里直接持锁跨 `await`。
 - 端口默认 `127.0.0.1:8787`，只绑回环；网关默认关闭，由前端显式启停。
 
+## 数据库与迁移
+
+- **改结构 = 同步三处**：`db/migrations.rs` 的 `SCHEMA`（新库建表）、`SCHEMA_VERSION` +1、`MIGRATIONS` 补一条对应目标的增量语句。**只允许增量**（`ADD COLUMN` / 建表 / 建索引），严禁 `DROP` 用户数据；`request_logs` 与 `settings` 不得随升级丢失。
+- **删列 / 改类型 / 去约束走重建表**：SQLite 不支持改类型，删列限制也多。需要时用「建新表 → `INSERT ... SELECT` → `DROP` 旧表 → `RENAME` → 重建索引」的重建套路，整段写进一条迁移（`apply` 已包事务）。
+- **外键每连接开关**：`configure` 负责 `PRAGMA foreign_keys = ON`；重建带外键的表时，需在事务外先关、迁移后开并 `foreign_key_check`（事务内设置该 pragma 无效）。
+- **迁移必配测试**：模拟旧版本库，断言升级后数据保留，参考 `db/migrations.rs` 的 `migrates_without_losing_rows`。
+- **dev / release 数据库隔离**：debug 构建用 `lumen-dev.db`，release 用 `lumen.db`（同一 `app_data_dir`）。开发 / 演示数据只进 dev 库，真实账本在 release 库；调试时别指望 dev 能看到 `lumen.db` 的数据。数据库版本号描述的是**表结构**，与 app 版本无关。
+
 ## 样式与主题
 
 **颜色只有一个来源：`src/styles/theme.css`。** 所有颜色与阴影都必须写成 token 引用（`var(--ink)`、`var(--chart-ochre)`、`var(--shadow-float)`），**禁止**在页面样式或组件里硬编码十六进制 / `rgb()` 色值。`theme.css` 用 CSS `light-dark()` 按 `color-scheme` 一次声明明暗两套值，`App.css` 将其作为第一行 `@import` 引入。
