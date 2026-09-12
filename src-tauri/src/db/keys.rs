@@ -149,6 +149,7 @@ mod tests {
             status: status.to_string(),
             http_status: Some(200),
             latency_ms: Some(10),
+            ttfb_ms: None,
             error_message: None,
             request_id: None,
             is_stream: false,

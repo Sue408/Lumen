@@ -8,6 +8,7 @@ import { AttributionLine } from "./AttributionLine";
 import { ModelCostBreakdown } from "./ModelCostBreakdown";
 import { QualityLine } from "./QualityLine";
 import { UsageTrendChart } from "./UsageTrendChart";
+import { ThroughputPanel } from "./ThroughputPanel";
 import { WeeklyUsageBars, MonthlyUsageHeatmap } from "./PeriodUsageCharts";
 import { formatPeriodCursor, isCurrentPeriod, shiftPeriod } from "./period";
 import { periodLabels, type PeriodKey, type UsagePeriod } from "./usageData";
@@ -21,6 +22,10 @@ export function UsagePage() {
   const [scope, setScope] = useState(ALL_SCOPE);
   const [keys, setKeys] = useState<VirtualKey[]>([]);
   const [overview, setOverview] = useState<UsagePeriod | null>(null);
+  // 已落地的数据对应的查询键。图表重挂载只绑它，而不是 UI 选择——否则切换
+  // 周期时会先用「旧周期的数据」重挂载并初始化 y 轴，新数据到达后单侧迟滞
+  // 又不会回缩，纵轴会一直停在旧上界。
+  const [dataKey, setDataKey] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,6 +33,9 @@ export function UsagePage() {
   const { revision, lastLog } = useLiveRevision();
   const revisionRef = useRef(revision);
   const queryRef = useRef(`${periodKey}|${anchorTime}|${scope}`);
+  // 首次加载后不再回到 loading：切换周期时保留旧数据直到新数据到达，
+  // 避免中间态把页面撑矮一帧、闪出滚动条。
+  const loadedRef = useRef(false);
   const current = isCurrentPeriod(periodKey, anchor);
   const cursor = formatPeriodCursor(periodKey, anchor);
   const currentHeading =
@@ -37,6 +45,7 @@ export function UsagePage() {
         ? "本周总账"
         : `${anchor.getMonth() + 1}月总账`;
   const heading = current ? currentHeading : `${cursor}总账`;
+  const throughputTitle = heading.replace("总账", "吞吐");
 
   useEffect(() => {
     let alive = true;
@@ -69,7 +78,7 @@ export function UsagePage() {
       ) {
         return;
       }
-    } else {
+    } else if (!loadedRef.current) {
       setLoading(true);
       setError(null);
     }
@@ -78,7 +87,11 @@ export function UsagePage() {
     const scopeValue = scope === ALL_SCOPE ? null : scope;
     queryUsageOverview(periodKey, new Date(anchorTime), scopeValue)
       .then((data) => {
-        if (alive) setOverview(data);
+        if (alive) {
+          loadedRef.current = true;
+          setOverview(data);
+          setDataKey(queryKey);
+        }
       })
       .catch((err: unknown) => {
         if (!alive || isLiveRefresh) return;
@@ -211,22 +224,30 @@ export function UsagePage() {
             ))}
           </section>
           <section className="usage-charts" aria-label="本期用量图表">
-            {periodKey === "day" ? (
-              <UsageTrendChart
-                key={`trend-${periodKey}-${anchorTime}-${scope}`}
-                period={overview}
+            <div className="usage-main">
+              <ThroughputPanel
+                title={throughputTitle}
+                periodKey={periodKey}
                 anchor={anchor}
+                revision={revision}
               />
-            ) : periodKey === "week" ? (
-              <WeeklyUsageBars key={`bars-${anchorTime}-${scope}`} period={overview} />
-            ) : (
-              <MonthlyUsageHeatmap
-                key={`heat-${anchorTime}-${scope}`}
-                period={overview}
-                anchor={anchor}
-              />
-            )}
-            <ModelCostBreakdown key={`cost-${periodKey}-${anchorTime}-${scope}`} period={overview} />
+              {overview.periodKey === "day" ? (
+                <UsageTrendChart
+                  key={`trend-${dataKey}`}
+                  period={overview}
+                  anchor={anchor}
+                />
+              ) : overview.periodKey === "week" ? (
+                <WeeklyUsageBars key={`bars-${dataKey}`} period={overview} />
+              ) : (
+                <MonthlyUsageHeatmap
+                  key={`heat-${dataKey}`}
+                  period={overview}
+                  anchor={anchor}
+                />
+              )}
+            </div>
+            <ModelCostBreakdown key={`cost-${dataKey}`} period={overview} />
           </section>
         </>
       ) : null}

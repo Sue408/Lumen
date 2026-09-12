@@ -77,6 +77,7 @@ function buildMockLogs(): RequestLog[] {
         status: failed ? "error" : "success",
         httpStatus: failed ? 500 : 200,
         latencyMs: 200 + ((index * 137 + dayOffset * 41) % 1800),
+        ttfbMs: index % 3 === 0 ? 150 + ((index * 37) % 400) : null,
         errorMessage: failed ? "上游超时" : null,
         requestId: `req-${dayOffset}-${index}`,
         isStream: index % 3 === 0,

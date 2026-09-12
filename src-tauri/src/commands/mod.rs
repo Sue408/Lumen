@@ -4,6 +4,7 @@ pub mod demo;
 pub mod settings;
 pub mod status;
 pub mod system;
+pub mod telemetry;
 pub mod usage;
 
 pub use config::*;
@@ -12,4 +13,5 @@ pub use demo::*;
 pub use settings::*;
 pub use status::*;
 pub use system::*;
+pub use telemetry::*;
 pub use usage::*;

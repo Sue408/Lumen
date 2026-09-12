@@ -96,6 +96,9 @@ CREATE TABLE IF NOT EXISTS request_logs (
     status              TEXT NOT NULL,
     http_status         INTEGER,
     latency_ms          INTEGER,
+    -- 首字节耗时：流式场景下从上游响应头到达至首个数据块。生成速度据此从
+    -- 整段 latency 中扣除首字等待，非流式为 NULL。
+    ttfb_ms             INTEGER,
     error_message       TEXT,
     request_id          TEXT,
     is_stream           INTEGER NOT NULL DEFAULT 0,
@@ -128,7 +131,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_route_targets_route_model
 
 /// 最新 schema 版本。每次修改 `SCHEMA` 的**结构**（新建表 / 加列 / 改约束）就 +1，
 /// 并在 `MIGRATIONS` 补一条对应目标的增量语句；纯加索引不算（`SCHEMA` 幂等补建即可）。
-pub const SCHEMA_VERSION: i64 = 13;
+pub const SCHEMA_VERSION: i64 = 14;
 
 /// 把 `user_version` 从「目标版本 - 1」提升到「目标版本」的增量语句，按目标版本升序。
 /// 只允许增量（`ALTER TABLE ADD COLUMN` / `CREATE TABLE` / `CREATE [UNIQUE] INDEX`），
@@ -163,6 +166,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (
         13,
         "ALTER TABLE providers ADD COLUMN header_rules TEXT NOT NULL DEFAULT '{}';",
+    ),
+    (
+        14,
+        "ALTER TABLE request_logs ADD COLUMN ttfb_ms INTEGER;",
     ),
 ];
 
@@ -258,6 +265,8 @@ mod tests {
         // v11 的 session_id 带索引，先撤索引再删列。
         conn.execute("DROP INDEX idx_request_logs_session", []).unwrap();
         conn.execute("ALTER TABLE request_logs DROP COLUMN session_id", [])
+            .unwrap();
+        conn.execute("ALTER TABLE request_logs DROP COLUMN ttfb_ms", [])
             .unwrap();
         conn.execute("ALTER TABLE route_targets DROP COLUMN header_rules", [])
             .unwrap();
@@ -362,6 +371,8 @@ mod tests {
         // v11 的 session_id 带索引，SQLite 不允许直接删除已索引的列，先撤索引再删列。
         conn.execute("DROP INDEX idx_request_logs_session", []).unwrap();
         conn.execute("ALTER TABLE request_logs DROP COLUMN session_id", [])
+            .unwrap();
+        conn.execute("ALTER TABLE request_logs DROP COLUMN ttfb_ms", [])
             .unwrap();
         conn.execute("ALTER TABLE route_targets DROP COLUMN header_rules", [])
             .unwrap();

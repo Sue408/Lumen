@@ -36,6 +36,8 @@ export type RequestLog = {
   status: string;
   httpStatus: number | null;
   latencyMs: number | null;
+  /** 首字节耗时（流式）；非流式为 null。生成速度据此扣除首字等待。 */
+  ttfbMs: number | null;
   errorMessage: string | null;
   requestId: string | null;
   isStream: boolean;

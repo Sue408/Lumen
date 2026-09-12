@@ -1,0 +1,99 @@
+/*
+ * 近 24 小时吞吐区块。去脚手架：只有一条曲线，无网格、无轴线、无图例块，
+ * 右侧不留任何文字。矿物颜料只用赭石；朱砂留给失败，不在此出现。
+ *
+ * 与周期花费视图同处图表区左列（`.usage-main`），垂直排列：吞吐在上、花费
+ * 视图在下。区块刻意压低尺寸，把高度让给下方的花费视图。`min-height` 让
+ * 加载 / 空态与数据态等高，避免刷新时整页跳动。
+ */
+
+/* 图表区左列：吞吐 + 周期花费视图垂直排列，右列仍是模型花费构成。 */
+.usage-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 花费视图吃掉左列剩余高度；吞吐保持内容高度。 */
+.usage-main > .chart-panel {
+  flex: 1 1 auto;
+}
+
+.throughput-panel {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 5.25rem;
+  padding: 0.65rem 0.9rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.throughput-head h2 {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+}
+
+.throughput-body {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.throughput-figure {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.throughput-figure strong {
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 1.375rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.throughput-figure span {
+  color: var(--ink-muted);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.throughput-spark {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  height: 3.25rem;
+  overflow: visible;
+}
+
+.throughput-spark path {
+  fill: none;
+  stroke: var(--chart-ochre);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.throughput-empty {
+  margin: auto 0;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .throughput-spark path {
+    transition: d 150ms ease;
+  }
+}

@@ -5,7 +5,9 @@
   min-width: 0;
   padding: var(--chrome-h) var(--page-gutter-x) var(--page-gutter-y);
   gap: 1.5rem;
-  overflow: hidden;
+  /* 纵向长卷：内容高于视口时滚动，而不是把图表压扁或裁切。 */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .page-header {

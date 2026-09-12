@@ -352,6 +352,7 @@ pub fn build_log(context: LogContext) -> RequestLog {
         status,
         http_status,
         latency_ms: Some(latency_ms),
+        ttfb_ms: None,
         error_message,
         request_id,
         is_stream,

@@ -1,0 +1,67 @@
+const integer = new Intl.NumberFormat("zh-CN");
+
+/** 吞吐速率：tok/s，按数量级保留不同精度。 */
+export function formatRate(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0 tok/s";
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k tok/s`;
+  if (value >= 100) return `${value.toFixed(0)} tok/s`;
+  return `${value.toFixed(1)} tok/s`;
+}
+
+/** token 总量：万 / 亿 分级，零值不带单位。 */
+export function formatCompactTokens(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)} 亿`;
+  if (value >= 10_000) return `${(value / 10_000).toFixed(1)} 万`;
+  return integer.format(value);
+}
+
+/** 延迟：毫秒；达到 1000ms 转秒；缺失用破折号而非 0。 */
+export function formatLatency(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms)) return "—";
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)} s`;
+  return `${Math.round(ms)} ms`;
+}
+
+/** 成功率：取整百分比。 */
+export function formatPercent(rate: number): string {
+  if (!Number.isFinite(rate)) return "—";
+  return `${Math.round(rate * 100)}%`;
+}
+
+export type ConnectivityState = "live" | "error" | "idle";
+
+/** 成功率低于此值即视为异常（与「健康」判定的唯一阈值）。 */
+export const CONNECTIVITY_ERROR_THRESHOLD = 0.9;
+
+/** 连通性状态：冷却或低成功率为 error，无流量为 idle，其余为 live。 */
+export function connectivityState(
+  connection: { total: number; successRate: number } | null,
+  cooling: boolean,
+): ConnectivityState {
+  if (cooling) return "error";
+  if (!connection || connection.total === 0) return "idle";
+  if (connection.successRate < CONNECTIVITY_ERROR_THRESHOLD) return "error";
+  return "live";
+}
+
+/**
+ * 把桶序列映射为一条 sparkline 折线路径（去脚手架：只留线，无轴无网格）。
+ * 空序列或非法尺寸返回空串，交由调用方决定是否绘制。
+ */
+export function buildSparklinePath(
+  values: number[],
+  width: number,
+  height: number,
+): string {
+  if (values.length === 0 || width <= 0 || height <= 0) return "";
+  const max = values.reduce((current, value) => Math.max(current, value), 0);
+  const step = values.length > 1 ? width / (values.length - 1) : width;
+  return values
+    .map((value, index) => {
+      const x = index * step;
+      const y = max <= 0 ? height : height - (value / max) * height;
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(" ");
+}

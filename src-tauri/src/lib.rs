@@ -67,6 +67,8 @@ macro_rules! register_handlers {
             commands::list_log_aliases_cmd,
             commands::list_sessions_cmd,
             commands::query_usage_overview_cmd,
+            commands::query_telemetry_cmd,
+            commands::test_provider_cmd,
             commands::get_settings_cmd,
             commands::save_settings_cmd,
             commands::export_seed_cmd,

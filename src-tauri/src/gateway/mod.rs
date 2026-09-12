@@ -4,6 +4,7 @@ pub mod failover;
 pub mod forward;
 pub mod handlers;
 pub mod headers;
+pub mod probe;
 pub mod quota;
 pub mod reject;
 pub mod resolve;

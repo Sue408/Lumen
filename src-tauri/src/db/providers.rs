@@ -112,6 +112,24 @@ pub fn list_upstream_models(conn: &Connection) -> Result<Vec<UpstreamModel>, App
     Ok(models)
 }
 
+/// 提供商名下首个启用的上游模型（按展示名排序），供连通性探测选样。
+pub fn first_enabled_model(
+    conn: &Connection,
+    provider_id: &str,
+) -> Result<Option<UpstreamModel>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM upstream_models
+          WHERE provider_id = ?1 AND enabled = 1
+          ORDER BY display_name ASC
+          LIMIT 1",
+    )?;
+    let mut rows = stmt.query_map([provider_id], UpstreamModel::from_row)?;
+    match rows.next() {
+        Some(row) => Ok(Some(row?)),
+        None => Ok(None),
+    }
+}
+
 /// 所有启用上游模型的真实模型名（去重），供网关启动时后台预热 tokenizer。
 pub fn list_enabled_model_ids(conn: &Connection) -> Result<Vec<String>, AppError> {
     let mut stmt =

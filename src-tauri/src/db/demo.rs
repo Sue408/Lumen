@@ -900,6 +900,9 @@ fn generate_logs(set: &DemoSet, profile: &Profile, now: DateTime<Local>) -> Vec<
             } else {
                 None
             };
+            let latency_ms = rng.range(200, 2_600) + if is_stream { 300 } else { 0 };
+            // 流式记录给一个约三分之一的首字等待，供生成速度演示；非流式为 NULL。
+            let ttfb_ms = is_stream.then_some(latency_ms / 3);
 
             logs.push(RequestLog {
                 id: format!("demo-log-{sequence}"),
@@ -929,7 +932,8 @@ fn generate_logs(set: &DemoSet, profile: &Profile, now: DateTime<Local>) -> Vec<
                 usage_source: usage.source.as_str().to_string(),
                 status: status.to_string(),
                 http_status,
-                latency_ms: Some(rng.range(200, 2_600) + if is_stream { 300 } else { 0 }),
+                latency_ms: Some(latency_ms),
+                ttfb_ms,
                 error_message,
                 request_id: Some(format!("req_demo_{sequence}")),
                 is_stream,

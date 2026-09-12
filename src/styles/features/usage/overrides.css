@@ -4,7 +4,7 @@
  * patches so each selector appears exactly once.
  */
 .usage-page {
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(24rem, 1fr);
 }
 
 .metric-strip {

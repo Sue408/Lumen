@@ -278,6 +278,8 @@ pub fn stream_response(
             input_estimate: meta.input_estimate,
             ..UsageScanner::default()
         };
+        // 首个数据块到达的时刻：`latency_ms − ttfb_ms` 即纯生成时长。
+        let mut ttfb: Option<Duration> = None;
         // 上游长时间不吐字节即视为挂起：主动中止并把该次调用记为失败，
         // 避免连接与扫描任务被永久占住。
         let mut failure: Option<String> = None;
@@ -298,6 +300,9 @@ pub fn stream_response(
             let Some(chunk) = item else { break };
             match chunk {
                 Ok(bytes) => {
+                    if ttfb.is_none() && !bytes.is_empty() {
+                        ttfb = Some(started.elapsed());
+                    }
                     scanner.push(&bytes);
                     if tx.send(Ok(bytes)).await.is_err() {
                         // 下游（客户端）提前断开：既不能记为成功，也没必要继续读上游。
@@ -314,7 +319,7 @@ pub fn stream_response(
         }
         drop(tx);
 
-        let log = build_log(LogContext {
+        let mut log = build_log(LogContext {
             endpoint: meta.endpoint,
             alias: meta.alias,
             is_stream: true,
@@ -333,6 +338,7 @@ pub fn stream_response(
             attempt_index: meta.attempt_index,
             session_id: meta.session_id,
         });
+        log.ttfb_ms = ttfb.map(|elapsed| elapsed.as_millis() as i64);
         let _ = record(&state, log).await;
     });
 

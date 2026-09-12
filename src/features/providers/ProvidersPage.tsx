@@ -1,5 +1,15 @@
-import { useEffect, useState } from "react";
-import { Boxes, FlaskConical, Pencil, Plus, Server, Trash } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Boxes,
+  CircleAlert,
+  CircleCheck,
+  FlaskConical,
+  Loader2,
+  Pencil,
+  Plus,
+  Server,
+  Trash,
+} from "lucide-react";
 import {
   EmptyNote,
   GlyphButton,
@@ -51,6 +61,15 @@ import { ModelForm } from "./ModelForm";
 import { ProviderForm } from "./ProviderForm";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
 import { useRegisterSelection } from "../../hooks/useRegisterSelection";
+import { useLiveRevision } from "../../app/useLiveRevision";
+import { CONNECTIVITY_ERROR_THRESHOLD, formatLatency, formatPercent } from "../../lib/telemetry";
+import {
+  queryTelemetry,
+  testProvider,
+  type ProbeResult,
+  type ProviderConnectivity,
+  type TelemetrySnapshot,
+} from "../../services/telemetry";
 
 function hostLabel(baseUrl: string): string {
   try {
@@ -69,7 +88,11 @@ export function ProvidersPage() {
   const [modelError, setModelError] = useState<string | null>(null);
   const [modelDraft, setModelDraft] = useState<ModelDraft | null>(null);
   const [confirmingModelId, setConfirmingModelId] = useState<string | null>(null);
+  const [probe, setProbe] = useState<ProbeResult | null>(null);
+  const [probing, setProbing] = useState(false);
   const { busy, run } = useAsyncAction();
+  const { revision } = useLiveRevision();
+  const [telemetry, setTelemetry] = useState<TelemetrySnapshot | null>(null);
 
   const {
     selectedId,
@@ -98,8 +121,16 @@ export function ProvidersPage() {
       setFormError(null);
       setModelError(null);
       setConfirmingModelId(null);
+      setProbe(null);
     },
   });
+
+  const connectivityById = useMemo(() => {
+    const map = new Map<string, ProviderConnectivity>();
+    telemetry?.connectivity.forEach((item) => map.set(item.providerId, item));
+    return map;
+  }, [telemetry]);
+  const coolingModels = useMemo(() => new Set(telemetry?.cooling ?? []), [telemetry]);
 
   const selectedProvider =
     selectedId && selectedId !== "new"
@@ -109,6 +140,32 @@ export function ProvidersPage() {
   const autoBrand = draft
     ? detectBrand([draft.name, draft.baseUrl, ...selectedModels.map((model) => model.modelId)])
     : null;
+
+  useEffect(() => {
+    let alive = true;
+    queryTelemetry("day")
+      .then((next) => {
+        if (alive) setTelemetry(next);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [revision]);
+
+  const runProbe = async () => {
+    if (!selectedProvider) return;
+    setProbe(null);
+    setProbing(true);
+    try {
+      const result = await testProvider(selectedProvider.id);
+      setProbe(result);
+    } catch (error) {
+      setProbe({ ok: false, httpStatus: null, latencyMs: 0, model: "", error: String(error) });
+    } finally {
+      setProbing(false);
+    }
+  };
 
   const refreshLists = async () => {
     const [nextProviders, nextModels] = await Promise.all([
@@ -369,6 +426,16 @@ export function ProvidersPage() {
                       provider.baseUrl,
                       ...providerModels.map((model) => model.modelId),
                     ]);
+                    const connection = connectivityById.get(provider.id) ?? null;
+                    const isCooling = providerModels.some((model) => coolingModels.has(model.id));
+                    const warn =
+                      isCooling ||
+                      (connection !== null &&
+                        connection.total > 0 &&
+                        connection.successRate < CONNECTIVITY_ERROR_THRESHOLD);
+                    const meta = provider.enabled
+                      ? `${providerModels.length} 个模型${connection ? ` · 24h ${formatPercent(connection.successRate)} · ${formatLatency(connection.avgLatencyMs)}` : ""}${isCooling ? " · 冷却中" : ""}`
+                      : `已停用 · ${providerModels.length} 个模型`;
                     return (
                       <button
                         className={`register-select${selectedId === provider.id ? " is-selected" : ""}${provider.enabled ? "" : " is-off"}`}
@@ -381,9 +448,7 @@ export function ProvidersPage() {
                         <BrandGlyph brand={brand} size={20} tint={provider.enabled ? provider.iconTint : "ink"} fallback={<Server aria-hidden="true" />} />
                         <span className="register-body">
                           <span className="register-name" title={provider.name}>{provider.name}</span>
-                          <span className="register-meta">
-                            {provider.enabled ? `${providerModels.length} 个模型` : `已停用 · ${providerModels.length} 个模型`}
-                          </span>
+                          <span className={`register-meta${warn ? " is-warn" : ""}`}>{meta}</span>
                         </span>
                         <StatusDot alive={provider.enabled} />
                       </button>
@@ -419,8 +484,16 @@ export function ProvidersPage() {
                     <div className="sheet-actions">
                       {selectedId !== "new" ? (
                         <>
-                          <GlyphButton label="连通性测试尚未接入" disabled onClick={() => {}}>
-                            <FlaskConical aria-hidden="true" />
+                          <GlyphButton
+                            label={probing ? "正在探测…" : "连通性测试"}
+                            disabled={busy || probing}
+                            onClick={() => void runProbe()}
+                          >
+                            {probing ? (
+                              <Loader2 className="is-spinning" aria-hidden="true" />
+                            ) : (
+                              <FlaskConical aria-hidden="true" />
+                            )}
                           </GlyphButton>
                           <GlyphButton label="删除该上游" danger disabled={busy} onClick={() => setConfirmingDelete(true)}>
                             <Trash aria-hidden="true" />
@@ -441,6 +514,22 @@ export function ProvidersPage() {
                       </span>
                       <span className="sheet-summary-sep" aria-hidden="true">·</span>
                       <span>{selectedModels.length} 个模型</span>
+                    </p>
+                  ) : null}
+
+                  {probe ? (
+                    <p
+                      className={`probe-result${probe.ok ? " is-ok" : " is-fail"}`}
+                      role="status"
+                    >
+                      {probe.ok ? (
+                        <CircleCheck aria-hidden="true" />
+                      ) : (
+                        <CircleAlert aria-hidden="true" />
+                      )}
+                      {probe.ok
+                        ? `连通正常 · ${formatLatency(probe.latencyMs)}`
+                        : `探测失败：${probe.error ?? "未知错误"}`}
                     </p>
                   ) : null}
 

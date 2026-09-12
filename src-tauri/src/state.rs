@@ -199,6 +199,18 @@ impl AppState {
             .unwrap_or(false)
     }
 
+    /// 当前所有处于冷却中的上游模型 id（顺带清理过期项）。供连通性展示叠加。
+    pub fn cooling_snapshot(&self) -> Vec<String> {
+        let now = Instant::now();
+        self.cooldowns
+            .lock()
+            .map(|mut guard| {
+                guard.until.retain(|_, deadline| *deadline > now);
+                guard.until.keys().cloned().collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// 将某上游模型标记为冷却一段时间。
     pub fn mark_cooling(&self, upstream_model_id: &str, duration: Duration) {
         if let Ok(mut guard) = self.cooldowns.lock() {

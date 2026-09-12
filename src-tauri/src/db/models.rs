@@ -383,6 +383,8 @@ pub struct RequestLog {
     pub status: String,
     pub http_status: Option<i64>,
     pub latency_ms: Option<i64>,
+    /// 首字节耗时：流式场景下从上游响应头到达至首个数据块；非流式为 `None`。
+    pub ttfb_ms: Option<i64>,
     pub error_message: Option<String>,
     pub request_id: Option<String>,
     pub is_stream: bool,
@@ -420,6 +422,7 @@ impl RequestLog {
             status: row.get("status")?,
             http_status: row.get("http_status")?,
             latency_ms: row.get("latency_ms")?,
+            ttfb_ms: row.get("ttfb_ms")?,
             error_message: row.get("error_message")?,
             request_id: row.get("request_id")?,
             is_stream: row.get::<_, i64>("is_stream")? != 0,

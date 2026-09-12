@@ -10,6 +10,7 @@ pub mod routes;
 pub mod seed;
 pub mod settings;
 pub mod stats;
+pub mod telemetry;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
