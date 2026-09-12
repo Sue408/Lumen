@@ -46,7 +46,8 @@ pub fn save_virtual_key(
             input.quota_period,
             created_at
         ],
-    )?;
+    )
+    .map_err(|error| AppError::from_constraint(error, "该密钥已存在，请换一个"))?;
     let mut stmt = conn.prepare("SELECT * FROM virtual_keys WHERE id = ?1")?;
     let mut rows = stmt.query_map([&id], VirtualKey::from_row)?;
     rows.next()
@@ -177,6 +178,16 @@ mod tests {
             .unwrap()
             .expect("应能查到启用密钥");
         assert_eq!(found.id, saved.id);
+    }
+
+    #[test]
+    fn duplicate_key_reports_a_friendly_error() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        save_virtual_key(&conn, &input(None, true)).unwrap();
+        // 同一个 key、不同 id：命中 UNIQUE(key)，应翻译成面向用户的提示而非裸 SQL 错误。
+        let error = save_virtual_key(&conn, &input(None, true)).unwrap_err();
+        assert!(matches!(error, AppError::Message(_)), "got {error:?}");
     }
 
     #[test]

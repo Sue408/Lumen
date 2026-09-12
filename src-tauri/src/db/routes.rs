@@ -109,7 +109,10 @@ pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTarg
             input.enabled as i64,
             created_at
         ],
-    )?;
+    )
+    .map_err(|error| {
+        AppError::from_constraint(error, format!("路由别名已存在：{}", input.alias))
+    })?;
     tx.execute("DELETE FROM route_targets WHERE route_id = ?1", [&id])?;
     for target in &input.targets {
         tx.execute(
@@ -281,5 +284,28 @@ mod tests {
             },
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn duplicate_alias_reports_a_friendly_error() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let model = seed_model(&conn, "openai", "gpt");
+        let input = |alias: &str| RouteInput {
+            id: None,
+            alias: alias.into(),
+            display_name: "R".into(),
+            protocol: "openai".into(),
+            enabled: true,
+            targets: vec![RouteTargetInput {
+                upstream_model_id: model.clone(),
+                priority: 0,
+                enabled: true,
+            }],
+        };
+        save_route(&conn, &input("r")).unwrap();
+        // 不同 id、相同 alias：命中 UNIQUE(alias)，应翻译成面向用户的提示。
+        let error = save_route(&conn, &input("r")).unwrap_err();
+        assert!(matches!(error, AppError::Message(_)), "got {error:?}");
     }
 }

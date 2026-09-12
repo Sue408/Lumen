@@ -43,6 +43,24 @@ impl AppError {
     pub fn message(message: impl Into<String>) -> Self {
         AppError::Message(message.into())
     }
+
+    /// 唯一约束冲突映射为面向用户的提示，其它数据库错误原样上报。
+    pub fn from_constraint(error: rusqlite::Error, message: impl Into<String>) -> Self {
+        if is_unique_violation(&error) {
+            AppError::Message(message.into())
+        } else {
+            AppError::Db(error)
+        }
+    }
+}
+
+/// SQLite 唯一约束（UNIQUE / PRIMARY KEY）冲突。
+fn is_unique_violation(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(inner, _)
+            if inner.code == rusqlite::ErrorCode::ConstraintViolation
+    )
 }
 
 impl serde::Serialize for AppError {

@@ -132,7 +132,13 @@ impl UsageScanner {
             return;
         };
         let data = data.trim();
-        if data.is_empty() || data == "[DONE]" {
+        if data.is_empty() {
+            return;
+        }
+        // `[DONE]` 是 SSE 的通用终止符：视为正常收尾，避免把「用量挂在非空
+        // choices 块上、随后以 [DONE] 结束」的上游误判成 partial。
+        if data == "[DONE]" {
+            self.finalized = true;
             return;
         }
         let Ok(value) = serde_json::from_str::<Value>(data) else {
@@ -366,6 +372,20 @@ mod tests {
         scanner.push(b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n");
         scanner.push(
             b"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,\"total_tokens\":120}}\n\n",
+        );
+        scanner.push(b"data: [DONE]\n\n");
+        let totals = scanner.totals();
+        assert_eq!(totals.source, UsageSource::Provider);
+        assert_eq!(totals.input_tokens, 100);
+        assert_eq!(totals.output_tokens, 20);
+    }
+
+    #[test]
+    fn scanner_finalizes_openai_stream_on_done() {
+        let mut scanner = make_scanner(PROTOCOL_OPENAI);
+        // usage 挂在最后一个非空 choices 块上，随后以 [DONE] 结束。
+        scanner.push(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20}}\n\n",
         );
         scanner.push(b"data: [DONE]\n\n");
         let totals = scanner.totals();

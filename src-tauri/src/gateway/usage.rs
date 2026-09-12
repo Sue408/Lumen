@@ -257,8 +257,15 @@ pub fn build_log(context: LogContext) -> RequestLog {
         usage,
     } = context;
 
+    // 只有拿到 input/output 或缓存计数时才能按 token 计价。仅有 total_tokens 的
+    // 响应无法拆分计价，保守记 0，并保留 usage_source = partial 供账本筛出。
+    let billable = usage.input_tokens > 0
+        || usage.output_tokens > 0
+        || usage.cache_read_tokens > 0
+        || usage.cache_creation_tokens > 0;
     let cost = match (&route, usage.source) {
         (Some(_), UsageSource::Missing) => 0.0,
+        (Some(_), _) if !billable => 0.0,
         (Some(route), _) => calculate_cost(
             &usage,
             &Pricing {
@@ -514,5 +521,55 @@ mod tests {
         assert_eq!(merged.input, Some(25));
         assert_eq!(merged.output, Some(15));
         assert_eq!(merged.cache_read, Some(10));
+    }
+
+    fn sample_route() -> ResolvedRoute {
+        ResolvedRoute {
+            route_id: "r1".into(),
+            upstream_model_id: "m1".into(),
+            model_id: "gpt-x".into(),
+            display_name: "GPT X".into(),
+            input_price: 3.0,
+            output_price: 15.0,
+            cache_read_price: 0.0,
+            cache_creation_price: 0.0,
+            provider_id: "p1".into(),
+            base_url: "https://example.com/v1".into(),
+            api_key: "secret".into(),
+            auth_scheme: "bearer".into(),
+            route_protocol: PROTOCOL_OPENAI.into(),
+            upstream_protocol: PROTOCOL_OPENAI.into(),
+            extra_headers: std::collections::BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn total_only_usage_is_partial_and_unbilled() {
+        let usage =
+            extract_usage(&json!({ "usage": { "total_tokens": 150 } }), PROTOCOL_OPENAI).unwrap();
+        assert_eq!(usage.total_tokens, 150);
+        assert_eq!(usage.input_tokens, 0);
+        assert_eq!(usage.output_tokens, 0);
+        assert_eq!(usage.source, UsageSource::Partial);
+
+        let log = build_log(LogContext {
+            endpoint: "/v1/chat/completions".into(),
+            method: "POST".into(),
+            alias: "lumen/x".into(),
+            kind: "chat".into(),
+            is_stream: false,
+            route: Some(sample_route()),
+            latency_ms: 1,
+            status: "success".into(),
+            http_status: Some(200),
+            error_message: None,
+            request_id: None,
+            virtual_key_id: None,
+            usage,
+        });
+        // 拆分未知 → 保守不结算，但保留 total 与 partial 标记。
+        assert_eq!(log.cost, 0.0);
+        assert_eq!(log.total_tokens, 150);
+        assert_eq!(log.usage_source, "partial");
     }
 }

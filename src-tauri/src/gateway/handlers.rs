@@ -379,7 +379,17 @@ fn reject_status(error: &AppError) -> i64 {
     }
 }
 
-/// 从 `Authorization: Bearer` 或 `x-api-key` 中取出密钥原文。
+fn header_key(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+/// 从 `Authorization: Bearer`、`x-api-key` 或 `x-goog-api-key` 中取出密钥原文。
+/// 后者用于兼容原生 Gemini 客户端的鉴权习惯。
 fn extract_key(headers: &HeaderMap) -> Option<String> {
     if let Some(value) = headers
         .get(header::AUTHORIZATION)
@@ -396,12 +406,7 @@ fn extract_key(headers: &HeaderMap) -> Option<String> {
             }
         }
     }
-    headers
-        .get("x-api-key")
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    header_key(headers, "x-api-key").or_else(|| header_key(headers, "x-goog-api-key"))
 }
 
 /// 解析并校验虚拟密钥；缺失、未知或已停用一律视为未授权。
@@ -990,6 +995,29 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].endpoint, "/v1beta/models/lumen/gemini:generateContent");
         assert_eq!(logs[0].total_tokens, 120);
+    }
+
+    #[tokio::test]
+    async fn gemini_endpoint_accepts_goog_api_key() {
+        let app = axum::Router::new()
+            .route("/models/{model_action}", axum::routing::post(gemini_upstream));
+        let base_url = serve(app).await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "gemini", "lumen/gemini");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1beta/models/lumen/gemini:generateContent")
+            .header("content-type", "application/json")
+            .header("x-goog-api-key", TEST_KEY)
+            .body(Body::from(json!({ "contents": [] }).to_string()))
+            .unwrap();
+        let response = router.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
