@@ -12,9 +12,21 @@ export type LogFilter = {
   from?: string | null;
   to?: string | null;
   usageSource?: UsageSource | "unreliable" | null;
+  sessionId?: string | null;
   attentionOnly?: boolean | null;
   limit?: number | null;
   offset?: number | null;
+};
+
+export type SessionSummary = {
+  sessionId: string;
+  virtualKeyId: string | null;
+  firstSeen: string;
+  lastSeen: string;
+  requests: number;
+  totalTokens: number;
+  cost: number;
+  models: string[];
 };
 
 const clone = <T>(value: T): T => structuredClone(value);
@@ -69,6 +81,7 @@ function buildMockLogs(): RequestLog[] {
         requestId: `req-${dayOffset}-${index}`,
         isStream: index % 3 === 0,
         attemptIndex: 0,
+        sessionId: null,
       });
     }
   }
@@ -160,4 +173,16 @@ export async function listLogAliases(): Promise<string[]> {
     return [...new Set(mockLogs.map((log) => log.routeAlias).filter((alias): alias is string => alias !== null))];
   }
   return invoke<string[]>("list_log_aliases_cmd");
+}
+
+/** 会话维度聚合。浏览器 mock 无会话数据，返回空表。 */
+export async function listSessions(
+  filter?: LogFilter,
+  limit?: number,
+): Promise<SessionSummary[]> {
+  if (!isTauriRuntime(window)) return [];
+  return invoke<SessionSummary[]>("list_sessions_cmd", {
+    filter: filter ?? null,
+    limit: limit ?? null,
+  });
 }

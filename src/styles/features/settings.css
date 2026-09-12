@@ -43,13 +43,13 @@
 .settings-page .settings-notice {
   margin: 0;
   color: var(--ink-muted);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
 }
 
 .settings-page .settings-footer {
   padding-top: 0.25rem;
   color: var(--ink-faint);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
@@ -80,7 +80,7 @@
 .settings-page .settings-row-note {
   grid-column: 1 / -1;
   color: var(--ink-muted);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
 }
 
 .settings-page .settings-row-control {
@@ -129,7 +129,7 @@
   border: 1px solid transparent;
   border-radius: 2px;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
@@ -153,7 +153,7 @@
   overflow: hidden;
   color: var(--ink-muted);
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -194,4 +194,30 @@
   .settings-page .settings-segment button {
     transition: none;
   }
+}
+
+.settings-page .settings-textarea {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 6rem;
+  padding: 0.5rem 0.6rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line-control);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.settings-page .settings-textarea:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.settings-page .settings-textarea:disabled {
+  color: var(--ink-muted);
+  background: var(--surface-hover-soft);
+  cursor: not-allowed;
 }

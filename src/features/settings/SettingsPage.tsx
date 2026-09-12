@@ -5,6 +5,7 @@ import { isTauriRuntime } from "../../components/tauriRuntime";
 import { useGatewayStatus } from "../../app/useGatewayStatus";
 import type { Theme } from "../../app/useTheme";
 import {
+  DEFAULT_SESSION_HEADERS,
   exportConfig,
   getAppVersion,
   getAutostart,
@@ -20,6 +21,7 @@ import { AppearanceSection } from "./AppearanceSection";
 import { DataSection } from "./DataSection";
 import { DevToolsSection } from "./DevToolsSection";
 import { GatewaySection } from "./GatewaySection";
+import { SessionSection } from "./SessionSection";
 
 type SettingsPageProps = {
   theme: Theme;
@@ -32,6 +34,7 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
   const [port, setPort] = useState("");
   const [savedPort, setSavedPort] = useState<number | null>(null);
   const [closeToTray, setCloseToTray] = useState(true);
+  const [sessionHeaders, setSessionHeaders] = useState<string[]>([...DEFAULT_SESSION_HEADERS]);
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [appVersion, setAppVersion] = useState("");
   const closeToTraySaving = useRef(false);
@@ -59,6 +62,7 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
         setPort(String(settings.port));
         setSavedPort(settings.port);
         setCloseToTray(settings.closeToTray);
+        setSessionHeaders(settings.sessionHeaders ?? [...DEFAULT_SESSION_HEADERS]);
       } catch (err) {
         if (alive) setError(String(err));
       } finally {
@@ -91,10 +95,11 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
     setBusy(true);
     setFormError(null);
     try {
-      const saved = await saveSettings({ port: value, closeToTray });
+      const saved = await saveSettings({ port: value, closeToTray, sessionHeaders });
       setPort(String(saved.port));
       setSavedPort(saved.port);
       setCloseToTray(saved.closeToTray);
+      setSessionHeaders(saved.sessionHeaders);
       setError(null);
       setNotice("端口已保存，下次启动生效");
     } catch (err) {
@@ -110,7 +115,7 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
     const previous = closeToTray;
     setCloseToTray(next);
     try {
-      const saved = await saveSettings({ port: savedPort, closeToTray: next });
+      const saved = await saveSettings({ port: savedPort, closeToTray: next, sessionHeaders });
       setCloseToTray(saved.closeToTray);
       setError(null);
     } catch (err) {
@@ -119,6 +124,21 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
       setError(String(err));
     } finally {
       closeToTraySaving.current = false;
+    }
+  };
+
+  const saveSessionHeaders = async (headers: string[]) => {
+    if (savedPort === null) return;
+    setBusy(true);
+    try {
+      const saved = await saveSettings({ port: savedPort, closeToTray, sessionHeaders: headers });
+      setSessionHeaders(saved.sessionHeaders);
+      setError(null);
+      setNotice("会话识别头已保存");
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -283,6 +303,12 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
               />
 
               <AppearanceSection theme={theme} onToggleTheme={onToggleTheme} />
+
+              <SessionSection
+                headers={sessionHeaders}
+                busy={busy}
+                onSave={(headers) => void saveSessionHeaders(headers)}
+              />
 
               <DataSection
                 busy={busy}

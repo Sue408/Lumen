@@ -7,6 +7,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use crate::db::models::RequestLog;
+use crate::db::settings::default_session_headers;
 use crate::db::Db;
 
 pub const DEFAULT_PORT: u16 = 8787;
@@ -100,6 +101,8 @@ pub struct AppState {
     pub gateway: Mutex<Option<GatewayHandle>>,
     port: Mutex<u16>,
     close_to_tray: Mutex<bool>,
+    /// 会话候选头名表（随设置保存刷新）。
+    session_headers: Mutex<Vec<String>>,
     cooldowns: Mutex<Cooldowns>,
 }
 
@@ -117,7 +120,21 @@ impl AppState {
             gateway: Mutex::new(None),
             port: Mutex::new(port),
             close_to_tray: Mutex::new(true),
+            session_headers: Mutex::new(default_session_headers()),
             cooldowns: Mutex::new(Cooldowns::default()),
+        }
+    }
+
+    pub fn session_headers(&self) -> Vec<String> {
+        self.session_headers
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn set_session_headers(&self, session_headers: Vec<String>) {
+        if let Ok(mut guard) = self.session_headers.lock() {
+            *guard = session_headers;
         }
     }
 

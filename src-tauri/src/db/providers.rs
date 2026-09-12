@@ -41,6 +41,9 @@ fn routes_using_provider(conn: &Connection, provider_id: &str) -> Result<Vec<Str
 }
 
 pub fn save_provider(conn: &Connection, input: &ProviderInput) -> Result<Provider, AppError> {
+    // 头规则与网关求值共用一套校验，非法配置在保存期就拒绝。
+    crate::gateway::headers::validate_provider_header_rules(&input.header_rules)
+        .map_err(AppError::message)?;
     let id = input
         .id
         .clone()
@@ -60,10 +63,11 @@ pub fn save_provider(conn: &Connection, input: &ProviderInput) -> Result<Provide
     }
     let created_at = chrono::Utc::now().to_rfc3339();
     let extra_headers = serde_json::to_string(&input.extra_headers)?;
+    let header_rules = serde_json::to_string(&input.header_rules)?;
     conn.execute(
         "INSERT INTO providers
-            (id, name, base_url, api_key, auth_scheme, protocol, extra_headers, icon, icon_tint, enabled, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            (id, name, base_url, api_key, auth_scheme, protocol, extra_headers, header_rules, icon, icon_tint, enabled, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             base_url = excluded.base_url,
@@ -71,6 +75,7 @@ pub fn save_provider(conn: &Connection, input: &ProviderInput) -> Result<Provide
             auth_scheme = excluded.auth_scheme,
             protocol = excluded.protocol,
             extra_headers = excluded.extra_headers,
+            header_rules = excluded.header_rules,
             icon = excluded.icon,
             icon_tint = excluded.icon_tint,
             enabled = excluded.enabled",
@@ -82,6 +87,7 @@ pub fn save_provider(conn: &Connection, input: &ProviderInput) -> Result<Provide
             input.auth_scheme,
             input.protocol,
             extra_headers,
+            header_rules,
             input.icon,
             input.icon_tint,
             input.enabled as i64,
@@ -180,7 +186,7 @@ pub fn delete_upstream_model(conn: &Connection, id: &str) -> Result<(), AppError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::models::{RouteInput, RouteTargetInput};
+    use crate::db::models::{HeaderReplace, ProviderHeaderRules, RouteInput, RouteTargetInput};
     use crate::db::open_in_memory;
     use crate::db::routes::save_route;
     use std::collections::BTreeMap;
@@ -196,6 +202,7 @@ mod tests {
                 auth_scheme: "bearer".into(),
                 protocol: protocol.into(),
                 extra_headers: BTreeMap::new(),
+                header_rules: Default::default(),
                 icon: None,
                 icon_tint: "ink".into(),
                 enabled: true,
@@ -215,6 +222,7 @@ mod tests {
                 auth_scheme: provider.auth_scheme.clone(),
                 protocol: protocol.into(),
                 extra_headers: BTreeMap::new(),
+                header_rules: Default::default(),
                 icon: None,
                 icon_tint: "ink".into(),
                 enabled: true,
@@ -293,6 +301,49 @@ mod tests {
             icon_tint: "ink".into(),
             enabled: true,
         }
+    }
+
+    #[test]
+    fn saves_and_reads_provider_header_rules() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = save_provider(
+            &conn,
+            &ProviderInput {
+                id: None,
+                name: "p".into(),
+                base_url: "https://example.com/v1".into(),
+                api_key: "secret".into(),
+                auth_scheme: "bearer".into(),
+                protocol: "openai".into(),
+                extra_headers: BTreeMap::new(),
+                header_rules: ProviderHeaderRules {
+                    forward: vec!["session_id".into()],
+                    replace: vec![HeaderReplace {
+                        from: "session_id".into(),
+                        to: "x-opencode-session".into(),
+                    }],
+                    remove: vec!["x-internal*".into()],
+                },
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+        .unwrap();
+        let saved = get_provider(&conn, &provider.id).unwrap().unwrap();
+        assert_eq!(saved.header_rules, provider.header_rules);
+
+        // 空规则落库为 `{}`。
+        let empty = seed_provider(&conn, "anthropic");
+        let raw: String = conn
+            .query_row(
+                "SELECT header_rules FROM providers WHERE id = ?1",
+                [&empty.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(raw, "{}");
     }
 
     #[test]

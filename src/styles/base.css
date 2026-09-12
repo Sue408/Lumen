@@ -31,7 +31,7 @@
   --text-metric: clamp(1.45rem, 1rem + 1.5vw, 2rem);
   --text-title: clamp(0.875rem, 0.82rem + 0.2vw, 0.9375rem);
   --text-body: clamp(0.9rem, 0.8rem + 0.45vw, 1.125rem);
-  --text-small: clamp(0.6875rem, 0.63rem + 0.25vw, 0.8125rem);
+  --text-small: clamp(0.75rem, 0.68rem + 0.25vw, 0.875rem);
 
   font-family: var(--font-sans);
   color: var(--ink);

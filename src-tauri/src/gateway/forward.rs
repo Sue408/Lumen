@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::body::{Body, Bytes};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use serde_json::Value;
@@ -12,6 +12,7 @@ use crate::db::models::{
     contains_cache_read, PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
 };
 use crate::error::AppError;
+use crate::gateway::headers::build_upstream_headers;
 use crate::gateway::resolve::ResolvedRoute;
 use crate::gateway::usage::{
     build_log, extract_fields, finalize, record, LogContext, UsageFields, UsageSource, UsageTotals,
@@ -46,24 +47,29 @@ pub fn upstream_path(protocol: &str, model_id: &str, is_stream: bool) -> String 
     }
 }
 
-/// 向上游发起请求：按 provider 注入自定义头与鉴权，用提供商密钥替换客户端鉴权。
+/// 向上游发起请求：按 provider 的四意图（内置底座 / 透传 / 替换 / 添加 / 移除）构建上游头，
+/// 最后**无条件**注入鉴权。鉴权永远在规则之后，硬黑名单在求值阶段剥离。
 pub async fn send(
     state: &AppState,
     route: &ResolvedRoute,
     body: &Value,
     upstream_path: &str,
     timeout: Option<Duration>,
+    client_headers: &HeaderMap,
 ) -> Result<reqwest::Response, AppError> {
     let url = upstream_url(&route.base_url, upstream_path);
+    let mapped = build_upstream_headers(client_headers, &route.header_rules, &route.extra_headers);
+
     let mut request = state.http.post(url).json(body);
     if let Some(timeout) = timeout {
         request = request.timeout(timeout);
     }
 
-    for (name, value) in &route.extra_headers {
-        request = request.header(name.as_str(), value.as_str());
+    for (name, value) in mapped.iter() {
+        request = request.header(name, value);
     }
 
+    // 鉴权最后注入、无条件覆盖。
     if !route.api_key.is_empty() {
         request = match route.auth_scheme.as_str() {
             "x-api-key" => request.header("x-api-key", &route.api_key),
@@ -72,9 +78,8 @@ pub async fn send(
         };
     }
 
-    if route.upstream_protocol == PROTOCOL_ANTHROPIC
-        && !route.extra_headers.contains_key("anthropic-version")
-    {
+    // Anthropic 默认版本头：仅当上游头（规则结果或 provider 基线）里缺失时补。
+    if route.upstream_protocol == PROTOCOL_ANTHROPIC && !mapped.contains_key("anthropic-version") {
         request = request.header("anthropic-version", "2023-06-01");
     }
     Ok(request.send().await?)
@@ -218,14 +223,20 @@ impl UsageScanner {
     }
 }
 
+/// 流式收尾写日志所需的请求身份。打包传入，避免 `stream_response` 参数持续膨胀。
+pub struct StreamMeta {
+    pub alias: String,
+    pub endpoint: String,
+    pub virtual_key_id: Option<String>,
+    pub attempt_index: i64,
+    pub session_id: Option<String>,
+}
+
 /// 透传上游 SSE 流，同时在后台扫描末块 usage 并落库。
 pub fn stream_response(
     state: Arc<AppState>,
     route: ResolvedRoute,
-    alias: String,
-    endpoint: String,
-    virtual_key_id: Option<String>,
-    attempt_index: i64,
+    meta: StreamMeta,
     response: reqwest::Response,
 ) -> Response {
     let status = response.status();
@@ -275,8 +286,8 @@ pub fn stream_response(
         drop(tx);
 
         let log = build_log(LogContext {
-            endpoint,
-            alias,
+            endpoint: meta.endpoint,
+            alias: meta.alias,
             is_stream: true,
             route: Some(route),
             latency_ms: started.elapsed().as_millis() as i64,
@@ -288,9 +299,10 @@ pub fn stream_response(
             http_status: Some(status.as_u16() as i64),
             error_message: failure,
             request_id,
-            virtual_key_id,
+            virtual_key_id: meta.virtual_key_id,
             usage: scanner.totals(),
-            attempt_index,
+            attempt_index: meta.attempt_index,
+            session_id: meta.session_id,
         });
         let _ = record(&state, log).await;
     });

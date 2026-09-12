@@ -5,6 +5,14 @@ import type {
   Protocol,
   UpstreamModel,
 } from "../../services/config";
+import type { ProviderHeaderRules } from "../../services/config/types.ts";
+import {
+  linesToText,
+  replacesToText,
+  textToLines,
+  textToReplaces,
+  validateProviderHeaderRules,
+} from "./providerHeaderModel.ts";
 
 export const authSchemeLabel: Record<AuthScheme, string> = {
   bearer: "Bearer",
@@ -50,6 +58,9 @@ export type ProviderDraft = {
   authScheme: AuthScheme;
   protocol: Protocol;
   extraHeadersText: string;
+  forwardText: string;
+  replaceText: string;
+  removeText: string;
   icon: string | null;
   iconTint: IconTint;
   enabled: boolean;
@@ -64,13 +75,26 @@ export function emptyProviderDraft(): ProviderDraft {
     authScheme: "bearer",
     protocol: "openai",
     extraHeadersText: "",
+    forwardText: "",
+    replaceText: "",
+    removeText: "",
     icon: null,
     iconTint: "ink",
     enabled: true,
   };
 }
 
+/** 由草稿的文本字段构建 provider 头规则（透传 / 替换 / 移除）。 */
+export function draftHeaderRules(draft: ProviderDraft): ProviderHeaderRules {
+  return {
+    forward: textToLines(draft.forwardText),
+    replace: textToReplaces(draft.replaceText),
+    remove: textToLines(draft.removeText),
+  };
+}
+
 export function providerToDraft(provider: Provider): ProviderDraft {
+  const rules = provider.headerRules ?? { forward: [], replace: [], remove: [] };
   return {
     id: provider.id,
     name: provider.name,
@@ -79,6 +103,9 @@ export function providerToDraft(provider: Provider): ProviderDraft {
     authScheme: provider.authScheme,
     protocol: provider.protocol,
     extraHeadersText: formatExtraHeaders(provider.extraHeaders),
+    forwardText: linesToText(rules.forward ?? []),
+    replaceText: replacesToText(rules.replace ?? []),
+    removeText: linesToText(rules.remove ?? []),
     icon: provider.icon,
     iconTint: provider.iconTint,
     enabled: provider.enabled,
@@ -95,7 +122,8 @@ export function isProviderDraftDirty(draft: ProviderDraft, original: ProviderDra
     draft.icon !== original.icon ||
     draft.iconTint !== original.iconTint ||
     draft.enabled !== original.enabled ||
-    !sameHeaders(parseExtraHeaders(draft.extraHeadersText), parseExtraHeaders(original.extraHeadersText))
+    !sameHeaders(parseExtraHeaders(draft.extraHeadersText), parseExtraHeaders(original.extraHeadersText)) ||
+    JSON.stringify(draftHeaderRules(draft)) !== JSON.stringify(draftHeaderRules(original))
   );
 }
 
@@ -105,6 +133,8 @@ export function validateProviderDraft(draft: ProviderDraft): string | null {
   if (baseUrl.length === 0) return "请填写上游地址。";
   if (!/^https?:\/\//i.test(baseUrl)) return "上游地址需以 http:// 或 https:// 开头。";
   if (draft.id === null && draft.apiKey.trim().length === 0) return "请填写 API Key。";
+  const headerMessage = validateProviderHeaderRules(draftHeaderRules(draft));
+  if (headerMessage) return `请求头映射：${headerMessage}`;
   return null;
 }
 

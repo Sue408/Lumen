@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS providers (
     auth_scheme  TEXT NOT NULL DEFAULT 'bearer',
     protocol     TEXT NOT NULL DEFAULT 'openai',
     extra_headers TEXT NOT NULL DEFAULT '{}',
+    header_rules TEXT NOT NULL DEFAULT '{}',
     icon         TEXT,
     icon_tint    TEXT NOT NULL DEFAULT 'ink',
     enabled      INTEGER NOT NULL DEFAULT 1,
@@ -51,7 +52,8 @@ CREATE TABLE IF NOT EXISTS route_targets (
     route_id          TEXT NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
     upstream_model_id TEXT NOT NULL REFERENCES upstream_models(id) ON DELETE CASCADE,
     priority          INTEGER NOT NULL DEFAULT 0,
-    enabled           INTEGER NOT NULL DEFAULT 1
+    enabled           INTEGER NOT NULL DEFAULT 1,
+    header_rules      TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS virtual_keys (
@@ -97,7 +99,8 @@ CREATE TABLE IF NOT EXISTS request_logs (
     error_message       TEXT,
     request_id          TEXT,
     is_stream           INTEGER NOT NULL DEFAULT 0,
-    attempt_index       INTEGER NOT NULL DEFAULT 0
+    attempt_index       INTEGER NOT NULL DEFAULT 0,
+    session_id          TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_request_logs_occurred ON request_logs(occurred_at);
@@ -113,6 +116,9 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_key_status_occurred
 -- 用量口径的筛选与「待处理」的 OR 都按 usage_source 取行：有它，存疑计数走覆盖
 -- 索引、attention 的 OR 走 MULTI-INDEX OR，否则两者都是全表扫描。
 CREATE INDEX IF NOT EXISTS idx_request_logs_usage_source ON request_logs(usage_source);
+-- 会话筛选与 `list_sessions` 的 `(virtual_key_id, session_id)` 分组都按 session_id
+-- 取行。会话值由候选头名解析而来，客户端未带时为 NULL。
+CREATE INDEX IF NOT EXISTS idx_request_logs_session ON request_logs(session_id);
 
 -- 路由目标的自然键：同一路由内同一上游模型只能出现一次。save_route 据此 upsert，
 -- 使 target id 稳定（未来日志可引用实际履约 target）。
@@ -122,7 +128,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_route_targets_route_model
 
 /// 最新 schema 版本。每次修改 `SCHEMA` 的**结构**（新建表 / 加列 / 改约束）就 +1，
 /// 并在 `MIGRATIONS` 补一条对应目标的增量语句；纯加索引不算（`SCHEMA` 幂等补建即可）。
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 13;
 
 /// 把 `user_version` 从「目标版本 - 1」提升到「目标版本」的增量语句，按目标版本升序。
 /// 只允许增量（`ALTER TABLE ADD COLUMN` / `CREATE TABLE` / `CREATE [UNIQUE] INDEX`），
@@ -145,6 +151,18 @@ const MIGRATIONS: &[(i64, &str)] = &[
         10,
         "ALTER TABLE routes ADD COLUMN icon TEXT;
          ALTER TABLE routes ADD COLUMN icon_tint TEXT;",
+    ),
+    (
+        11,
+        "ALTER TABLE request_logs ADD COLUMN session_id TEXT;",
+    ),
+    (
+        12,
+        "ALTER TABLE route_targets ADD COLUMN header_rules TEXT NOT NULL DEFAULT '{}';",
+    ),
+    (
+        13,
+        "ALTER TABLE providers ADD COLUMN header_rules TEXT NOT NULL DEFAULT '{}';",
     ),
 ];
 
@@ -234,11 +252,19 @@ mod tests {
             [],
         )
         .unwrap();
-        // 模拟 v9 旧库：去掉 v10 才新增的路由图标列，数据与更低的版本号都保留。
+        // 模拟 v9 旧库：去掉 v10 / v11 才新增的列，数据与更低的版本号都保留。
         conn.execute("ALTER TABLE routes DROP COLUMN icon", []).unwrap();
         conn.execute("ALTER TABLE routes DROP COLUMN icon_tint", []).unwrap();
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION - 1)
+        // v11 的 session_id 带索引，先撤索引再删列。
+        conn.execute("DROP INDEX idx_request_logs_session", []).unwrap();
+        conn.execute("ALTER TABLE request_logs DROP COLUMN session_id", [])
             .unwrap();
+        conn.execute("ALTER TABLE route_targets DROP COLUMN header_rules", [])
+            .unwrap();
+        // v13 的 provider header_rules 同样先撤，模拟 v9 库。
+        conn.execute("ALTER TABLE providers DROP COLUMN header_rules", [])
+            .unwrap();
+        conn.pragma_update(None, "user_version", 9).unwrap();
 
         configure(&conn).unwrap();
 
@@ -266,6 +292,22 @@ mod tests {
             .unwrap();
         assert_eq!(logs, 1);
         assert_eq!(attempt, 0);
+        // v11 列按 NULL 补齐。
+        let session_null: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM request_logs WHERE session_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(session_null, 1, "旧流水的 session_id 应为 NULL");
+        // v13 列按默认空规则补齐。
+        let provider_rules: String = conn
+            .query_row("SELECT header_rules FROM providers LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(provider_rules, "{}", "旧 provider 应补空规则");
     }
 
     #[test]
@@ -317,6 +359,15 @@ mod tests {
 
         conn.execute("ALTER TABLE request_logs DROP COLUMN attempt_index", [])
             .unwrap();
+        // v11 的 session_id 带索引，SQLite 不允许直接删除已索引的列，先撤索引再删列。
+        conn.execute("DROP INDEX idx_request_logs_session", []).unwrap();
+        conn.execute("ALTER TABLE request_logs DROP COLUMN session_id", [])
+            .unwrap();
+        conn.execute("ALTER TABLE route_targets DROP COLUMN header_rules", [])
+            .unwrap();
+        // v13：provider 头规则列也先撤，模拟 v7 库。
+        conn.execute("ALTER TABLE providers DROP COLUMN header_rules", [])
+            .unwrap();
         conn.execute("ALTER TABLE routes DROP COLUMN icon", [])
             .unwrap();
         conn.execute("ALTER TABLE routes DROP COLUMN icon_tint", [])
@@ -341,6 +392,13 @@ mod tests {
         assert_eq!(table_count("request_logs"), 2);
         // v8 迁移把重复目标去重为一条。
         assert_eq!(table_count("route_targets"), 1);
+        // v12 新列按默认空规则补齐。
+        let rules: String = conn
+            .query_row("SELECT header_rules FROM route_targets LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(rules, "{}", "旧目标应补空规则");
 
         let (sum, attempt_max): (f64, i64) = conn
             .query_row(
@@ -351,6 +409,23 @@ mod tests {
             .unwrap();
         assert!((sum - 1.75).abs() < 1e-9, "金额不得随升级丢失，got {sum}");
         assert_eq!(attempt_max, 0, "v9 新列按默认值补齐");
+
+        // v11 新列按 NULL 补齐：旧流水的会话值未知，不得臆造。
+        let sessions: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM request_logs WHERE session_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(sessions, 2, "旧流水的 session_id 应为 NULL");
+
+        let provider_rules: String = conn
+            .query_row("SELECT header_rules FROM providers LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(provider_rules, "{}", "旧 provider 应补空规则");
 
         let port: String = conn
             .query_row(

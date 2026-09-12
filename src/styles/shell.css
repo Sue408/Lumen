@@ -99,7 +99,7 @@
   background: none;
   color: var(--ink-muted);
   font: inherit;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   text-align: left;
   cursor: pointer;
   transition: background 150ms ease, color 150ms ease;
@@ -165,7 +165,7 @@
 .runtime-detail {
   overflow: hidden;
   color: var(--ink-faint);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   line-height: 1.25;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

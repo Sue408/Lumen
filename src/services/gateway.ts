@@ -40,6 +40,7 @@ export type RequestLog = {
   requestId: string | null;
   isStream: boolean;
   attemptIndex: number;
+  sessionId: string | null;
 };
 
 const DEFAULT_PORT = 8787;

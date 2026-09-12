@@ -587,6 +587,7 @@ fn write_config(conn: &Connection, set: &DemoSet) -> Result<DemoSummary, AppErro
                 auth_scheme: provider.auth_scheme.to_string(),
                 protocol: provider.protocol.to_string(),
                 extra_headers: Default::default(),
+                header_rules: Default::default(),
                 icon: Some(provider.icon.to_string()),
                 icon_tint: provider.icon_tint.to_string(),
                 enabled: provider.enabled,
@@ -933,6 +934,7 @@ fn generate_logs(set: &DemoSet, profile: &Profile, now: DateTime<Local>) -> Vec<
                 request_id: Some(format!("req_demo_{sequence}")),
                 is_stream,
                 attempt_index: 0,
+                session_id: None,
             });
             sequence += 1;
         }

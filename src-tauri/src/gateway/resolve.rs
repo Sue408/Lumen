@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 
+use crate::db::models::{parse_provider_header_rules, ProviderHeaderRules};
 use crate::db::with_db;
 use crate::error::AppError;
 use crate::state::AppState;
@@ -24,6 +25,8 @@ pub struct ResolvedRoute {
     /// 上游提供商的协议（决定转发路径、鉴权头与计费口径）。
     pub upstream_protocol: String,
     pub extra_headers: BTreeMap<String, String>,
+    /// 上游 provider 的请求头映射（透传 / 替换 / 移除）；与 `extra_headers` 同为 provider 级。
+    pub header_rules: ProviderHeaderRules,
 }
 
 /// 解析别名对应的**全部启用候选**，按 `priority` 升序（同级按插入顺序）。
@@ -48,7 +51,8 @@ pub fn resolve_candidates(
             p.api_key       AS api_key,
             p.auth_scheme   AS auth_scheme,
             p.protocol      AS upstream_protocol,
-            p.extra_headers AS extra_headers
+            p.extra_headers AS extra_headers,
+            p.header_rules  AS header_rules
          FROM routes r
          JOIN route_targets t   ON t.route_id = r.id
          JOIN upstream_models m ON m.id = t.upstream_model_id
@@ -78,6 +82,7 @@ pub fn resolve_candidates(
             auth_scheme: row.get("auth_scheme")?,
             upstream_protocol: row.get("upstream_protocol")?,
             extra_headers: serde_json::from_str(&raw_headers).unwrap_or_default(),
+            header_rules: parse_provider_header_rules(&row.get::<_, String>("header_rules")?),
         })
     })?;
     let mut candidates = Vec::new();
@@ -110,6 +115,7 @@ mod tests {
                 auth_scheme: "bearer".into(),
                 protocol: "openai".into(),
                 extra_headers: BTreeMap::new(),
+                header_rules: Default::default(),
                 icon: None,
                 icon_tint: "ink".into(),
                 enabled: true,

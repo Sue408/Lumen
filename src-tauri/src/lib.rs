@@ -65,6 +65,7 @@ macro_rules! register_handlers {
             commands::query_virtual_keys_usage_cmd,
             commands::query_log_page_cmd,
             commands::list_log_aliases_cmd,
+            commands::list_sessions_cmd,
             commands::query_usage_overview_cmd,
             commands::get_settings_cmd,
             commands::save_settings_cmd,
@@ -125,15 +126,16 @@ pub fn run() {
             let events = Arc::new(TauriEventSink {
                 app: app.handle().clone(),
             });
-            let (port, close_to_tray) = {
+            let (port, close_to_tray, session_headers) = {
                 let conn = db
                     .lock()
                     .map_err(|_| error::AppError::message("数据库锁已中毒"))?;
                 let settings = db::settings::get_settings(&conn)?;
-                (settings.port, settings.close_to_tray)
+                (settings.port, settings.close_to_tray, settings.session_headers)
             };
             let state = Arc::new(AppState::new(db, http, events, port));
             state.set_close_to_tray(close_to_tray);
+            state.set_session_headers(session_headers);
             app.manage(state);
 
             tray::setup(app.handle())?;

@@ -753,6 +753,7 @@ mod tests {
             request_id: None,
             is_stream: false,
             attempt_index: 0,
+            session_id: None,
         }
     }
 

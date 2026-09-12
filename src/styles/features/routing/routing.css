@@ -51,7 +51,7 @@
   border: 1px solid var(--line);
   border-radius: 2px;
   color: var(--ink-muted);
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   line-height: 1.4;
 }
 
@@ -96,17 +96,18 @@
   display: grid;
   gap: 0.55rem;
   width: min(24rem, calc(100vw - 2rem));
-  padding: 0.7rem 0.8rem;
+  padding: 0.8rem 0.9rem;
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 6px;
   box-shadow: var(--shadow-float);
+  font-size: var(--text-small);
 }
 
 .protocol-help-title {
   margin: 0;
   color: var(--ink-soft);
-  font-size: 0.75rem;
+  font-size: var(--text-title);
   font-weight: 600;
   letter-spacing: var(--tracking-label);
 }
@@ -126,7 +127,6 @@
 
 .protocol-help-row dt {
   color: var(--ink-muted);
-  font-size: 0.75rem;
 }
 
 .protocol-help-row dd {
@@ -139,20 +139,18 @@
 .protocol-help-row code {
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 0.6875rem;
+  font-size: 0.95em;
   overflow-wrap: anywhere;
 }
 
 .protocol-help-row em {
   color: var(--ink-muted);
-  font-size: 0.6875rem;
   font-style: normal;
 }
 
 .protocol-help-foot {
   margin: 0;
   color: var(--ink-muted);
-  font-size: 0.6875rem;
 }
 
 /* ---- target editor ---- */
@@ -190,7 +188,7 @@
   background: var(--paper-deep);
   border: 1px solid var(--line);
   border-radius: 50%;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   place-items: center;
@@ -255,14 +253,14 @@
   overflow: hidden;
   color: var(--ink-muted);
   font-family: var(--font-mono);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .target-provider {
   color: var(--ink-faint);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
 }
 
 .target-row.is-off .target-model-name {
@@ -335,7 +333,7 @@
 .model-picker-group-name {
   padding: 0.35rem 0.25rem 0.15rem;
   color: var(--ink-muted);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   letter-spacing: var(--tracking-label);
 }
 
@@ -380,7 +378,7 @@
   max-width: 10rem;
   color: var(--ink-muted);
   font-family: var(--font-mono);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -388,12 +386,12 @@
 .model-picker-used {
   flex: 0 0 auto;
   color: var(--ink-faint);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
 }
 
 .model-picker-empty {
   margin: 0;
   padding: 0.75rem 0.4rem;
   color: var(--ink-muted);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
 }

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::models::{
     default_auth_scheme, default_icon_tint, default_protocol, default_quota_period, default_true,
-    is_known_protocol,
+    is_known_protocol, ProviderHeaderRules,
 };
 use crate::error::AppError;
 
@@ -36,6 +36,8 @@ struct SeedProvider {
     protocol: String,
     #[serde(default)]
     extra_headers: BTreeMap<String, String>,
+    #[serde(default)]
+    header_rules: ProviderHeaderRules,
     #[serde(default)]
     icon: Option<String>,
     #[serde(default = "default_icon_tint")]
@@ -181,6 +183,7 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
     }
     for provider in &seed.providers {
         let extra_headers = serde_json::to_string(&provider.extra_headers)?;
+        let header_rules = serde_json::to_string(&provider.header_rules)?;
         let id = match existing_id(
             &tx,
             "SELECT id FROM providers WHERE name = ?1",
@@ -189,14 +192,16 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
             Some(id) => {
                 tx.execute(
                     "UPDATE providers SET base_url = ?1, api_key = ?2, auth_scheme = ?3,
-                        protocol = ?4, extra_headers = ?5, icon = ?6, icon_tint = ?7, enabled = ?8
-                     WHERE id = ?9",
+                        protocol = ?4, extra_headers = ?5, header_rules = ?6,
+                        icon = ?7, icon_tint = ?8, enabled = ?9
+                     WHERE id = ?10",
                     params![
                         provider.base_url,
                         provider.api_key,
                         provider.auth_scheme,
                         provider.protocol,
                         extra_headers,
+                        header_rules,
                         provider.icon,
                         provider.icon_tint,
                         provider.enabled as i64,
@@ -210,8 +215,8 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
                 let id = uuid::Uuid::new_v4().to_string();
                 tx.execute(
                     "INSERT INTO providers
-                        (id, name, base_url, api_key, auth_scheme, protocol, extra_headers, icon, icon_tint, enabled, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                        (id, name, base_url, api_key, auth_scheme, protocol, extra_headers, header_rules, icon, icon_tint, enabled, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                     params![
                         id,
                         provider.name,
@@ -220,6 +225,7 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
                         provider.auth_scheme,
                         provider.protocol,
                         extra_headers,
+                        header_rules,
                         provider.icon,
                         provider.icon_tint,
                         provider.enabled as i64,
@@ -403,7 +409,8 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
                 )));
             }
             tx.execute(
-                "INSERT INTO route_targets (id, route_id, upstream_model_id, priority, enabled)
+                "INSERT INTO route_targets
+                    (id, route_id, upstream_model_id, priority, enabled)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     uuid::Uuid::new_v4().to_string(),
@@ -468,11 +475,12 @@ pub fn export_seed(conn: &Connection) -> Result<String, AppError> {
     let mut providers = Vec::new();
     {
         let mut stmt = conn.prepare(
-            "SELECT id, name, base_url, api_key, auth_scheme, protocol, extra_headers, icon, icon_tint, enabled
+            "SELECT id, name, base_url, api_key, auth_scheme, protocol, extra_headers, header_rules, icon, icon_tint, enabled
              FROM providers ORDER BY created_at, name",
         )?;
         let rows = stmt.query_map([], |row| {
             let extra_raw: String = row.get(6)?;
+            let rules_raw: String = row.get(7)?;
             Ok(SeedProvider {
                 name: row.get(1)?,
                 base_url: row.get(2)?,
@@ -480,9 +488,10 @@ pub fn export_seed(conn: &Connection) -> Result<String, AppError> {
                 auth_scheme: row.get(4)?,
                 protocol: row.get(5)?,
                 extra_headers: serde_json::from_str(&extra_raw).unwrap_or_default(),
-                icon: row.get(7)?,
-                icon_tint: row.get(8)?,
-                enabled: row.get::<_, i64>(9)? != 0,
+                header_rules: serde_json::from_str(&rules_raw).unwrap_or_default(),
+                icon: row.get(8)?,
+                icon_tint: row.get(9)?,
+                enabled: row.get::<_, i64>(10)? != 0,
             })
         })?;
         for row in rows {
@@ -672,6 +681,7 @@ mod tests {
                 &Settings {
                     port: 9999,
                     close_to_tray: false,
+                    ..Settings::default()
                 },
             )
             .unwrap();

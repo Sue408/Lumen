@@ -1,6 +1,7 @@
 import type {
   KeyUsage,
   Provider,
+  ProviderHeaderRules,
   ProviderInput,
   QuotaPeriod,
   RouteInput,
@@ -15,6 +16,12 @@ const nowIso = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
 const clone = <T>(value: T): T => structuredClone(value);
 
+export const emptyProviderHeaderRules = (): ProviderHeaderRules => ({
+  forward: [],
+  replace: [],
+  remove: [],
+});
+
 const providers: Provider[] = [
   {
     id: "p-deepseek",
@@ -24,6 +31,7 @@ const providers: Provider[] = [
     authScheme: "x-api-key",
     protocol: "anthropic",
     extraHeaders: {},
+    headerRules: emptyProviderHeaderRules(),
     icon: "deepseek",
     iconTint: "ink",
     enabled: true,
@@ -37,6 +45,7 @@ const providers: Provider[] = [
     authScheme: "bearer",
     protocol: "openai",
     extraHeaders: { "OpenAI-Beta": "assistants=v2" },
+    headerRules: emptyProviderHeaderRules(),
     icon: "openai",
     iconTint: "ink",
     enabled: false,
@@ -167,6 +176,7 @@ export function mockSaveProvider(input: ProviderInput): Provider {
     authScheme: input.authScheme ?? "bearer",
     protocol: input.protocol ?? "openai",
     extraHeaders: input.extraHeaders ?? {},
+    headerRules: input.headerRules ?? existing?.headerRules ?? emptyProviderHeaderRules(),
     icon: input.icon ?? existing?.icon ?? null,
     iconTint: input.iconTint ?? existing?.iconTint ?? "ink",
     enabled: input.enabled ?? true,

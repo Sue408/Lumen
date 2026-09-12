@@ -11,6 +11,7 @@ export type Provider = {
   authScheme: AuthScheme;
   protocol: Protocol;
   extraHeaders: Record<string, string>;
+  headerRules: ProviderHeaderRules;
   icon: string | null;
   iconTint: IconTint;
   enabled: boolean;
@@ -25,9 +26,20 @@ export type ProviderInput = {
   authScheme?: AuthScheme;
   protocol?: Protocol;
   extraHeaders?: Record<string, string>;
+  headerRules?: ProviderHeaderRules;
   icon?: string | null;
   iconTint?: IconTint;
   enabled?: boolean;
+};
+
+/** 一条替换规则：客户端头 `from` → 上游头 `to`。 */
+export type HeaderReplace = { from: string; to: string };
+
+/** per-provider 请求头映射（透传 / 替换 / 移除）；"添加" 复用 `extraHeaders`。 */
+export type ProviderHeaderRules = {
+  forward: string[];
+  replace: HeaderReplace[];
+  remove: string[];
 };
 
 export type UpstreamModel = {

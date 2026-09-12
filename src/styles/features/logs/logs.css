@@ -37,21 +37,13 @@
 
 .logs-toolbar {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem 1rem;
   min-width: 0;
 }
 
-.logs-toolbar-view {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: 0.75rem;
-}
-
-.logs-scope,
-.logs-range-toggle {
+.logs-scope {
   flex: 0 0 auto;
 }
 
@@ -71,7 +63,7 @@
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
@@ -91,7 +83,7 @@
   outline-offset: 2px;
 }
 
-.logs-range-toggle {
+.logs-filter-toggle {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -102,85 +94,33 @@
   border: 1px solid var(--line);
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
-.logs-range-toggle svg {
+.logs-filter-toggle svg {
   width: 0.95rem;
   height: 0.95rem;
 }
 
-.logs-range-toggle:hover {
+.logs-filter-toggle:hover {
   color: var(--ink);
   border-color: var(--ochre);
 }
 
-.logs-range-toggle.is-active {
+.logs-filter-toggle.is-active {
   color: var(--ink);
   border-color: var(--ochre);
   background: var(--surface-hover-soft);
 }
 
-.logs-range-toggle:focus-visible {
+.logs-filter-toggle:focus-visible {
   outline: 2px solid var(--ochre);
   outline-offset: 2px;
 }
 
 .logs-filters {
-  display: flex;
-  align-items: center;
-  flex: 1 1 auto;
-  min-width: 0;
-  gap: 0.75rem;
-  margin-left: auto;
-}
-
-.logs-filters label {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: 0.4rem;
-  color: var(--ink-muted);
-  font-size: 0.75rem;
-}
-
-.logs-filters select,
-.logs-filters input {
-  height: 2rem;
-  padding: 0.25rem 0.5rem;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--line-control);
-  border-radius: 4px;
-  font-size: 0.8125rem;
-}
-
-.logs-filters select:focus-visible,
-.logs-filters input:focus-visible {
-  outline: 2px solid var(--ochre);
-  outline-offset: 2px;
-}
-
-.logs-search {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.logs-search input {
-  width: 100%;
-  min-width: 7rem;
-}
-
-.logs-count {
-  flex: 0 0 auto;
-  color: var(--ink-muted);
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.logs-range-panel {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -191,28 +131,89 @@
   border-radius: 6px;
 }
 
-.logs-range-panel label {
+.logs-filters label {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 0.4rem;
   color: var(--ink-muted);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
 }
 
-.logs-range-panel input {
+.logs-filters select,
+.logs-filters input {
   height: 2rem;
-  padding: 0.2rem 0.5rem;
+  padding: 0.25rem 0.5rem;
   color: var(--ink);
   background: var(--paper);
   border: 1px solid var(--line-control);
   border-radius: 4px;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
+}
+
+.logs-filters select {
+  max-width: 18rem;
+  text-overflow: ellipsis;
+}
+
+.logs-filters input {
   font-variant-numeric: tabular-nums;
 }
 
-.logs-range-panel input:focus-visible {
+.logs-filters select:focus-visible,
+.logs-filters input:focus-visible {
   outline: 2px solid var(--ochre);
   outline-offset: 2px;
+}
+
+.logs-search {
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 14rem;
+  min-width: 0;
+  gap: 0.4rem;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+
+.logs-search input {
+  width: 100%;
+  min-width: 7rem;
+  height: 2rem;
+  padding: 0.25rem 0.5rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line-control);
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+.logs-search input:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.logs-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.3rem;
+  color: var(--paper);
+  background: var(--ochre);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.logs-count {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .logs-range-sep {
@@ -231,7 +232,7 @@
   border: 1px solid var(--line);
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   transition: color 150ms ease, border-color 150ms ease;
 }
 
@@ -271,7 +272,7 @@
   padding: 0.5rem 0;
   color: var(--ink-muted);
   background: var(--paper);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: var(--tracking-label);
 }
@@ -292,7 +293,7 @@
   background: transparent;
   border: 0;
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   transition: background-color 150ms ease;
 }
 
@@ -316,7 +317,7 @@
 
 .logs-row time {
   color: var(--ink-muted);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -338,7 +339,7 @@
   align-items: center;
   gap: 0.5rem;
   color: var(--ink-muted);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
 }
 
 .logs-mark {
@@ -397,13 +398,13 @@
 
 .logs-detail-row dt {
   color: var(--ink-muted);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
 }
 
 .logs-detail-row dd {
   margin: 0;
   color: var(--ink-soft);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   word-break: break-word;
 }
 
@@ -419,7 +420,7 @@
 
 .logs-request-id code {
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
 }
 
 .logs-copy {
@@ -472,7 +473,7 @@
   border: 1px solid var(--line);
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
@@ -487,14 +488,14 @@
   outline-offset: 2px;
 }
 
-/* narrow: stack the view controls and the filters as two blocks */
+/* narrow: toolbar wraps, search takes its own row; filters panel is already a block */
 @media (max-width: 60rem) {
-  .logs-toolbar {
-    flex-wrap: wrap;
+  .logs-search {
+    flex-basis: 100%;
+    order: 1;
   }
 
-  .logs-filters {
-    flex-basis: 100%;
+  .logs-count {
     margin-left: 0;
   }
 }
@@ -512,7 +513,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .logs-scope button,
-  .logs-range-toggle,
+  .logs-filter-toggle,
   .logs-range-clear,
   .logs-row-main,
   .logs-chevron,

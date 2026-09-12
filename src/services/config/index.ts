@@ -6,6 +6,8 @@ export type {
   IconTint,
   Provider,
   ProviderInput,
+  ProviderHeaderRules,
+  HeaderReplace,
   UpstreamModel,
   UpstreamModelInput,
   Route,

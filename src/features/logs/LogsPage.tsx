@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLiveRevision } from "../../app/useLiveRevision";
-import { CalendarRange, Check, ChevronDown, Copy, X } from "lucide-react";
+import { Check, ChevronDown, Copy, SlidersHorizontal, X } from "lucide-react";
 import { InlineError, LoadingLines } from "../../components/ConfigControls";
 import type { RequestLog } from "../../services/gateway";
-import { listLogAliases, queryLogPage, type LogSummary } from "../../services/usage";
+import {
+  listLogAliases,
+  listSessions,
+  queryLogPage,
+  type LogSummary,
+  type SessionSummary,
+} from "../../services/usage";
 import { formatCurrency, formatInteger } from "../../lib/format";
 import {
   ALL_ALIASES,
+  ALL_SESSIONS,
   buildLogFilter,
   dailyRangeBounds,
   describeLog,
@@ -21,6 +28,7 @@ import {
   usageSourceLabels,
   type LogScope,
 } from "./logQuery";
+import { formatSessionLabel } from "./sessionLabel";
 
 const PAGE_SIZE = 100;
 const formatTokens = (value: number) => `${formatInteger(value)} Tokens`;
@@ -28,10 +36,11 @@ const formatTokens = (value: number) => `${formatInteger(value)} Tokens`;
 export function LogsPage() {
   const [scope, setScope] = useState<LogScope>("attention");
   const [alias, setAlias] = useState(ALL_ALIASES);
+  const [session, setSession] = useState(ALL_SESSIONS);
   const [query, setQuery] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [rangeOpen, setRangeOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [logs, setLogs] = useState<RequestLog[] | null>(null);
   const [total, setTotal] = useState<number | null>(null);
@@ -40,6 +49,7 @@ export function LogsPage() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [aliases, setAliases] = useState<string[]>([]);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const { revision } = useLiveRevision();
 
   useEffect(() => {
@@ -59,14 +69,26 @@ export function LogsPage() {
   const rangeActive = Boolean(range.from || range.to);
 
   const filter = useMemo(
-    () => buildLogFilter({ scope, alias, query, range }),
-    [scope, alias, query, range],
+    () => buildLogFilter({ scope, alias, query, range, session }),
+    [scope, alias, query, range, session],
   );
 
   const summaryFilter = useMemo(
     () => buildLogFilter({ scope: "all", alias, range }),
     [alias, range],
   );
+
+  useEffect(() => {
+    let alive = true;
+    listSessions(summaryFilter)
+      .then((items) => {
+        if (alive) setSessions(items);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [summaryFilter, revision]);
 
   useEffect(() => {
     let alive = true;
@@ -101,7 +123,14 @@ export function LogsPage() {
     setExpanded(null);
   };
 
-  const clearRange = () => {
+  const activeFilters =
+    (alias !== ALL_ALIASES ? 1 : 0) +
+    (session !== ALL_SESSIONS ? 1 : 0) +
+    (rangeActive ? 1 : 0);
+
+  const clearFilters = () => {
+    setAlias(ALL_ALIASES);
+    setSession(ALL_SESSIONS);
     setFrom("");
     setTo("");
     resetPaging();
@@ -169,8 +198,7 @@ export function LogsPage() {
         </p>
 
         <div className="logs-toolbar">
-          <div className="logs-toolbar-view">
-            <div className="logs-scope" role="group" aria-label="查看口径">
+          <div className="logs-scope" role="group" aria-label="查看口径">
             {logScopes.map((item) => (
               <button
                 className={item.key === scope ? "is-selected" : ""}
@@ -187,17 +215,35 @@ export function LogsPage() {
             ))}
           </div>
 
-          <button
-            className={`logs-range-toggle${rangeActive ? " is-active" : ""}`}
-            type="button"
-            aria-expanded={rangeOpen}
-            onClick={() => setRangeOpen((value) => !value)}
-          >
-            <CalendarRange aria-hidden="true" />
-            {rangeActive ? rangeLabel : "时间范围"}
-            </button>
-          </div>
+          <label className="logs-search">
+            搜索
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                resetPaging();
+              }}
+              placeholder="别名、模型、类型或 Token"
+            />
+          </label>
 
+          <button
+            className={`logs-filter-toggle${filtersOpen ? " is-open" : ""}${activeFilters > 0 ? " is-active" : ""}`}
+            type="button"
+            aria-expanded={filtersOpen}
+            onClick={() => setFiltersOpen((value) => !value)}
+          >
+            <SlidersHorizontal aria-hidden="true" />
+            筛选
+            {activeFilters > 0 ? <span className="logs-filter-count">{activeFilters}</span> : null}
+          </button>
+
+          <span className="logs-count">
+            {loading ? "读取中…" : logs ? `${formatInteger(logs.length)} 条` : "读取中…"}
+          </span>
+        </div>
+
+        {filtersOpen ? (
           <div className="logs-filters">
             <label>
               别名
@@ -214,26 +260,26 @@ export function LogsPage() {
                 ))}
               </select>
             </label>
-            <label className="logs-search">
-              搜索
-              <input
-                value={query}
+            <label>
+              会话
+              <select
+                value={session}
                 onChange={(event) => {
-                  setQuery(event.target.value);
+                  setSession(event.target.value);
                   resetPaging();
                 }}
-                placeholder="别名、模型、类型或 Token"
-              />
+              >
+                <option>{ALL_SESSIONS}</option>
+                {sessions.map((item) => (
+                  <option
+                    key={`${item.virtualKeyId ?? ""}:${item.sessionId}`}
+                    value={item.sessionId}
+                  >
+                    {formatSessionLabel(item)}
+                  </option>
+                ))}
+              </select>
             </label>
-
-            <span className="logs-count">
-              {loading ? "读取中…" : logs ? `${formatInteger(logs.length)} 条` : "读取中…"}
-            </span>
-          </div>
-        </div>
-
-        {rangeOpen ? (
-          <div className="logs-range-panel">
             <label>
               开始
               <input
@@ -262,11 +308,11 @@ export function LogsPage() {
             <button
               className="logs-range-clear"
               type="button"
-              disabled={!rangeActive}
-              onClick={clearRange}
+              disabled={activeFilters === 0}
+              onClick={clearFilters}
             >
               <X aria-hidden="true" />
-              清除
+              清除筛选
             </button>
           </div>
         ) : null}
@@ -318,6 +364,7 @@ function LogDetail({ log }: { log: RequestLog }) {
         <RequestId value={log.requestId} />
       </DetailRow>
       <DetailRow term="路由">{chain.length > 0 ? chain.join("  →  ") : "未匹配到路由"}</DetailRow>
+      {log.sessionId ? <DetailRow term="会话">{log.sessionId}</DetailRow> : null}
       <DetailRow term="用量来源">{usageSourceLabels[log.usageSource] ?? log.usageSource}</DetailRow>
       <DetailRow term="Token">
         {tokens.map((part) => `${part.label} ${formatInteger(part.value)}`).join(" · ")}

@@ -48,6 +48,7 @@ pub struct Provider {
     pub auth_scheme: String,
     pub protocol: String,
     pub extra_headers: BTreeMap<String, String>,
+    pub header_rules: ProviderHeaderRules,
     pub icon: Option<String>,
     pub icon_tint: String,
     pub enabled: bool,
@@ -68,6 +69,8 @@ pub struct ProviderInput {
     pub protocol: String,
     #[serde(default)]
     pub extra_headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub header_rules: ProviderHeaderRules,
     #[serde(default)]
     pub icon: Option<String>,
     #[serde(default = "default_icon_tint")]
@@ -106,6 +109,7 @@ impl Provider {
             auth_scheme: row.get("auth_scheme")?,
             protocol: row.get("protocol")?,
             extra_headers: parse_headers(&row.get::<_, String>("extra_headers")?),
+            header_rules: parse_provider_header_rules(&row.get::<_, String>("header_rules")?),
             icon: row.get("icon")?,
             icon_tint: row.get("icon_tint")?,
             enabled: row.get::<_, i64>("enabled")? != 0,
@@ -196,6 +200,41 @@ pub struct Route {
     pub icon_tint: Option<String>,
     pub enabled: bool,
     pub created_at: String,
+}
+
+/// per-provider 请求头映射（四意图中的**透传 / 替换 / 移除**；"添加" 复用
+/// `Provider.extra_headers`）。空规则序列化为 `{}`。
+///
+/// 求值顺序（见 `gateway::headers::build_upstream_headers`）：
+/// 内置底座 → `forward` → `replace` → `extra_headers` → `remove` → 硬黑名单。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProviderHeaderRules {
+    /// 透传：放行客户端头（通配，如 `session_*` / `session_id`）。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub forward: Vec<String>,
+    /// 替换：把客户端头 `from` 以 `to` 的名字发出（有序，后写覆盖先写）。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub replace: Vec<HeaderReplace>,
+    /// 移除：从最终结果删除（通配，优先级最高）。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub remove: Vec<String>,
+}
+
+/// 一条替换规则：客户端头 `from` → 上游头 `to`。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HeaderReplace {
+    pub from: String,
+    pub to: String,
+}
+
+/// 反序列化持久化的 provider 头规则；失败回落空规则并告警，不 panic。
+pub fn parse_provider_header_rules(raw: &str) -> ProviderHeaderRules {
+    serde_json::from_str(raw).unwrap_or_else(|error| {
+        tracing::warn!("provider header_rules 解析失败，回落空规则：{error}");
+        ProviderHeaderRules::default()
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -349,6 +388,9 @@ pub struct RequestLog {
     pub is_stream: bool,
     /// 本次客户端请求内的上游尝试序号，从 0 起。降级链中失败与成功的尝试各占一条。
     pub attempt_index: i64,
+    /// 会话标识：由候选会话头名解析而来，客户端未带时为 `None`。仅作日志维度，
+    /// 不实体化、不做生命周期；按 `(virtual_key_id, session_id)` 聚合。
+    pub session_id: Option<String>,
 }
 
 impl RequestLog {
@@ -382,6 +424,7 @@ impl RequestLog {
             request_id: row.get("request_id")?,
             is_stream: row.get::<_, i64>("is_stream")? != 0,
             attempt_index: row.get("attempt_index")?,
+            session_id: row.get("session_id")?,
         })
     }
 }

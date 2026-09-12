@@ -32,7 +32,7 @@
 .chart-meta {
   color: var(--ink-muted);
   font-family: var(--font-sans);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 400;
 }
 
@@ -57,7 +57,7 @@
   justify-content: space-between;
   padding: 7px 0 8px;
   color: var(--ink-muted);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -84,7 +84,7 @@
   align-items: end;
   justify-content: space-between;
   color: var(--ink-muted);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -123,7 +123,7 @@
 
 .donut-label {
   color: var(--ink-muted);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
 }
 
 .cost-ranking {
@@ -231,7 +231,7 @@
   gap: 0.3rem;
   padding: 0 0.15rem;
   color: var(--ink-soft);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   line-height: 1.2;
   text-align: right;
   white-space: nowrap;

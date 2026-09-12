@@ -19,10 +19,12 @@ use crate::gateway::auth::authenticate;
 use crate::gateway::failover::{classify, parse_retry_after, AttemptAction};
 use crate::gateway::forward::{
     ensure_include_usage, error_response, request_id, send, stream_response, upstream_path,
+    StreamMeta,
 };
 use crate::gateway::quota::{exceeded_limit, period_label, period_start, QuotaPeriod};
 use crate::gateway::reject::reject;
 use crate::gateway::resolve::{resolve_all, ResolvedRoute};
+use crate::gateway::session;
 use crate::gateway::usage::{build_log, extract_usage, record, LogContext, UsageTotals};
 use crate::state::{AppState, COOLDOWN_EXHAUSTED, COOLDOWN_TRANSIENT};
 
@@ -184,6 +186,9 @@ async fn forward(
     };
     let key_id = virtual_key.id.clone();
 
+    // 会话解析只做一次：既用于本侧归因（每次尝试都带），也作为头映射的变量喂给上游。
+    let session = session::resolve_session(&headers, &state.session_headers());
+
     // 额度闸门：建连前看「已累计花费」是否已达上限；未达即放行，最后一次可能略微超出。
     let period = QuotaPeriod::parse(&virtual_key.quota_period);
     let spend_start = period_start(period, Local::now());
@@ -304,6 +309,7 @@ async fn forward(
                 virtual_key_id: Some(key_id.clone()),
                 usage: UsageTotals::missing(),
                 attempt_index: 0,
+                session_id: session.clone(),
             },
         )
         .await;
@@ -326,7 +332,9 @@ async fn forward(
 
             let started = Instant::now();
             let timeout = if is_stream { None } else { Some(UPSTREAM_TIMEOUT) };
-            let response = match send(&state, &candidate, &attempt_body, &path, timeout).await {
+            let response =
+                match send(&state, &candidate, &attempt_body, &path, timeout, &headers).await
+                {
                 Ok(response) => response,
                 Err(error) => {
                     record_log(
@@ -344,6 +352,7 @@ async fn forward(
                             virtual_key_id: Some(key_id.clone()),
                             usage: UsageTotals::missing(),
                             attempt_index,
+                            session_id: session.clone(),
                         },
                     )
                     .await;
@@ -365,10 +374,13 @@ async fn forward(
                     return stream_response(
                         state,
                         candidate,
-                        alias,
-                        endpoint.to_string(),
-                        Some(key_id),
-                        attempt_index,
+                        StreamMeta {
+                            alias,
+                            endpoint: endpoint.to_string(),
+                            virtual_key_id: Some(key_id),
+                            attempt_index,
+                            session_id: session,
+                        },
                         response,
                     );
                 }
@@ -391,6 +403,7 @@ async fn forward(
                         virtual_key_id: Some(key_id.clone()),
                         usage: UsageTotals::missing(),
                         attempt_index,
+                        session_id: session.clone(),
                     },
                 )
                 .await;
@@ -437,6 +450,7 @@ async fn forward(
                             virtual_key_id: Some(key_id),
                             usage,
                             attempt_index,
+                            session_id: session.clone(),
                         },
                     )
                     .await;
@@ -458,6 +472,7 @@ async fn forward(
                             virtual_key_id: Some(key_id.clone()),
                             usage: UsageTotals::missing(),
                             attempt_index,
+                            session_id: session.clone(),
                         },
                     )
                     .await;
@@ -483,6 +498,7 @@ async fn forward(
                             virtual_key_id: Some(key_id),
                             usage: UsageTotals::missing(),
                             attempt_index,
+                            session_id: session.clone(),
                         },
                     )
                     .await;
@@ -504,6 +520,7 @@ async fn forward(
                             virtual_key_id: Some(key_id.clone()),
                             usage: UsageTotals::missing(),
                             attempt_index,
+                            session_id: session.clone(),
                         },
                     )
                     .await;
@@ -574,8 +591,8 @@ mod tests {
     use crate::db::keys::save_virtual_key;
     use crate::db::logs::{list_logs, LogFilter};
     use crate::db::models::{
-        ProviderInput, RequestLog, RouteInput, RouteTargetInput, UpstreamModelInput, VirtualKey,
-        VirtualKeyInput,
+        HeaderReplace, ProviderHeaderRules, ProviderInput, RequestLog, RouteInput, RouteTargetInput,
+        UpstreamModelInput, VirtualKey, VirtualKeyInput,
     };
     use crate::db::{open_in_memory, providers, routes, Db};
     use crate::state::{EventSink, GatewayStatus};
@@ -650,6 +667,7 @@ mod tests {
                 },
                 protocol: protocol.into(),
                 extra_headers: std::collections::BTreeMap::new(),
+                header_rules: Default::default(),
                 icon: None,
                 icon_tint: "ink".into(),
                 enabled: true,
@@ -712,6 +730,7 @@ mod tests {
                 },
                 protocol: protocol.into(),
                 extra_headers: std::collections::BTreeMap::new(),
+                header_rules: Default::default(),
                 icon: None,
                 icon_tint: "ink".into(),
                 enabled: true,
@@ -1454,8 +1473,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_fails_over_before_first_byte() {
-        let bad = start_error_upstream(500).await;
+    async fn stream_fails_over_before_first_byte() {        let bad = start_error_upstream(500).await;
         let good = start_sse_upstream().await;
         let db = open_in_memory().unwrap();
         let bad_model = add_provider_model(&db, &bad, "openai", "bad-model");
@@ -1490,5 +1508,309 @@ mod tests {
         assert_eq!(logs.len(), 2, "失败 500 与成功流各一条");
         assert_eq!(logs[0].http_status, Some(500));
         assert_eq!(logs[1].status, "success");
+    }
+
+    fn post_with_headers(uri: &str, body: Value, extra: &[(&str, &str)]) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {TEST_KEY}"));
+        for (name, value) in extra {
+            builder = builder.header(*name, *value);
+        }
+        builder.body(Body::from(body.to_string())).unwrap()
+    }
+
+    async fn session_test_router(db: &Db, sink: Arc<MockSink>) -> axum::Router {
+        let base_url = start_mock_upstream().await;
+        seed_upstream(db, &base_url, "openai", "lumen/mock");
+        seed_virtual_key(db, TEST_KEY, true, None, "monthly");
+        let state = Arc::new(AppState::new(
+            db.clone(),
+            reqwest::Client::new(),
+            sink,
+            0,
+        ));
+        crate::gateway::build_router(state)
+    }
+
+    #[tokio::test]
+    async fn captures_session_from_claude_code_header() {
+        let db = open_in_memory().unwrap();
+        let sink = Arc::new(MockSink::default());
+        let router = session_test_router(&db, sink).await;
+
+        let response = router
+            .oneshot(post_with_headers(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+                &[("x-claude-code-session-id", "ses_claude")],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].session_id.as_deref(), Some("ses_claude"));
+    }
+
+    #[tokio::test]
+    async fn missing_session_header_records_null() {
+        let db = open_in_memory().unwrap();
+        let sink = Arc::new(MockSink::default());
+        let router = session_test_router(&db, sink).await;
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 1);
+        assert!(logs[0].session_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn session_candidates_follow_priority() {
+        let db = open_in_memory().unwrap();
+        let sink = Arc::new(MockSink::default());
+        let router = session_test_router(&db, sink).await;
+
+        let response = router
+            .oneshot(post_with_headers(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+                &[
+                    ("x-session-id", "ses_lower"),
+                    ("x-opencode-session", "ses_higher"),
+                ],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs[0].session_id.as_deref(), Some("ses_higher"));
+    }
+
+    /// 回显若干到达上游的请求头，用于验证头映射结果。
+    async fn start_header_echo_upstream() -> String {
+        let app = axum::Router::new().route(
+            "/chat/completions",
+            axum::routing::post(|headers: axum::http::HeaderMap| async move {
+                let pick = |name: &str| {
+                    headers
+                        .get(name)
+                        .and_then(|value| value.to_str().ok())
+                        .map(str::to_string)
+                };
+                Json(json!({
+                    "id": "cmpl-1",
+                    "choices": [],
+                    "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 },
+                    "_headers": {
+                        "anthropic-beta": pick("anthropic-beta"),
+                        "x-opencode-session": pick("x-opencode-session"),
+                        "authorization": pick("authorization"),
+                        "x-api-key": pick("x-api-key"),
+                        "user-agent": pick("user-agent"),
+                    }
+                }))
+            }),
+        );
+        serve(app).await
+    }
+
+    /// 登记一个可带自定义头与头规则的 provider + model + 路由。
+    fn seed_ruled_route(
+        db: &Db,
+        base_url: &str,
+        protocol: &str,
+        alias: &str,
+        extra_headers: std::collections::BTreeMap<String, String>,
+        rules: ProviderHeaderRules,
+    ) -> String {
+        let conn = db.lock().unwrap();
+        let provider = providers::save_provider(
+            &conn,
+            &ProviderInput {
+                id: None,
+                name: "echo".into(),
+                base_url: base_url.to_string(),
+                api_key: "secret".into(),
+                auth_scheme: "bearer".into(),
+                protocol: protocol.into(),
+                extra_headers,
+                header_rules: rules,
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+        .unwrap();
+        let model = providers::save_upstream_model(
+            &conn,
+            &UpstreamModelInput {
+                id: None,
+                provider_id: provider.id,
+                model_id: "mock-model".into(),
+                display_name: "Mock".into(),
+                input_price: 1.0,
+                output_price: 2.0,
+                cache_read_price: 0.0,
+                cache_creation_price: 0.0,
+                context_window: 0,
+                capabilities: Vec::new(),
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+        .unwrap();
+        routes::save_route(
+            &conn,
+            &RouteInput {
+                id: None,
+                alias: alias.into(),
+                display_name: "Mock".into(),
+                protocol: protocol.into(),
+                icon: None,
+                icon_tint: None,
+                enabled: true,
+                targets: vec![RouteTargetInput {
+                    upstream_model_id: model.id.clone(),
+                    priority: 0,
+                    enabled: true,
+                }],
+            },
+        )
+        .unwrap();
+        model.id
+    }
+
+    fn echo_router(db: &Db, sink: Arc<MockSink>) -> axum::Router {
+        seed_virtual_key(db, TEST_KEY, true, None, "monthly");
+        let state = Arc::new(AppState::new(
+            db.clone(),
+            reqwest::Client::new(),
+            sink,
+            0,
+        ));
+        crate::gateway::build_router(state)
+    }
+
+    #[tokio::test]
+    async fn header_rules_forward_and_extra_headers_reach_upstream_without_leaking_key() {
+        let base_url = start_header_echo_upstream().await;
+        let db = open_in_memory().unwrap();
+        let rules = ProviderHeaderRules {
+            forward: vec!["anthropic-beta".into()],
+            ..ProviderHeaderRules::default()
+        };
+        seed_ruled_route(
+            &db,
+            &base_url,
+            "openai",
+            "lumen/mock",
+            std::collections::BTreeMap::from([(
+                "user-agent".to_string(),
+                "opencode/local".to_string(),
+            )]),
+            rules,
+        );
+        let router = echo_router(&db, Arc::new(MockSink::default()));
+
+        let response = router
+            .oneshot(post_with_headers(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+                &[("anthropic-beta", "prompt-caching")],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(value["_headers"]["anthropic-beta"], "prompt-caching");
+        assert_eq!(value["_headers"]["user-agent"], "opencode/local");
+        // 下游虚拟密钥绝不泄漏；上游拿到的是 provider 密钥。
+        assert_eq!(value["_headers"]["authorization"], "Bearer secret");
+    }
+
+    #[tokio::test]
+    async fn replace_maps_session_header_to_opencode_header() {
+        let base_url = start_header_echo_upstream().await;
+        let db = open_in_memory().unwrap();
+        let rules = ProviderHeaderRules {
+            replace: vec![HeaderReplace {
+                from: "x-claude-code-session-id".into(),
+                to: "x-opencode-session".into(),
+            }],
+            ..ProviderHeaderRules::default()
+        };
+        seed_ruled_route(
+            &db,
+            &base_url,
+            "openai",
+            "lumen/mock",
+            std::collections::BTreeMap::new(),
+            rules,
+        );
+        let router = echo_router(&db, Arc::new(MockSink::default()));
+
+        let response = router
+            .oneshot(post_with_headers(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+                &[("x-claude-code-session-id", "ses_cc")],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(value["_headers"]["x-opencode-session"], "ses_cc");
+    }
+
+    #[tokio::test]
+    async fn extra_headers_override_forwarded_user_agent_but_auth_still_injected() {
+        let base_url = start_header_echo_upstream().await;
+        let db = open_in_memory().unwrap();
+        let extra = std::collections::BTreeMap::from([(
+            "user-agent".to_string(),
+            "opencode/local".to_string(),
+        )]);
+        seed_ruled_route(
+            &db,
+            &base_url,
+            "openai",
+            "lumen/mock",
+            extra,
+            ProviderHeaderRules::default(),
+        );
+        let router = echo_router(&db, Arc::new(MockSink::default()));
+
+        let response = router
+            .oneshot(post_with_headers(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+                &[("user-agent", "provider-default")],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(value["_headers"]["user-agent"], "opencode/local");
+        assert_eq!(value["_headers"]["authorization"], "Bearer secret");
     }
 }

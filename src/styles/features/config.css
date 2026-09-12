@@ -57,7 +57,7 @@
 
 .register-title {
   color: var(--ink-soft);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: var(--tracking-label);
   font-variant-numeric: tabular-nums;
@@ -156,7 +156,7 @@
 .register-meta {
   overflow: hidden;
   color: var(--ink-muted);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -208,7 +208,7 @@
   gap: 0.45rem;
   margin: -0.75rem 0 1.15rem;
   color: var(--ink-muted);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -252,7 +252,7 @@
   align-items: center;
   gap: 0.45rem;
   color: var(--ink-soft);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-weight: 600;
   letter-spacing: var(--tracking-label);
 }
@@ -359,7 +359,7 @@
   border: 1px solid var(--line-faint);
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
@@ -390,7 +390,7 @@
   border: 1px solid transparent;
   border-radius: 2px;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
@@ -493,7 +493,7 @@
   border: 1px solid var(--line);
   border-radius: 999px;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   white-space: nowrap;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
@@ -517,7 +517,7 @@
   gap: 0.32rem;
   height: 1.5rem;
   padding: 0 0.5rem;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
 }
 
 .toggle-pill:disabled {
@@ -589,7 +589,7 @@
   background: transparent;
   border: 0;
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   transition: color 100ms ease;
 }
 
@@ -610,7 +610,7 @@
   border: 1px solid var(--line-strong);
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
@@ -656,7 +656,7 @@
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--ochre);
   border-radius: 4px;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
 }
 
 .pending-bar {
@@ -694,7 +694,7 @@
   align-items: center;
   gap: 0.35rem;
   color: var(--ink-soft);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
 }
 
 .save-bar-note svg {
@@ -738,7 +738,7 @@
 
 .field > span {
   color: var(--ink-muted);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
 }
 
 /* 只读字段值：表示创建后锁定的属性（如协议）。 */
@@ -752,6 +752,190 @@
   border: 1px dashed var(--line-strong);
   border-radius: 4px;
   font-size: 0.875rem;
+}
+
+/* 表单内的说明文字：解释规则语义，不参与字段栅格。 */
+.field-hint {
+  margin: 0 0 0.6rem;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.field-hint code {
+  padding: 0 0.25rem;
+  margin: 0 0.15rem;
+  color: var(--ink-soft);
+  background: var(--surface-active);
+  border-radius: 2px;
+  font-size: 0.75rem;
+}
+
+/* ---- 请求头映射：说明浮窗与折叠编辑 ---- */
+
+.header-rules-help-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: help;
+}
+
+.section-title .header-rules-help-trigger svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.header-rules-help-trigger:hover {
+  color: var(--ochre);
+}
+
+.header-rules-help-trigger:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+/* 浮层 portal 到 body，故为顶层类，不挂在页面根下。 */
+.header-rules-help {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  gap: 0.55rem;
+  width: min(24rem, calc(100vw - 2rem));
+  padding: 0.8rem 0.9rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow-float);
+  font-size: var(--text-small);
+}
+
+.header-rules-help-title {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--text-title);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+}
+
+.header-rules-help-note {
+  margin: 0;
+  color: var(--ink-muted);
+  line-height: 1.55;
+}
+
+.header-rules-help-note code {
+  padding: 0 0.2rem;
+  color: var(--ink-soft);
+  background: var(--surface-active);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+
+.header-rules-help-order {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-muted);
+}
+
+.header-rules-help-order li {
+  display: inline-flex;
+  align-items: center;
+}
+
+.header-rules-help-order li:not(:last-child)::after {
+  content: "→";
+  margin-left: 0.3rem;
+  color: var(--ink-faint);
+}
+
+.header-rules-help-order li:last-child {
+  color: var(--ink-soft);
+}
+
+.header-rules-help-codes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+.header-rules-help-codes code {
+  padding: 0.05rem 0.3rem;
+  color: var(--ink-soft);
+  background: var(--surface-active);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+
+.header-rules-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.3rem 0;
+  color: var(--ink-muted);
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.header-rules-toggle:hover {
+  color: var(--ink-soft);
+}
+
+.header-rules-toggle:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.header-rules-toggle svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.header-rules-chevron {
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+
+.header-rules-toggle[aria-expanded="true"] .header-rules-chevron {
+  transform: rotate(180deg);
+}
+
+.header-rules-summary {
+  margin-left: auto;
+  color: var(--ink-faint);
+}
+
+.header-rules-panel {
+  margin-top: 0.5rem;
 }
 
 .field input,
@@ -804,7 +988,7 @@
   align-items: center;
   gap: 0.5rem;
   color: var(--ink-soft);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
 }
 
 .form-actions {
@@ -819,13 +1003,13 @@
 .inline-error {
   margin: 0;
   color: var(--danger);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
 }
 
 .inline-warning {
   margin: 0;
   color: var(--ochre);
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
 }
 
 .empty-note {
@@ -957,6 +1141,10 @@
   }
 
   .status-dot {
+    transition: none;
+  }
+
+  .header-rules-chevron {
     transition: none;
   }
 }

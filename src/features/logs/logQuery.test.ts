@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { RequestLog } from "../../services/gateway";
 import {
   ALL_ALIASES,
+  ALL_SESSIONS,
   buildLogFilter,
   dailyRangeBounds,
   describeLog,
@@ -41,6 +42,7 @@ function log(overrides: Partial<RequestLog> = {}): RequestLog {
     errorMessage: null,
     requestId: "req-1",
     isStream: false,
+    sessionId: null,
     ...overrides,
   };
 }
@@ -67,6 +69,11 @@ test("range bounds are inclusive of the chosen days and skip empty alias/query",
   assert.equal(filter.to, new Date(2026, 8, 11).toISOString());
   assert.equal(filter.routeAlias, undefined);
   assert.equal(filter.query, undefined);
+});
+
+test("session filter is pushed only when a specific session is chosen", () => {
+  assert.equal(buildLogFilter({ scope: "all", session: ALL_SESSIONS }).sessionId, undefined);
+  assert.equal(buildLogFilter({ scope: "all", session: "ses_a" }).sessionId, "ses_a");
 });
 
 test("range label reads as an inclusive date span", () => {

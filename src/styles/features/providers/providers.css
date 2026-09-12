@@ -69,7 +69,7 @@
   overflow: hidden;
   color: var(--ink-muted);
   font-family: var(--font-mono);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -87,7 +87,7 @@
   color: var(--ink-soft);
   border: 1px solid var(--line);
   border-radius: 4px;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -101,7 +101,7 @@
   display: inline-flex;
   align-items: baseline;
   gap: 0.22rem;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
 }
 
 .price-cell em {
@@ -131,7 +131,7 @@
   align-items: center;
   gap: 0.22rem;
   color: var(--ink-muted);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
 }
 
 /*
@@ -171,7 +171,7 @@
   border: 1px solid var(--line);
   border-radius: 999px;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 

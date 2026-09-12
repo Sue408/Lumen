@@ -33,7 +33,7 @@
 .x-axis,
 .y-axis {
   color: var(--ink-muted);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
 }
 
 .cost-content {
@@ -225,7 +225,7 @@
 .trend-tooltip strong {
   display: block;
   margin-bottom: 0.4375rem;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -258,7 +258,7 @@
 
 .trend-tooltip dt,
 .trend-tooltip dd {
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -275,7 +275,7 @@
   margin-top: 0.5rem;
   padding-top: 0.4375rem;
   border-top: 1px solid var(--line);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
 }
 

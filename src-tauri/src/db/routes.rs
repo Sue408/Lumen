@@ -151,13 +151,16 @@ pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTarg
         match existing.remove(&target.upstream_model_id) {
             Some(target_id) => {
                 tx.execute(
-                    "UPDATE route_targets SET priority = ?2, enabled = ?3 WHERE id = ?1",
+                    "UPDATE route_targets
+                        SET priority = ?2, enabled = ?3
+                      WHERE id = ?1",
                     params![target_id, target.priority, target.enabled as i64],
                 )?;
             }
             None => {
                 tx.execute(
-                    "INSERT INTO route_targets (id, route_id, upstream_model_id, priority, enabled)
+                    "INSERT INTO route_targets
+                        (id, route_id, upstream_model_id, priority, enabled)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
                         uuid::Uuid::new_v4().to_string(),
@@ -214,6 +217,7 @@ mod tests {
                 auth_scheme: "bearer".into(),
                 protocol: protocol.into(),
                 extra_headers: BTreeMap::new(),
+                header_rules: Default::default(),
                 icon: None,
                 icon_tint: "ink".into(),
                 enabled: true,
@@ -665,4 +669,5 @@ mod tests {
         assert_eq!(id_of(&reordered, &a), a_id);
         assert_eq!(id_of(&reordered, &b), b_id);
     }
+
 }

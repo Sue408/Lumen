@@ -5,14 +5,28 @@ import { isTauriRuntime } from "../components/tauriRuntime";
 export type Settings = {
   port: number;
   closeToTray: boolean;
+  sessionHeaders: string[];
 };
+
+/** 与后端 `gateway::session::DEFAULT_SESSION_HEADERS` 保持一致。 */
+export const DEFAULT_SESSION_HEADERS = [
+  "x-opencode-session",
+  "x-session-affinity",
+  "x-session-id",
+  "x-claude-code-session-id",
+  "session_id",
+];
 
 export async function getAppVersion(): Promise<string> {
   if (!isTauriRuntime(window)) return __APP_VERSION__;
   return getVersion();
 }
 
-let mockSettings: Settings = { port: 8787, closeToTray: true };
+let mockSettings: Settings = {
+  port: 8787,
+  closeToTray: true,
+  sessionHeaders: [...DEFAULT_SESSION_HEADERS],
+};
 
 export async function getSettings(): Promise<Settings> {
   if (!isTauriRuntime(window)) return { ...mockSettings };

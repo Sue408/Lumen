@@ -1,12 +1,15 @@
 import { useState } from "react";
-import { SlidersHorizontal } from "lucide-react";
+import { ChevronDown, Repeat, SlidersHorizontal } from "lucide-react";
 import { InlineError, SaveBar, SectionTitle } from "../../components/ConfigControls";
 import {
   authSchemeLabel,
+  draftHeaderRules,
   isProviderDraftDirty,
   protocolLabel,
   type ProviderDraft,
 } from "./providerModel";
+import { summarizeProviderHeaderRules } from "./providerHeaderModel.ts";
+import { HeaderRulesHelp } from "./HeaderRulesHelp";
 
 export function ProviderForm({
   draft,
@@ -26,6 +29,7 @@ export function ProviderForm({
   onSubmit: () => void;
 }) {
   const [reveal, setReveal] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const set = (patch: Partial<ProviderDraft>) => onChange({ ...draft, ...patch });
   const dirty = isProviderDraftDirty(draft, savedDraft);
 
@@ -85,17 +89,70 @@ export function ProviderForm({
               <span className="field-static">{protocolLabel[draft.protocol]}</span>
             )}
           </label>
-          <label className="field field-wide">
-            <span>额外请求头</span>
-            <textarea
-              rows={2}
-              value={draft.extraHeadersText}
-              onChange={(event) => set({ extraHeadersText: event.target.value })}
-              placeholder={"每行一条，例如\nX-Trace: 1"}
-              spellCheck={false}
-            />
-          </label>
         </div>
+      </section>
+
+      <section className="sheet-section">
+        <SectionTitle icon={<Repeat aria-hidden="true" />}>
+          请求头映射
+          <HeaderRulesHelp />
+        </SectionTitle>
+        <button
+          className="header-rules-toggle"
+          type="button"
+          aria-expanded={rulesOpen}
+          onClick={() => setRulesOpen((value) => !value)}
+        >
+          <ChevronDown className="header-rules-chevron" aria-hidden="true" />
+          <span>{rulesOpen ? "收起规则" : "配置规则"}</span>
+          <span className="header-rules-summary">
+            {summarizeProviderHeaderRules(draftHeaderRules(draft))}
+          </span>
+        </button>
+        {rulesOpen ? (
+          <div className="field-grid header-rules-panel">
+            <label className="field field-wide">
+              <span>透传（每行一个，支持 * 通配）</span>
+              <textarea
+                rows={2}
+                value={draft.forwardText}
+                onChange={(event) => set({ forwardText: event.target.value })}
+                placeholder={"非 x- 前缀的头也能放行，例如\nsession_id"}
+                spellCheck={false}
+              />
+            </label>
+            <label className="field field-wide">
+              <span>替换（每行 `来源 → 目标`）</span>
+              <textarea
+                rows={2}
+                value={draft.replaceText}
+                onChange={(event) => set({ replaceText: event.target.value })}
+                placeholder={"session_id → x-opencode-session"}
+                spellCheck={false}
+              />
+            </label>
+            <label className="field field-wide">
+              <span>添加（常量，每行 `name: value`）</span>
+              <textarea
+                rows={2}
+                value={draft.extraHeadersText}
+                onChange={(event) => set({ extraHeadersText: event.target.value })}
+                placeholder={"user-agent: opencode/local"}
+                spellCheck={false}
+              />
+            </label>
+            <label className="field field-wide">
+              <span>移除（每行一个，支持 * 通配）</span>
+              <textarea
+                rows={2}
+                value={draft.removeText}
+                onChange={(event) => set({ removeText: event.target.value })}
+                placeholder={"x-internal*"}
+                spellCheck={false}
+              />
+            </label>
+          </div>
+        ) : null}
       </section>
 
       {error ? <InlineError message={error} /> : null}

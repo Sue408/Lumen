@@ -11,6 +11,7 @@ export const logScopes: { key: LogScope; label: string }[] = [
 ];
 
 export const ALL_ALIASES = "全部别名";
+export const ALL_SESSIONS = "全部会话";
 
 /** 时间区间用半开区间（to 不含），与后端约定一致。 */
 export type LogRange = { from?: string; to?: string };
@@ -20,6 +21,7 @@ export type LogFilterOptions = {
   alias?: string;
   query?: string;
   range?: LogRange;
+  session?: string;
 };
 
 /** 把页面的口径 / 区间 / 别名 / 搜索折算成后端 LogFilter，过滤一律下推数据库。 */
@@ -31,6 +33,7 @@ export function buildLogFilter(options: LogFilterOptions): LogFilter {
   if (options.scope === "failed") filter.status = "error";
   if (options.scope === "unreliable") filter.usageSource = "unreliable";
   if (options.alias && options.alias !== ALL_ALIASES) filter.routeAlias = options.alias;
+  if (options.session && options.session !== ALL_SESSIONS) filter.sessionId = options.session;
   const query = options.query?.trim();
   if (query) filter.query = query;
   return filter;

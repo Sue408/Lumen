@@ -236,7 +236,11 @@ export function RoutingPage() {
     apply(route, {
       targets: [
         ...targetInputs(sortedTargets(route)),
-        { upstreamModelId: modelId, priority: sortedTargets(route).length, enabled: true },
+        {
+          upstreamModelId: modelId,
+          priority: sortedTargets(route).length,
+          enabled: true,
+        },
       ],
     });
 
@@ -485,3 +489,4 @@ export function RoutingPage() {
     </main>
   );
 }
+

@@ -24,6 +24,9 @@ pub struct LogFilter {
     /// 或 "unreliable" 表示 missing 与 partial 两者。
     #[serde(default)]
     pub usage_source: Option<String>,
+    /// 会话等值过滤；与列表页的会话筛选对应。
+    #[serde(default)]
+    pub session_id: Option<String>,
     /// 只保留需要关注的记录：status = 'error' 或 usage_source 为 missing / partial。
     #[serde(default)]
     pub attention_only: Option<bool>,
@@ -102,6 +105,10 @@ fn build_where(filter: &LogFilter) -> Result<(String, Vec<Box<dyn rusqlite::ToSq
             params.push(Box::new(source));
         }
     }
+    if let Some(session) = non_empty(&filter.session_id) {
+        clauses.push("session_id = ?");
+        params.push(Box::new(session));
+    }
     if filter.attention_only == Some(true) {
         clauses.push("(status = 'error' OR usage_source IN ('missing', 'partial'))");
     }
@@ -122,10 +129,10 @@ pub fn insert_log(conn: &Connection, log: &RequestLog) -> Result<(), AppError> {
             kind, input_tokens, output_tokens, total_tokens,
             cache_read_tokens, cache_creation_tokens, cache_read_in_input, reasoning_tokens,
             cost, usage_source, status, http_status, latency_ms, error_message, request_id, is_stream,
-            attempt_index
+            attempt_index, session_id
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-            ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
+            ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
          )",
         params![
             log.id,
@@ -156,6 +163,7 @@ pub fn insert_log(conn: &Connection, log: &RequestLog) -> Result<(), AppError> {
             log.request_id,
             log.is_stream as i64,
             log.attempt_index,
+            log.session_id,
         ],
     )?;
     Ok(())
@@ -241,6 +249,85 @@ pub fn list_log_aliases(conn: &Connection) -> Result<Vec<String>, AppError> {
     Ok(aliases)
 }
 
+/// 会话维度的聚合结果。会话不是实体：这里全部由 `request_logs` 按
+/// `(virtual_key_id, session_id)` 聚合得到。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSummary {
+    pub session_id: String,
+    pub virtual_key_id: Option<String>,
+    /// 首次出现 / 最近出现（`MIN` / `MAX(occurred_at)`）。
+    pub first_seen: String,
+    pub last_seen: String,
+    pub requests: i64,
+    pub total_tokens: i64,
+    pub cost: f64,
+    /// 该会话涉及过的去重上游模型名（忽略 NULL）。
+    pub models: Vec<String>,
+}
+
+fn split_models(raw: Option<String>) -> Vec<String> {
+    raw.map(|value| {
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// 按 `(virtual_key_id, session_id)` 聚合会话视图，`session_id IS NULL` 的记录不入结果。
+/// 按最近出现倒序，`limit` 默认 50（上限 1000）。
+pub fn list_sessions(
+    conn: &Connection,
+    filter: &LogFilter,
+) -> Result<Vec<SessionSummary>, AppError> {
+    let limit = filter.limit.unwrap_or(50).clamp(1, 1000);
+    let (where_sql, params) = build_where(filter)?;
+    let where_sql = if where_sql.is_empty() {
+        " WHERE session_id IS NOT NULL".to_string()
+    } else {
+        format!("{where_sql} AND session_id IS NOT NULL")
+    };
+    let sql = format!(
+        "SELECT
+            session_id,
+            virtual_key_id,
+            MIN(occurred_at) AS first_seen,
+            MAX(occurred_at) AS last_seen,
+            COUNT(*)         AS requests,
+            COALESCE(SUM(total_tokens), 0) AS total_tokens,
+            COALESCE(SUM(cost), 0)         AS cost,
+            GROUP_CONCAT(DISTINCT upstream_model_name) AS models
+         FROM request_logs{where_sql}
+         GROUP BY virtual_key_id, session_id
+         ORDER BY last_seen DESC
+         LIMIT ?"
+    );
+    let mut bound: Vec<&dyn rusqlite::ToSql> = params.iter().map(|item| item.as_ref()).collect();
+    bound.push(&limit);
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bound), |row| {
+        Ok(SessionSummary {
+            session_id: row.get("session_id")?,
+            virtual_key_id: row.get("virtual_key_id")?,
+            first_seen: row.get("first_seen")?,
+            last_seen: row.get("last_seen")?,
+            requests: row.get("requests")?,
+            total_tokens: row.get("total_tokens")?,
+            cost: row.get("cost")?,
+            models: split_models(row.get("models")?),
+        })
+    })?;
+    let mut sessions = Vec::new();
+    for row in rows {
+        sessions.push(row?);
+    }
+    Ok(sessions)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,6 +363,7 @@ mod tests {
             request_id: Some(format!("req-{n}")),
             is_stream: false,
             attempt_index: 0,
+            session_id: None,
         }
     }
 
@@ -387,6 +475,76 @@ mod tests {
         )
         .unwrap();
         assert_eq!(hit.len(), 3);
+    }
+
+    fn session_log(
+        n: i32,
+        occurred_at: &str,
+        session: Option<&str>,
+        key: Option<&str>,
+        cost: f64,
+        model: &str,
+    ) -> RequestLog {
+        let mut entry = log(n, occurred_at, "success", "provider");
+        entry.session_id = session.map(str::to_string);
+        entry.virtual_key_id = key.map(str::to_string);
+        entry.cost = cost;
+        entry.upstream_model_name = Some(model.to_string());
+        entry
+    }
+
+    #[test]
+    fn sessions_aggregate_by_key_and_session() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let rows = [
+            session_log(1, "2026-09-01T10:00:00+00:00", Some("ses_a"), Some("k1"), 0.10, "Model X"),
+            session_log(2, "2026-09-02T10:00:00+00:00", Some("ses_a"), Some("k1"), 0.24, "Model Y"),
+            session_log(3, "2026-09-03T10:00:00+00:00", Some("ses_b"), Some("k1"), 0.05, "Model X"),
+            session_log(4, "2026-09-04T10:00:00+00:00", None, Some("k1"), 0.99, "Model X"),
+        ];
+        for entry in &rows {
+            insert_log(&conn, entry).unwrap();
+        }
+
+        let sessions = list_sessions(&conn, &LogFilter::default()).unwrap();
+        assert_eq!(sessions.len(), 2, "NULL 会话不进结果");
+        assert_eq!(sessions[0].session_id, "ses_b", "按最近出现倒序");
+
+        let a = sessions.iter().find(|s| s.session_id == "ses_a").unwrap();
+        assert_eq!(a.virtual_key_id.as_deref(), Some("k1"));
+        assert_eq!(a.requests, 2);
+        assert_eq!(a.first_seen, "2026-09-01T10:00:00+00:00");
+        assert_eq!(a.last_seen, "2026-09-02T10:00:00+00:00");
+        assert!((a.cost - 0.34).abs() < 1e-9, "cost was {}", a.cost);
+        let mut models = a.models.clone();
+        models.sort();
+        assert_eq!(models, vec!["Model X".to_string(), "Model Y".to_string()]);
+    }
+
+    #[test]
+    fn logs_filter_by_session() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        insert_log(
+            &conn,
+            &session_log(1, "2026-09-01T10:00:00+00:00", Some("ses_a"), Some("k1"), 0.1, "M"),
+        )
+        .unwrap();
+        insert_log(
+            &conn,
+            &session_log(2, "2026-09-02T10:00:00+00:00", Some("ses_b"), Some("k1"), 0.2, "M"),
+        )
+        .unwrap();
+
+        let filter = LogFilter {
+            session_id: Some("ses_a".into()),
+            ..Default::default()
+        };
+        let rows = list_logs(&conn, &filter).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].session_id.as_deref(), Some("ses_a"));
+        assert_eq!(count_logs(&conn, &filter).unwrap(), 1);
     }
 
     /// 手动跑的粗略基准：`cargo test bench_logs -- --nocapture --ignored`。

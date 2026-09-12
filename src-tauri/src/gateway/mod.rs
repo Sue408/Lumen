@@ -2,9 +2,11 @@ pub mod auth;
 pub mod failover;
 pub mod forward;
 pub mod handlers;
+pub mod headers;
 pub mod quota;
 pub mod reject;
 pub mod resolve;
+pub mod session;
 pub mod usage;
 
 use std::net::SocketAddr;

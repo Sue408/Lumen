@@ -14,7 +14,7 @@
   border: 1px solid var(--line);
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 

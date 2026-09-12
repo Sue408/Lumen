@@ -25,6 +25,7 @@ pub async fn save_settings_cmd(
     let saved = with_db(&state.db, move |conn| save_settings(conn, &input)).await?;
     state.set_port(saved.port);
     state.set_close_to_tray(saved.close_to_tray);
+    state.set_session_headers(saved.session_headers.clone());
     Ok(saved)
 }
 

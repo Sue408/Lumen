@@ -4,7 +4,10 @@ use chrono::Local;
 use serde::Serialize;
 use tauri::State;
 
-use crate::db::logs::{count_logs, list_log_aliases, list_logs, summarize_logs, LogFilter, LogSummary};
+use crate::db::logs::{
+    count_logs, list_log_aliases, list_logs, list_sessions, summarize_logs, LogFilter,
+    LogSummary, SessionSummary,
+};
 use crate::db::models::RequestLog;
 use crate::db::stats::{query_overview, KeyScope, Period, UsageOverview};
 use crate::db::with_db;
@@ -44,6 +47,20 @@ pub async fn list_log_aliases_cmd(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<String>, AppError> {
     with_db(&state.db, list_log_aliases).await
+}
+
+/// 会话维度聚合：按 `(virtual_key_id, session_id)` 分组，默认取最近 50 个会话。
+#[tauri::command]
+pub async fn list_sessions_cmd(
+    state: State<'_, Arc<AppState>>,
+    filter: Option<LogFilter>,
+    limit: Option<i64>,
+) -> Result<Vec<SessionSummary>, AppError> {
+    let mut filter = filter.unwrap_or_default();
+    if let Some(limit) = limit {
+        filter.limit = Some(limit);
+    }
+    with_db(&state.db, move |conn| list_sessions(conn, &filter)).await
 }
 
 #[tauri::command]

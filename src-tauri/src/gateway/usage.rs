@@ -240,6 +240,8 @@ pub struct LogContext {
     pub usage: UsageTotals,
     /// 本次客户端请求内的上游尝试序号，从 0 起；降级时递增。
     pub attempt_index: i64,
+    /// 会话标识：由候选会话头名解析而来，每次尝试都带（成功与失败均记，便于按会话追踪）。
+    pub session_id: Option<String>,
 }
 
 pub fn build_log(context: LogContext) -> RequestLog {
@@ -256,8 +258,8 @@ pub fn build_log(context: LogContext) -> RequestLog {
         virtual_key_id,
         usage,
         attempt_index,
+        session_id,
     } = context;
-
     // 只有拿到 input/output 或缓存计数时才能按 token 计价。仅有 total_tokens 的
     // 响应无法拆分计价，保守记 0，并保留 usage_source = partial 供账本筛出。
     let billable = usage.input_tokens > 0
@@ -308,6 +310,7 @@ pub fn build_log(context: LogContext) -> RequestLog {
         request_id,
         is_stream,
         attempt_index,
+        session_id,
     }
 }
 
@@ -542,6 +545,7 @@ mod tests {
             route_protocol: PROTOCOL_OPENAI.into(),
             upstream_protocol: PROTOCOL_OPENAI.into(),
             extra_headers: std::collections::BTreeMap::new(),
+            header_rules: Default::default(),
         }
     }
 
@@ -567,6 +571,7 @@ mod tests {
             virtual_key_id: None,
             usage,
             attempt_index: 0,
+            session_id: None,
         });
         // 拆分未知 → 保守不结算，但保留 total 与 partial 标记。
         assert_eq!(log.cost, 0.0);
