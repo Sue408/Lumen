@@ -39,6 +39,16 @@ pub fn period_start(period: QuotaPeriod, now: DateTime<Local>) -> DateTime<Local
     }
 }
 
+/// 额度周期的中文名，用于超限提示。
+pub fn period_label(period: QuotaPeriod) -> &'static str {
+    match period {
+        QuotaPeriod::Daily => "每日",
+        QuotaPeriod::Weekly => "每周",
+        QuotaPeriod::Monthly => "每月",
+        QuotaPeriod::Total => "一次性总额",
+    }
+}
+
 /// 是否已达 / 超过额度。无上限（`None`）永远放行；恰好等于上限视为超限。
 pub fn is_over_quota(spent: f64, limit: Option<f64>) -> bool {
     match limit {

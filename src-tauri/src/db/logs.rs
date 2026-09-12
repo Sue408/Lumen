@@ -40,6 +40,18 @@ fn non_empty(value: &Option<String>) -> Option<String> {
         .filter(|item| !item.is_empty())
 }
 
+/// 转义 LIKE 的通配符，避免用户输入的 `%` / `_` 被当成模式。调用方以 `ESCAPE '\'` 配套。
+fn escape_like(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
 /// 把 RFC3339 时间统一折算成 Utc 的规范形式，保证字符串序与时间序一致。
 fn canonical_time(value: &Option<String>) -> Result<Option<String>, AppError> {
     match non_empty(value) {
@@ -70,9 +82,9 @@ fn build_where(filter: &LogFilter) -> Result<(String, Vec<Box<dyn rusqlite::ToSq
     }
     if let Some(query) = non_empty(&filter.query) {
         clauses.push(
-            "(COALESCE(route_alias, '') || ' ' || COALESCE(upstream_model_name, '') || ' ' || kind || ' ' || CAST(total_tokens AS TEXT)) LIKE ?",
+            "(COALESCE(route_alias, '') || ' ' || COALESCE(upstream_model_name, '') || ' ' || kind || ' ' || CAST(total_tokens AS TEXT)) LIKE ? ESCAPE '\\'",
         );
-        params.push(Box::new(format!("%{query}%")));
+        params.push(Box::new(format!("%{}%", escape_like(&query))));
     }
     if let Some(from) = canonical_time(&filter.from)? {
         clauses.push("occurred_at >= ?");
@@ -345,6 +357,33 @@ mod tests {
         let rows = list_logs(&conn, &filter).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "log-2");
+    }
+
+    #[test]
+    fn query_treats_wildcards_as_literals() {
+        let db = fixture();
+        let conn = db.lock().unwrap();
+        // 字面量 `%` 不应被当作 LIKE 通配符匹配全部记录。
+        let none = list_logs(
+            &conn,
+            &LogFilter {
+                query: Some("%".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(none.is_empty());
+
+        // 正常子串仍能命中。
+        let hit = list_logs(
+            &conn,
+            &LogFilter {
+                query: Some("Model".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(hit.len(), 3);
     }
 
     /// 手动跑的粗略基准：`cargo test bench_logs -- --nocapture --ignored`。

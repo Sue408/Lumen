@@ -8,18 +8,20 @@ use axum::Json;
 use chrono::Local;
 use serde_json::{json, Value};
 
-use crate::db::keys::{find_enabled_virtual_key, virtual_key_spend};
+use crate::db::keys::virtual_key_spend;
 use crate::db::models::{
-    VirtualKey, PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
+    PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
 };
 use crate::db::routes::list_enabled_aliases;
 use crate::db::with_db;
 use crate::error::AppError;
+use crate::gateway::auth::authenticate;
 use crate::gateway::forward::{
     ensure_include_usage, error_response, request_id, send, stream_response, upstream_path,
 };
-use crate::gateway::quota::{is_over_quota, period_start, QuotaPeriod};
-use crate::gateway::resolve::{resolve, ResolvedRoute};
+use crate::gateway::quota::{is_over_quota, period_label, period_start, QuotaPeriod};
+use crate::gateway::reject::reject;
+use crate::gateway::resolve::resolve;
 use crate::gateway::usage::{build_log, extract_usage, record, LogContext, UsageTotals};
 use crate::state::AppState;
 
@@ -369,81 +371,6 @@ fn error_message(value: &Value, fallback: &str) -> String {
         })
 }
 
-fn header_key(headers: &HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-/// 从 `Authorization: Bearer`、`x-api-key` 或 `x-goog-api-key` 中取出密钥原文。
-/// 后者用于兼容原生 Gemini 客户端的鉴权习惯。
-fn extract_key(headers: &HeaderMap) -> Option<String> {
-    if let Some(value) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-    {
-        let value = value.trim();
-        if let Some(token) = value
-            .strip_prefix("Bearer ")
-            .or_else(|| value.strip_prefix("bearer "))
-        {
-            let token = token.trim();
-            if !token.is_empty() {
-                return Some(token.to_string());
-            }
-        }
-    }
-    header_key(headers, "x-api-key").or_else(|| header_key(headers, "x-goog-api-key"))
-}
-
-/// 解析并校验虚拟密钥；缺失、未知或已停用一律视为未授权。
-async fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<VirtualKey, AppError> {
-    let key = extract_key(headers).ok_or(AppError::Unauthorized)?;
-    with_db(&state.db, move |conn| find_enabled_virtual_key(conn, &key))
-        .await?
-        .ok_or(AppError::Unauthorized)
-}
-
-fn period_label(period: QuotaPeriod) -> &'static str {
-    match period {
-        QuotaPeriod::Daily => "每日",
-        QuotaPeriod::Weekly => "每周",
-        QuotaPeriod::Monthly => "每月",
-        QuotaPeriod::Total => "一次性总额",
-    }
-}
-
-/// 在进入转发前拒绝请求（未授权 / 超限 / 未找到模型 / 协议不匹配 / 配置不一致），并落一条 error 日志。
-async fn reject(
-    state: &AppState,
-    endpoint: &str,
-    alias: &str,
-    is_stream: bool,
-    route: Option<ResolvedRoute>,
-    virtual_key_id: Option<String>,
-    error: &AppError,
-) {
-    let log = build_log(LogContext {
-        endpoint: endpoint.to_string(),
-        method: "POST".to_string(),
-        alias: alias.to_string(),
-        kind: "chat".to_string(),
-        is_stream,
-        route,
-        latency_ms: 0,
-        status: "error".to_string(),
-        http_status: Some(error.status_code().as_u16() as i64),
-        error_message: Some(error.to_string()),
-        request_id: None,
-        virtual_key_id,
-        usage: UsageTotals::missing(),
-    });
-    let _ = record(state, log).await;
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -456,7 +383,7 @@ mod tests {
     use crate::db::keys::save_virtual_key;
     use crate::db::logs::{list_logs, LogFilter};
     use crate::db::models::{
-        ProviderInput, RequestLog, RouteInput, RouteTargetInput, UpstreamModelInput,
+        ProviderInput, RequestLog, RouteInput, RouteTargetInput, UpstreamModelInput, VirtualKey,
         VirtualKeyInput,
     };
     use crate::db::{open_in_memory, providers, routes, Db};

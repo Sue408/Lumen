@@ -57,6 +57,10 @@ pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTarg
     if !is_known_protocol(&input.protocol) {
         return Err(AppError::message(format!("未知协议：{}", input.protocol)));
     }
+    // 启用的路由至少需要一个启用中的目标，否则运行时永远解析为 404。
+    if input.enabled && !input.targets.iter().any(|target| target.enabled) {
+        return Err(AppError::message("启用的路由至少需要一个启用中的目标"));
+    }
     // 协议创建后锁定：改协议等于换了对外契约，应删除重建而非原地修改。
     if let Some(existing_id) = input.id.as_deref().filter(|value| !value.is_empty()) {
         if let Some(existing) = get_route(conn, existing_id)? {
@@ -307,5 +311,37 @@ mod tests {
         // 不同 id、相同 alias：命中 UNIQUE(alias)，应翻译成面向用户的提示。
         let error = save_route(&conn, &input("r")).unwrap_err();
         assert!(matches!(error, AppError::Message(_)), "got {error:?}");
+    }
+
+    #[test]
+    fn rejects_enabled_route_without_usable_target() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let model = seed_model(&conn, "openai", "gpt");
+        let route = |alias: &str, enabled: bool, targets: Vec<RouteTargetInput>| RouteInput {
+            id: None,
+            alias: alias.into(),
+            display_name: "R".into(),
+            protocol: "openai".into(),
+            enabled,
+            targets,
+        };
+
+        assert!(save_route(&conn, &route("empty", true, Vec::new())).is_err());
+        assert!(save_route(
+            &conn,
+            &route(
+                "disabled-target",
+                true,
+                vec![RouteTargetInput {
+                    upstream_model_id: model.clone(),
+                    priority: 0,
+                    enabled: false,
+                }],
+            ),
+        )
+        .is_err());
+        // 停用的路由允许暂不挂目标。
+        assert!(save_route(&conn, &route("draft", false, Vec::new())).is_ok());
     }
 }
