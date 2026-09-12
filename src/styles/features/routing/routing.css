@@ -7,11 +7,6 @@
   overflow: hidden;
 }
 
-/* 左栏放宽到约 1.5×，详情栏相应收窄。 */
-.routing-page .config-workbench {
-  grid-template-columns: minmax(19.5rem, 24rem) minmax(0, 1fr);
-}
-
 /* 协议说明图标：与页面标题同排，靠右留出呼吸，底部与标题对齐。 */
 .routing-page .page-header {
   display: flex;

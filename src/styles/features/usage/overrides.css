@@ -116,17 +116,12 @@
   opacity: 0.4;
 }
 
-@media (max-width: 50rem) {
-  .header-actions {
-    align-items: flex-start;
-    width: 100%;
+@container page (max-width: 46rem) {
+  .page-controls {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .period-control-stack {
-    justify-items: start;
-  }
-
-  .header-utility-actions {
-    padding-bottom: 0;
+  .header-actions .period-control-stack {
+    margin-left: auto;
   }
 }

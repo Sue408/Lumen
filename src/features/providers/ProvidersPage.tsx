@@ -62,7 +62,7 @@ import { ProviderForm } from "./ProviderForm";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
 import { useRegisterSelection } from "../../hooks/useRegisterSelection";
 import { useLiveRevision } from "../../app/useLiveRevision";
-import { CONNECTIVITY_ERROR_THRESHOLD, formatLatency, formatPercent } from "../../lib/telemetry";
+import { connectivityLabel, connectivityState, connectivitySummary, formatLatency, formatPercent } from "../../lib/telemetry";
 import {
   queryTelemetry,
   testProvider,
@@ -428,14 +428,15 @@ export function ProvidersPage() {
                     ]);
                     const connection = connectivityById.get(provider.id) ?? null;
                     const isCooling = providerModels.some((model) => coolingModels.has(model.id));
-                    const warn =
-                      isCooling ||
-                      (connection !== null &&
-                        connection.total > 0 &&
-                        connection.successRate < CONNECTIVITY_ERROR_THRESHOLD);
+                    const state = connectivityState(connection, isCooling);
+                    const warn = state === "error";
                     const meta = provider.enabled
-                      ? `${providerModels.length} 个模型${connection ? ` · 24h ${formatPercent(connection.successRate)} · ${formatLatency(connection.avgLatencyMs)}` : ""}${isCooling ? " · 冷却中" : ""}`
+                      ? `${providerModels.length} 个模型 · ${connectivitySummary(connection, isCooling)}`
                       : `已停用 · ${providerModels.length} 个模型`;
+                    const metaDetail =
+                      connection && connection.total > 0
+                        ? `近 24 小时${connectivityLabel(state)} · 成功率 ${formatPercent(connection.successRate)} · 平均延迟 ${formatLatency(connection.avgLatencyMs)}`
+                        : "近 24 小时暂无调用";
                     return (
                       <button
                         className={`register-select${selectedId === provider.id ? " is-selected" : ""}${provider.enabled ? "" : " is-off"}`}
@@ -448,7 +449,9 @@ export function ProvidersPage() {
                         <BrandGlyph brand={brand} size={20} tint={provider.enabled ? provider.iconTint : "ink"} fallback={<Server aria-hidden="true" />} />
                         <span className="register-body">
                           <span className="register-name" title={provider.name}>{provider.name}</span>
-                          <span className={`register-meta${warn ? " is-warn" : ""}`}>{meta}</span>
+                          <span className={`register-meta${warn ? " is-warn" : ""}`} title={provider.enabled ? metaDetail : undefined}>
+                            {meta}
+                          </span>
                         </span>
                         <StatusDot alive={provider.enabled} />
                       </button>
@@ -528,7 +531,7 @@ export function ProvidersPage() {
                         <CircleAlert aria-hidden="true" />
                       )}
                       {probe.ok
-                        ? `连通正常 · ${formatLatency(probe.latencyMs)}`
+                        ? `连通正常 · 延迟 ${formatLatency(probe.latencyMs)}`
                         : `探测失败：${probe.error ?? "未知错误"}`}
                     </p>
                   ) : null}

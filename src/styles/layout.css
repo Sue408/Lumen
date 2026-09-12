@@ -18,3 +18,21 @@
    */
   --chrome-h: 2.5rem;
 }
+
+/*
+ * 内容容器 — 响应式断点以「内容列宽」而非「视口宽」为准。
+ *
+ * 页面根 <main> 就是 .app-shell 的内容列（视口 − 流体侧栏 − 页边距），
+ * 在最小窗口（900px）下实际只有约 40rem。若按视口断点，等于把侧栏与
+ * 页边距一起算进内容，窄屏规则永远不会命中。此处建立 inline-size 容器，
+ * 各页的窄屏规则用 @container page (...) 查询真实可用宽度。
+ */
+.usage-page,
+.logs-page,
+.providers-page,
+.routing-page,
+.keys-page,
+.settings-page {
+  container-type: inline-size;
+  container-name: page;
+}

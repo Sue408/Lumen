@@ -1,11 +1,11 @@
-@media (max-width: 62.5rem) {
+@container page (max-width: 52rem) {
   .usage-charts {
     grid-template-columns: minmax(0, 1.6fr) minmax(14rem, 0.9fr);
     gap: 1.5rem;
   }
 }
 
-@media (max-width: 56.25rem) {
+@container page (max-width: 46rem) {
   .usage-charts {
     grid-template-columns: minmax(0, 1.5fr) minmax(13.5rem, 0.9fr);
     gap: 1.25rem;

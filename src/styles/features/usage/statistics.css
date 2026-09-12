@@ -85,10 +85,11 @@
 }
 
 .page-controls {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  column-gap: 1.5rem;
+  row-gap: 1rem;
   min-width: 0;
 }
 

@@ -489,7 +489,7 @@
 }
 
 /* narrow: toolbar wraps, search takes its own row; filters panel is already a block */
-@media (max-width: 60rem) {
+@container page (max-width: 48rem) {
   .logs-search {
     flex-basis: 100%;
     order: 1;
@@ -500,7 +500,7 @@
   }
 }
 
-@media (max-width: 50rem) {
+@container page (max-width: 44rem) {
   .logs-row-main {
     grid-template-columns: 3rem minmax(8rem, 1fr) 6.5rem 5rem 1rem;
     gap: 0.625rem;

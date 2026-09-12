@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildSparklinePath,
+  connectivityLabel,
   connectivityState,
+  connectivitySummary,
   formatCompactTokens,
   formatLatency,
   formatPercent,
@@ -40,6 +42,29 @@ test("connectivity state follows cooling and threshold", () => {
   assert.equal(connectivityState({ total: 10, successRate: 0.95 }, false), "live");
   assert.equal(connectivityState({ total: 10, successRate: 0.5 }, false), "error");
   assert.equal(connectivityState({ total: 10, successRate: 1 }, true), "error");
+});
+
+test("connectivity label reads as plain language", () => {
+  assert.equal(connectivityLabel("live"), "连通良好");
+  assert.equal(connectivityLabel("error"), "连通异常");
+  assert.equal(connectivityLabel("idle"), "暂无流量");
+});
+
+test("connectivity summary keeps labelled numbers inline", () => {
+  assert.equal(connectivitySummary(null, false), "暂无流量");
+  assert.equal(connectivitySummary({ total: 0, successRate: 1, avgLatencyMs: null }, false), "暂无流量");
+  assert.equal(
+    connectivitySummary({ total: 10, successRate: 0.95, avgLatencyMs: 612.4 }, false),
+    "成功率 95% · 延迟 612 ms",
+  );
+  assert.equal(
+    connectivitySummary({ total: 10, successRate: 0.5, avgLatencyMs: 1500 }, true),
+    "成功率 50% · 延迟 1.5 s · 冷却中",
+  );
+  assert.equal(
+    connectivitySummary({ total: 0, successRate: 1, avgLatencyMs: null }, true),
+    "暂无流量 · 冷却中",
+  );
 });
 
 test("sparkline maps buckets across the full width", () => {

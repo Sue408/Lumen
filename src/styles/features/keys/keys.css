@@ -261,10 +261,13 @@
 }
 
 .keys-page .key-quota-text {
-  flex: 0 0 auto;
+  overflow: hidden;
+  flex: 0 1 auto;
+  min-width: 0;
   color: var(--ink-muted);
   font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -295,6 +298,38 @@
 .keys-page .key-card .confirm-bar {
   grid-column: 1 / -1;
   margin-bottom: 0;
+}
+
+/*
+ * 窄内容区：每行折成两行——身份 + 动作在首行，密钥、配额依次在下。
+ * 单行四列的最小宽度（约 50rem）在最小窗口（内容区约 40rem）下装不下，
+ * 硬撑会让配额金额溢出到动作列，故按内容列宽降级为两行网格。
+ */
+@container page (max-width: 52rem) {
+  .keys-page .key-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "id actions"
+      "key key"
+      "quota quota";
+    gap: 0.45rem 1rem;
+  }
+
+  .keys-page .key-part-id {
+    grid-area: id;
+  }
+
+  .keys-page .key-part-key {
+    grid-area: key;
+  }
+
+  .keys-page .key-part-quota {
+    grid-area: quota;
+  }
+
+  .keys-page .key-part-actions {
+    grid-area: actions;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

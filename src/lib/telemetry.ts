@@ -45,6 +45,32 @@ export function connectivityState(
   return "live";
 }
 
+/** 连通性状态的人话说法：登记簿里给一眼能懂的结果，数值明细交给 tooltip。 */
+const CONNECTIVITY_LABEL: Record<ConnectivityState, string> = {
+  live: "连通良好",
+  error: "连通异常",
+  idle: "暂无流量",
+};
+
+export function connectivityLabel(state: ConnectivityState): string {
+  return CONNECTIVITY_LABEL[state];
+}
+
+/**
+ * 登记簿行内的连通性摘要：带上「成功率 / 延迟」标签，避免一串裸数字。
+ * 没有任何流量时只说明现状；冷却中始终在末尾点明。
+ */
+export function connectivitySummary(
+  connection: { total: number; successRate: number; avgLatencyMs: number | null } | null,
+  cooling: boolean,
+): string {
+  if (!connection || connection.total === 0) {
+    return cooling ? "暂无流量 · 冷却中" : "暂无流量";
+  }
+  const detail = `成功率 ${formatPercent(connection.successRate)} · 延迟 ${formatLatency(connection.avgLatencyMs)}`;
+  return cooling ? `${detail} · 冷却中` : detail;
+}
+
 /**
  * 把桶序列映射为一条 sparkline 折线路径（去脚手架：只留线，无轴无网格）。
  * 空序列或非法尺寸返回空串，交由调用方决定是否绘制。

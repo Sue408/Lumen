@@ -30,10 +30,35 @@
 .config-workbench {
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: minmax(13rem, 16rem) minmax(0, 1fr);
+  /* 提供商 / 路由共用同一左栏宽度，两页登记簿列宽一致。 */
+  grid-template-columns: minmax(19.5rem, 24rem) minmax(0, 1fr);
   align-items: stretch;
   min-height: 0;
   min-width: 0;
+}
+
+/*
+ * 窄内容区：工作台从双栏降为单栏（register 在上、详情在下），两栏各自
+ * 内部滚动。断点按内容列宽而非视口，故用 @container。
+ */
+@container page (max-width: 52rem) {
+  .config-workbench {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(9rem, 0.85fr) minmax(0, 1.15fr);
+    row-gap: 0.75rem;
+  }
+
+  .config-workbench > .register-pane {
+    padding-right: 0;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .config-workbench > .workbench-sheet {
+    padding-right: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
 }
 
 /* ---- register (object index) ---- */
