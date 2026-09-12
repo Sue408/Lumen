@@ -27,7 +27,7 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 axum = "0.8"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "fs"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
@@ -45,6 +45,35 @@ tower = { version = "0.5", features = ["util"] }
 [profile.release]
 codegen-units = 1
 lto = true
-opt-level = 3
+opt-level = "s"
 panic = "abort"
 strip = true
+
+# 体积优先：全局 opt-level = "s"，但网关热路径（HTTP 转发、JSON、SQLite）单独保留
+# opt-level = 3，避免以吞吐换取体积。webview2 / wry / tao 等体积大头仍走 "s"。
+[profile.release.package.reqwest]
+opt-level = 3
+
+[profile.release.package.tokio]
+opt-level = 3
+
+[profile.release.package.hyper]
+opt-level = 3
+
+[profile.release.package.hyper-util]
+opt-level = 3
+
+[profile.release.package.axum]
+opt-level = 3
+
+[profile.release.package.tower]
+opt-level = 3
+
+[profile.release.package.serde_json]
+opt-level = 3
+
+[profile.release.package.rusqlite]
+opt-level = 3
+
+[profile.release.package.libsqlite3-sys]
+opt-level = 3
