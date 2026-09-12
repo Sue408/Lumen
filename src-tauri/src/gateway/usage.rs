@@ -4,6 +4,7 @@ use crate::db::logs::insert_log;
 use crate::db::models::{contains_cache_read, RequestLog, PROTOCOL_GEMINI};
 use crate::db::with_db;
 use crate::error::AppError;
+use crate::gateway::estimate::Estimates;
 use crate::gateway::resolve::ResolvedRoute;
 use crate::state::AppState;
 
@@ -14,9 +15,7 @@ pub const PER_MILLION: f64 = 1_000_000.0;
 pub enum UsageSource {
     /// 上游明确返回，可直接结算。
     Provider,
-    /// 网关 tokenizer 估算。**当前预留**：网关不做本地估算，仅作为对外契约
-    /// （`docs/后端接口文档.md` 的 `UsageSource`）保留的取值之一。
-    #[allow(dead_code, reason = "对前端保留的契约取值，待接入本地估算后才会构造")]
+    /// 网关本地估算：上游未返回用量、或只返回部分用量时，用请求 / 响应文本补齐。
     Estimated,
     /// 上游未返回任何可用用量。
     #[default]
@@ -145,7 +144,18 @@ pub fn extract_fields(usage: &Value) -> UsageFields {
 }
 
 /// 把存在性字段收敛为规范量。输入与输出都缺失时返回 `None`（无法结算）。
+#[cfg(test)]
 pub fn finalize(fields: UsageFields, contains_cache_read: bool) -> Option<UsageTotals> {
+    finalize_with_estimate(fields, contains_cache_read, false)
+}
+
+/// 与 `finalize` 相同，但当缺失的边由网关估算补齐时（`estimated = true`），来源标为
+/// `Estimated` 而非 `Provider` / `Partial`，让账本能把估算值与上游原值分开。
+pub fn finalize_with_estimate(
+    fields: UsageFields,
+    contains_cache_read: bool,
+    estimated: bool,
+) -> Option<UsageTotals> {
     if fields.input.is_none() && fields.output.is_none() && fields.total.is_none() {
         return None;
     }
@@ -158,7 +168,9 @@ pub fn finalize(fields: UsageFields, contains_cache_read: bool) -> Option<UsageT
     } else {
         input + cache_read + cache_creation + output
     };
-    let source = if fields.input.is_some() && fields.output.is_some() {
+    let source = if estimated {
+        UsageSource::Estimated
+    } else if fields.input.is_some() && fields.output.is_some() {
         UsageSource::Provider
     } else {
         UsageSource::Partial
@@ -175,6 +187,24 @@ pub fn finalize(fields: UsageFields, contains_cache_read: bool) -> Option<UsageT
     })
 }
 
+/// 用估算值补上上游缺失的边；返回是否真的用到了估算（用于决定来源标记）。
+pub fn apply_estimates(fields: &mut UsageFields, estimates: Estimates) -> bool {
+    let mut used = false;
+    if fields.input.is_none() {
+        if let Some(value) = estimates.input {
+            fields.input = Some(value);
+            used = true;
+        }
+    }
+    if fields.output.is_none() {
+        if let Some(value) = estimates.output {
+            fields.output = Some(value);
+            used = true;
+        }
+    }
+    used
+}
+
 /// 按协议选定用量容器：Gemini 原生用 `usageMetadata`，其余用 `usage`。
 fn usage_container<'a>(value: &'a Value, protocol: &str) -> Option<&'a Value> {
     let key = if protocol == PROTOCOL_GEMINI {
@@ -186,9 +216,25 @@ fn usage_container<'a>(value: &'a Value, protocol: &str) -> Option<&'a Value> {
 }
 
 /// 从完整响应中提取规范用量（非流式）。容器与缓存边界都由协议决定。
+#[cfg(test)]
 pub fn extract_usage(value: &Value, protocol: &str) -> Option<UsageTotals> {
     let usage = usage_container(value, protocol)?;
     finalize(extract_fields(usage), contains_cache_read(protocol))
+}
+
+/// 非流式：提取上游用量，缺失的边用估算补齐。上游完全未返回时，只要估算可用，
+/// 仍产出一条 `estimated` 记录——网关不做「上游不给就放弃」。
+pub fn extract_usage_estimated(
+    value: &Value,
+    protocol: &str,
+    estimates: Estimates,
+) -> UsageTotals {
+    let mut fields = usage_container(value, protocol)
+        .map(extract_fields)
+        .unwrap_or_default();
+    let used = apply_estimates(&mut fields, estimates);
+    finalize_with_estimate(fields, contains_cache_read(protocol), used)
+        .unwrap_or_else(UsageTotals::missing)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -577,5 +623,103 @@ mod tests {
         assert_eq!(log.cost, 0.0);
         assert_eq!(log.total_tokens, 150);
         assert_eq!(log.usage_source, "partial");
+    }
+
+    #[test]
+    fn apply_estimates_fills_only_missing_sides() {
+        let mut fields = UsageFields::default();
+        let used = apply_estimates(
+            &mut fields,
+            Estimates {
+                input: Some(30),
+                output: Some(7),
+            },
+        );
+        assert!(used);
+        assert_eq!(fields.input, Some(30));
+        assert_eq!(fields.output, Some(7));
+
+        let mut partial = UsageFields {
+            input: Some(10),
+            ..UsageFields::default()
+        };
+        let used = apply_estimates(
+            &mut partial,
+            Estimates {
+                input: Some(99),
+                output: Some(7),
+            },
+        );
+        assert!(used);
+        // 上游已给的边不被估算覆盖。
+        assert_eq!(partial.input, Some(10));
+        assert_eq!(partial.output, Some(7));
+    }
+
+    #[test]
+    fn estimated_usage_is_billable_and_tagged() {
+        let usage = extract_usage_estimated(
+            &json!({ "choices": [] }),
+            PROTOCOL_OPENAI,
+            Estimates {
+                input: Some(1000),
+                output: Some(500),
+            },
+        );
+        assert_eq!(usage.source, UsageSource::Estimated);
+        assert_eq!(usage.input_tokens, 1000);
+        assert_eq!(usage.output_tokens, 500);
+
+        let log = build_log(LogContext {
+            endpoint: "/v1/chat/completions".into(),
+            alias: "lumen/x".into(),
+            is_stream: false,
+            route: Some(sample_route()),
+            latency_ms: 1,
+            status: "success".into(),
+            http_status: Some(200),
+            error_message: None,
+            request_id: None,
+            virtual_key_id: None,
+            usage,
+            attempt_index: 0,
+            session_id: None,
+        });
+        // 估算值计入花费：账本不因上游漏报而归零。
+        assert!(log.cost > 0.0);
+        assert_eq!(log.usage_source, "estimated");
+    }
+
+    #[test]
+    fn provider_usage_survives_estimates() {
+        let value = json!({ "usage": { "prompt_tokens": 12, "completion_tokens": 8 } });
+        let usage = extract_usage_estimated(
+            &value,
+            PROTOCOL_OPENAI,
+            Estimates {
+                input: Some(999),
+                output: Some(999),
+            },
+        );
+        assert_eq!(usage.source, UsageSource::Provider);
+        assert_eq!(usage.input_tokens, 12);
+        assert_eq!(usage.output_tokens, 8);
+    }
+
+    #[test]
+    fn partial_usage_is_completed_by_estimates() {
+        // 上游只给了 total：两侧都用估算补齐，并标为估算。
+        let value = json!({ "usage": { "total_tokens": 150 } });
+        let usage = extract_usage_estimated(
+            &value,
+            PROTOCOL_OPENAI,
+            Estimates {
+                input: Some(100),
+                output: Some(50),
+            },
+        );
+        assert_eq!(usage.source, UsageSource::Estimated);
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 50);
     }
 }

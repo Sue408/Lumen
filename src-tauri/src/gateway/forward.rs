@@ -12,10 +12,12 @@ use crate::db::models::{
     contains_cache_read, PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
 };
 use crate::error::AppError;
+use crate::gateway::estimate::{collect_stream_delta, count_tokens, Estimates};
 use crate::gateway::headers::build_upstream_headers;
 use crate::gateway::resolve::ResolvedRoute;
 use crate::gateway::usage::{
-    build_log, extract_fields, finalize, record, LogContext, UsageFields, UsageSource, UsageTotals,
+    apply_estimates, build_log, extract_fields, finalize_with_estimate, record, LogContext,
+    UsageFields, UsageSource, UsageTotals,
 };
 use crate::state::AppState;
 
@@ -117,6 +119,12 @@ struct UsageScanner {
     finalized: bool,
     /// 上游协议，决定容器、缓存边界与收尾标记。
     protocol: String,
+    /// 真实上游模型名，用于在上游漏报时选取 tokenizer。
+    model_id: String,
+    /// 累积的输出文本，供上游未给 usage 时估算。
+    output_text: String,
+    /// 请求侧估算的输入 token；上游未回输入时用它补齐。
+    input_estimate: Option<i64>,
 }
 
 impl UsageScanner {
@@ -149,6 +157,9 @@ impl UsageScanner {
         let Ok(value) = serde_json::from_str::<Value>(data) else {
             return;
         };
+
+        // 无论上游是否上报 usage，都累积输出文本，供漏报时估算。
+        collect_stream_delta(&self.protocol, &value, &mut self.output_text);
 
         // Anthropic 以 message_stop 收尾；OpenAI 的最终 usage 块 choices 为空且带 usage；
         // Responses 以 response.completed / incomplete / failed 收尾。
@@ -208,12 +219,24 @@ impl UsageScanner {
     }
 
     fn totals(&self) -> UsageTotals {
-        if !self.usage_seen {
+        let estimates = Estimates {
+            input: self.input_estimate,
+            output: if self.output_text.is_empty() {
+                None
+            } else {
+                Some(count_tokens(&self.model_id, &self.output_text))
+            },
+        };
+        let mut fields = self.fields;
+        let used = apply_estimates(&mut fields, estimates);
+        // 上游一字未报、且估算也拿不到文本（如完全失败）时，只能记 missing。
+        if !self.usage_seen && !used {
             return UsageTotals::missing();
         }
-        match finalize(self.fields, contains_cache_read(&self.protocol)) {
+        match finalize_with_estimate(fields, contains_cache_read(&self.protocol), used) {
             Some(mut totals) => {
-                if !self.finalized {
+                // 上游给了完整字段但流未正常收尾 → Partial；用了估算则已是 Estimated。
+                if totals.source == UsageSource::Provider && !self.finalized {
                     totals.source = UsageSource::Partial;
                 }
                 totals
@@ -230,6 +253,8 @@ pub struct StreamMeta {
     pub virtual_key_id: Option<String>,
     pub attempt_index: i64,
     pub session_id: Option<String>,
+    /// 请求侧估算的输入 token，供上游漏报时补齐。
+    pub input_estimate: Option<i64>,
 }
 
 /// 透传上游 SSE 流，同时在后台扫描末块 usage 并落库。
@@ -249,6 +274,8 @@ pub fn stream_response(
         let mut stream = response.bytes_stream();
         let mut scanner = UsageScanner {
             protocol: route.upstream_protocol.clone(),
+            model_id: route.model_id.clone(),
+            input_estimate: meta.input_estimate,
             ..UsageScanner::default()
         };
         // 上游长时间不吐字节即视为挂起：主动中止并把该次调用记为失败，
@@ -445,9 +472,19 @@ mod tests {
     }
 
     #[test]
-    fn scanner_flags_responses_stream_without_completed() {
+    fn scanner_estimates_output_when_usage_never_arrives() {
         let mut scanner = make_scanner(PROTOCOL_RESPONSES);
         scanner.push(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n");
+        let totals = scanner.totals();
+        // 上游未给 usage，但响应文本在手：估算而不是放弃。
+        assert_eq!(totals.source, UsageSource::Estimated);
+        assert!(totals.output_tokens > 0);
+    }
+
+    #[test]
+    fn scanner_stays_missing_without_usage_or_text() {
+        let mut scanner = make_scanner(PROTOCOL_OPENAI);
+        scanner.push(b"data: {\"choices\":[]}\n\n");
         assert_eq!(scanner.totals().source, UsageSource::Missing);
     }
 

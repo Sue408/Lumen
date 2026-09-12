@@ -16,6 +16,7 @@ use crate::db::routes::list_enabled_aliases;
 use crate::db::with_db;
 use crate::error::AppError;
 use crate::gateway::auth::authenticate;
+use crate::gateway::estimate::{self, Estimates};
 use crate::gateway::failover::{classify, parse_retry_after, AttemptAction};
 use crate::gateway::forward::{
     ensure_include_usage, error_response, request_id, send, stream_response, upstream_path,
@@ -25,7 +26,7 @@ use crate::gateway::quota::{exceeded_limit, period_label, period_start, QuotaPer
 use crate::gateway::reject::reject;
 use crate::gateway::resolve::{resolve_all, ResolvedRoute};
 use crate::gateway::session;
-use crate::gateway::usage::{build_log, extract_usage, record, LogContext, UsageTotals};
+use crate::gateway::usage::{build_log, extract_usage_estimated, record, LogContext, UsageTotals};
 use crate::state::{AppState, COOLDOWN_EXHAUSTED, COOLDOWN_TRANSIENT};
 
 const CHAT_ENDPOINT: &str = "/v1/chat/completions";
@@ -371,6 +372,9 @@ async fn forward(
 
             if is_stream {
                 if matches!(action, AttemptAction::Served) {
+                    // 请求体在手，先估出输入 token；上游漏报时由它补齐。
+                    let input_estimate =
+                        Some(estimate::estimate_input(&candidate.model_id, &attempt_body));
                     return stream_response(
                         state,
                         candidate,
@@ -380,6 +384,7 @@ async fn forward(
                             virtual_key_id: Some(key_id),
                             attempt_index,
                             session_id: session,
+                            input_estimate,
                         },
                         response,
                     );
@@ -433,8 +438,16 @@ async fn forward(
 
             match action {
                 AttemptAction::Served => {
-                    let usage = extract_usage(&value, &candidate.upstream_protocol)
-                        .unwrap_or_else(UsageTotals::missing);
+                    // 上游漏报或只报部分用量时，用请求体与响应文本补齐。
+                    let output_text =
+                        estimate::response_text(&candidate.upstream_protocol, &value);
+                    let estimates = Estimates {
+                        input: Some(estimate::estimate_input(&candidate.model_id, &attempt_body)),
+                        output: (!output_text.is_empty())
+                            .then(|| estimate::count_tokens(&candidate.model_id, &output_text)),
+                    };
+                    let usage =
+                        extract_usage_estimated(&value, &candidate.upstream_protocol, estimates);
                     record_log(
                         &state,
                         LogContext {
@@ -931,6 +944,51 @@ mod tests {
         assert_eq!(logs[0].total_tokens, 150);
         assert!((logs[0].cost - 0.0002).abs() < 1e-9, "cost was {}", logs[0].cost);
         assert_eq!(sink.logs.lock().unwrap().len(), 1);
+    }
+
+    /// 一个完全不返回 usage 的上游，用于验证网关兜底估算。
+    async fn start_usage_less_upstream() -> String {
+        let app = axum::Router::new().route(
+            "/chat/completions",
+            axum::routing::post(|| async {
+                Json(json!({
+                    "id": "cmpl-1",
+                    "choices": [{ "message": { "role": "assistant", "content": "hello there" } }]
+                }))
+            }),
+        );
+        serve(app).await
+    }
+
+    #[tokio::test]
+    async fn unreported_usage_is_estimated_and_billed() {
+        let base_url = start_usage_less_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "openai", "lumen/mock");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [{ "role": "user", "content": "hello" }] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1);
+        // 上游完全没给 usage：网关据请求 / 响应文本估算，而非记 missing。
+        assert_eq!(logs[0].usage_source, "estimated");
+        assert!(logs[0].input_tokens > 0);
+        assert!(logs[0].output_tokens > 0);
+        assert!(logs[0].cost > 0.0);
     }
 
     #[tokio::test]
