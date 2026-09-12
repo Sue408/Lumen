@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::models::{is_known_protocol, Route, RouteInput, RouteTarget, RouteWithTargets};
@@ -61,6 +63,16 @@ pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTarg
     if input.enabled && !input.targets.iter().any(|target| target.enabled) {
         return Err(AppError::message("启用的路由至少需要一个启用中的目标"));
     }
+    // 同一路由内同一上游模型只能出现一次（也是 route_targets 的唯一索引）。
+    let mut seen_models = std::collections::HashSet::new();
+    for target in &input.targets {
+        if !seen_models.insert(target.upstream_model_id.as_str()) {
+            return Err(AppError::message(format!(
+                "路由目标重复：{}",
+                target.upstream_model_id
+            )));
+        }
+    }
     // 协议创建后锁定：改协议等于换了对外契约，应删除重建而非原地修改。
     if let Some(existing_id) = input.id.as_deref().filter(|value| !value.is_empty()) {
         if let Some(existing) = get_route(conn, existing_id)? {
@@ -117,19 +129,46 @@ pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTarg
     .map_err(|error| {
         AppError::from_constraint(error, format!("路由别名已存在：{}", input.alias))
     })?;
-    tx.execute("DELETE FROM route_targets WHERE route_id = ?1", [&id])?;
+    // 按自然键 `(route_id, upstream_model_id)` upsert，使已有目标的 id 保持不变：
+    // 未来日志可引用实际履约的 target，而不会被「全删全插」打乱。
+    let mut existing: HashMap<String, String> = HashMap::new();
+    {
+        let mut stmt =
+            tx.prepare("SELECT id, upstream_model_id FROM route_targets WHERE route_id = ?1")?;
+        let rows = stmt.query_map([&id], |row| {
+            Ok((row.get::<_, String>(1)?, row.get::<_, String>(0)?))
+        })?;
+        for row in rows {
+            let (model_id, target_id) = row?;
+            existing.insert(model_id, target_id);
+        }
+    }
     for target in &input.targets {
-        tx.execute(
-            "INSERT INTO route_targets (id, route_id, upstream_model_id, priority, enabled)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                uuid::Uuid::new_v4().to_string(),
-                id,
-                target.upstream_model_id,
-                target.priority,
-                target.enabled as i64,
-            ],
-        )?;
+        match existing.remove(&target.upstream_model_id) {
+            Some(target_id) => {
+                tx.execute(
+                    "UPDATE route_targets SET priority = ?2, enabled = ?3 WHERE id = ?1",
+                    params![target_id, target.priority, target.enabled as i64],
+                )?;
+            }
+            None => {
+                tx.execute(
+                    "INSERT INTO route_targets (id, route_id, upstream_model_id, priority, enabled)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        uuid::Uuid::new_v4().to_string(),
+                        id,
+                        target.upstream_model_id,
+                        target.priority,
+                        target.enabled as i64,
+                    ],
+                )?;
+            }
+        }
+    }
+    // 输入中未出现的旧目标即被移除。
+    for target_id in existing.values() {
+        tx.execute("DELETE FROM route_targets WHERE id = ?1", [target_id])?;
     }
     tx.commit()?;
     get_route(conn, &id)?.ok_or_else(|| AppError::Message("保存路由失败".into()))
@@ -343,5 +382,214 @@ mod tests {
         .is_err());
         // 停用的路由允许暂不挂目标。
         assert!(save_route(&conn, &route("draft", false, Vec::new())).is_ok());
+    }
+
+    fn route_with(targets: Vec<RouteTargetInput>) -> RouteInput {
+        RouteInput {
+            id: None,
+            alias: "r".into(),
+            display_name: "R".into(),
+            protocol: "openai".into(),
+            enabled: true,
+            targets,
+        }
+    }
+
+    #[test]
+    fn save_route_preserves_target_ids_across_resaves() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let a = seed_model(&conn, "openai", "a");
+        let b = seed_model(&conn, "openai", "b");
+        let saved = save_route(
+            &conn,
+            &route_with(
+                vec![
+                    RouteTargetInput {
+                        upstream_model_id: a.clone(),
+                        priority: 0,
+                        enabled: true,
+                    },
+                    RouteTargetInput {
+                        upstream_model_id: b.clone(),
+                        priority: 1,
+                        enabled: true,
+                    },
+                ],
+            ),
+        )
+        .unwrap();
+        let ids_before: Vec<(String, String)> = saved
+            .targets
+            .iter()
+            .map(|t| (t.upstream_model_id.clone(), t.id.clone()))
+            .collect();
+
+        let resaved = save_route(
+            &conn,
+            &RouteInput {
+                id: Some(saved.route.id.clone()),
+                alias: "r".into(),
+                display_name: "R".into(),
+                protocol: "openai".into(),
+                enabled: true,
+                targets: vec![
+                    RouteTargetInput {
+                        upstream_model_id: a.clone(),
+                        priority: 3,
+                        enabled: false,
+                    },
+                    RouteTargetInput {
+                        upstream_model_id: b.clone(),
+                        priority: 0,
+                        enabled: true,
+                    },
+                ],
+            },
+        )
+        .unwrap();
+
+        for (model_id, target_id) in &ids_before {
+            let now = resaved
+                .targets
+                .iter()
+                .find(|t| &t.upstream_model_id == model_id)
+                .unwrap();
+            assert_eq!(&now.id, target_id, "target id 应保持不变");
+        }
+        let a_now = resaved
+            .targets
+            .iter()
+            .find(|t| t.upstream_model_id == a)
+            .unwrap();
+        assert_eq!(a_now.priority, 3);
+        assert!(!a_now.enabled);
+    }
+
+    #[test]
+    fn save_route_removes_dropped_targets() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let a = seed_model(&conn, "openai", "a");
+        let b = seed_model(&conn, "openai", "b");
+        let saved = save_route(
+            &conn,
+            &route_with(
+                vec![
+                    RouteTargetInput {
+                        upstream_model_id: a.clone(),
+                        priority: 0,
+                        enabled: true,
+                    },
+                    RouteTargetInput {
+                        upstream_model_id: b.clone(),
+                        priority: 1,
+                        enabled: true,
+                    },
+                ],
+            ),
+        )
+        .unwrap();
+
+        let resaved = save_route(
+            &conn,
+            &RouteInput {
+                id: Some(saved.route.id.clone()),
+                alias: "r".into(),
+                display_name: "R".into(),
+                protocol: "openai".into(),
+                enabled: true,
+                targets: vec![RouteTargetInput {
+                    upstream_model_id: a.clone(),
+                    priority: 0,
+                    enabled: true,
+                }],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(resaved.targets.len(), 1);
+        assert_eq!(resaved.targets[0].upstream_model_id, a);
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM route_targets WHERE route_id = ?1",
+                [&saved.route.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn save_route_rejects_duplicate_target_model() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let a = seed_model(&conn, "openai", "a");
+        let result = save_route(
+            &conn,
+            &route_with(
+                vec![
+                    RouteTargetInput {
+                        upstream_model_id: a.clone(),
+                        priority: 0,
+                        enabled: true,
+                    },
+                    RouteTargetInput {
+                        upstream_model_id: a.clone(),
+                        priority: 1,
+                        enabled: true,
+                    },
+                ],
+            ),
+        );
+        assert!(result.is_err());
+        let routes: i64 = conn
+            .query_row("SELECT COUNT(*) FROM routes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(routes, 0, "校验失败不应留下路由");
+    }
+
+    #[test]
+    fn target_id_survives_priority_reorder() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let a = seed_model(&conn, "openai", "a");
+        let b = seed_model(&conn, "openai", "b");
+        let target = |model: &str, priority: i64| RouteTargetInput {
+            upstream_model_id: model.to_string(),
+            priority,
+            enabled: true,
+        };
+        let saved = save_route(
+            &conn,
+            &route_with(vec![target(&a, 0), target(&b, 1)]),
+        )
+        .unwrap();
+        let id_of = |route: &crate::db::models::RouteWithTargets, model: &str| {
+            route
+                .targets
+                .iter()
+                .find(|t| t.upstream_model_id == model)
+                .unwrap()
+                .id
+                .clone()
+        };
+        let a_id = id_of(&saved, &a);
+        let b_id = id_of(&saved, &b);
+
+        let reordered = save_route(
+            &conn,
+            &RouteInput {
+                id: Some(saved.route.id.clone()),
+                alias: "r".into(),
+                display_name: "R".into(),
+                protocol: "openai".into(),
+                enabled: true,
+                targets: vec![target(&b, 0), target(&a, 1)],
+            },
+        )
+        .unwrap();
+        assert_eq!(id_of(&reordered, &a), a_id);
+        assert_eq!(id_of(&reordered, &b), b_id);
     }
 }

@@ -110,16 +110,29 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_key_status_occurred
 -- 用量口径的筛选与「待处理」的 OR 都按 usage_source 取行：有它，存疑计数走覆盖
 -- 索引、attention 的 OR 走 MULTI-INDEX OR，否则两者都是全表扫描。
 CREATE INDEX IF NOT EXISTS idx_request_logs_usage_source ON request_logs(usage_source);
+
+-- 路由目标的自然键：同一路由内同一上游模型只能出现一次。save_route 据此 upsert，
+-- 使 target id 稳定（未来日志可引用实际履约 target）。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_route_targets_route_model
+    ON route_targets(route_id, upstream_model_id);
 "#;
 
 /// 最新 schema 版本。每次修改 `SCHEMA` 的**结构**（新建表 / 加列 / 改约束）就 +1，
 /// 并在 `MIGRATIONS` 补一条对应目标的增量语句；纯加索引不算（`SCHEMA` 幂等补建即可）。
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 /// 把 `user_version` 从「目标版本 - 1」提升到「目标版本」的增量语句，按目标版本升序。
 /// 只允许增量（`ALTER TABLE ADD COLUMN` / `CREATE TABLE` / `CREATE [UNIQUE] INDEX`），
 /// 严禁 `DROP`，以保证流水与设置不随升级丢失。
-const MIGRATIONS: &[(i64, &str)] = &[];
+const MIGRATIONS: &[(i64, &str)] = &[(
+    8,
+    "DELETE FROM route_targets
+       WHERE rowid NOT IN (
+         SELECT MIN(rowid) FROM route_targets GROUP BY route_id, upstream_model_id
+       );
+     CREATE UNIQUE INDEX IF NOT EXISTS idx_route_targets_route_model
+       ON route_targets(route_id, upstream_model_id);",
+)];
 
 /// 校准数据库版本：
 /// - `user_version == 0`：新库，执行 `SCHEMA` 建表；
