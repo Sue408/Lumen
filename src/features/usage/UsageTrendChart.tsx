@@ -105,19 +105,17 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
     [period.periodKey, now, pointCount],
   );
 
-  // 峰值取逐小时总量的最高点，而不是末点（末点只是最后一小时）。
-  const hourlyPeak = layers
-    .reduce<number[]>(
-      (totals, layer) =>
-        layer.values.map((value, index) => (totals[index] ?? 0) + value),
-      [],
-    )
-    .reduce((max, value) => Math.max(max, value), 0);
+  // 日视图画的是四条独立曲线，纵轴上界该贴合「可见包络」——最高的那条线，
+  // 而不是四层叠加的总高度（那样峰值永远只到 ~1/4，曲线贴底）。
+  const envelopePeak = layers.reduce(
+    (max, layer) => layer.values.reduce((m, value) => Math.max(m, value), max),
+    0,
+  );
   // 迟滞上界：峰值触到当前上界的 CEILING_TRIGGER 才抬一次，避免刷新时整图缩放抖动。
-  const [yMax, setYMax] = useState(() => initialCeiling(hourlyPeak));
+  const [yMax, setYMax] = useState(() => initialCeiling(envelopePeak));
   useEffect(() => {
-    setYMax((prev) => growCeiling(prev, hourlyPeak));
-  }, [hourlyPeak]);
+    setYMax((prev) => growCeiling(prev, envelopePeak));
+  }, [envelopePeak]);
   const series = useMemo(
     () =>
       layers.map((layer) => ({
@@ -129,7 +127,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
   );
   // Visual compromise: a zero-value period has no curve to draw. Lift a flat 0
   // line a few px off the baseline so the chart reads as "0" instead of blank.
-  const hasValue = hourlyPeak > 0;
+  const hasValue = envelopePeak > 0;
   const zeroY = Math.max(chartSize.height - 8, 0);
 
   const toY = (value: number) =>

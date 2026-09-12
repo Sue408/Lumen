@@ -147,7 +147,6 @@ pub struct UsageOverview {
     pub metrics: Vec<MetricDto>,
     pub total_cost: f64,
     pub axis_labels: Vec<String>,
-    pub y_axis_max: f64,
     pub series: SeriesDto,
     pub layers: Vec<UsageLayer>,
     pub attribution: Attribution,
@@ -476,25 +475,6 @@ fn quality_totals(
     })
 }
 
-pub fn nice_axis_max(value: f64) -> f64 {
-    if value <= 0.0 {
-        return 10.0;
-    }
-    let exponent = value.log10().floor();
-    let base = 10f64.powf(exponent);
-    let normalized = value / base;
-    let nice = if normalized <= 1.0 {
-        1.0
-    } else if normalized <= 2.0 {
-        2.0
-    } else if normalized <= 5.0 {
-        5.0
-    } else {
-        10.0
-    };
-    nice * base
-}
-
 fn format_thousands(value: i64) -> String {
     let digits = value.to_string();
     let mut output = String::new();
@@ -680,8 +660,6 @@ pub fn build_overview(
         },
     ];
 
-    let max = current_series.iter().copied().fold(0.0f64, f64::max);
-
     let cost_pct = if previous.cost > 0.0 {
         Some((current.cost - previous.cost) / previous.cost * 100.0)
     } else {
@@ -715,7 +693,6 @@ pub fn build_overview(
         metrics,
         total_cost: round2(current.cost),
         axis_labels: axis_labels(period),
-        y_axis_max: nice_axis_max(max),
         series: SeriesDto {
             current: current_label,
             previous: previous_label,
@@ -777,14 +754,6 @@ mod tests {
             is_stream: false,
             attempt_index: 0,
         }
-    }
-
-    #[test]
-    fn axis_max_rounds_up_to_nice_value() {
-        assert_eq!(nice_axis_max(0.0), 10.0);
-        assert_eq!(nice_axis_max(3.0), 5.0);
-        assert_eq!(nice_axis_max(47.0), 50.0);
-        assert_eq!(nice_axis_max(404.0), 500.0);
     }
 
     #[test]

@@ -53,7 +53,6 @@ export type UsagePeriod = {
   metrics: Metric[];
   totalCost: number;
   axisLabels: string[];
-  yAxisMax: number;
   series: {
     current: string;
     previous: string;
@@ -85,7 +84,6 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
     ],
     totalCost: 4.82,
     axisLabels: ["00:00", "06:00", "12:00", "18:00", "现在"],
-    yAxisMax: 60,
     series: {
       current: "今天",
       previous: "昨天同期",
@@ -126,7 +124,6 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
     ],
     totalCost: 31.46,
     axisLabels: ["周一", "周二", "周三", "周四", "周五", "今天"],
-    yAxisMax: 420,
     series: {
       current: "本周",
       previous: "上周同期",
@@ -167,7 +164,6 @@ export const usagePeriods: Record<PeriodKey, UsagePeriod> = {
     ],
     totalCost: 76.42,
     axisLabels: ["1 日", "5 日", "9 日", "13 日", "今天"],
-    yAxisMax: 900,
     series: {
       current: "九月",
       previous: "八月同期",
