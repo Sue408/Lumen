@@ -190,6 +190,10 @@ pub struct Route {
     pub alias: String,
     pub display_name: String,
     pub protocol: String,
+    /// 显式选择的品牌图标；`None` 时回落到首选目标上游模型的图标。
+    pub icon: Option<String>,
+    /// `None` = 继承首选目标模型的着色；`"ink"` / `"brand"` = 显式。
+    pub icon_tint: Option<String>,
     pub enabled: bool,
     pub created_at: String,
 }
@@ -220,6 +224,10 @@ pub struct RouteInput {
     pub display_name: String,
     #[serde(default = "default_protocol")]
     pub protocol: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub icon_tint: Option<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
@@ -243,6 +251,8 @@ impl Route {
             alias: row.get("alias")?,
             display_name: row.get("display_name")?,
             protocol: row.get("protocol")?,
+            icon: row.get("icon")?,
+            icon_tint: row.get("icon_tint")?,
             enabled: row.get::<_, i64>("enabled")? != 0,
             created_at: row.get("created_at")?,
         })

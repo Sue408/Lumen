@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS routes (
     alias         TEXT NOT NULL UNIQUE,
     display_name  TEXT NOT NULL,
     protocol      TEXT NOT NULL DEFAULT 'openai',
+    icon          TEXT,
+    icon_tint     TEXT,
     enabled       INTEGER NOT NULL DEFAULT 1,
     created_at    TEXT NOT NULL
 );
@@ -120,7 +122,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_route_targets_route_model
 
 /// 最新 schema 版本。每次修改 `SCHEMA` 的**结构**（新建表 / 加列 / 改约束）就 +1，
 /// 并在 `MIGRATIONS` 补一条对应目标的增量语句；纯加索引不算（`SCHEMA` 幂等补建即可）。
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 /// 把 `user_version` 从「目标版本 - 1」提升到「目标版本」的增量语句，按目标版本升序。
 /// 只允许增量（`ALTER TABLE ADD COLUMN` / `CREATE TABLE` / `CREATE [UNIQUE] INDEX`），
@@ -138,6 +140,11 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (
         9,
         "ALTER TABLE request_logs ADD COLUMN attempt_index INTEGER NOT NULL DEFAULT 0;",
+    ),
+    (
+        10,
+        "ALTER TABLE routes ADD COLUMN icon TEXT;
+         ALTER TABLE routes ADD COLUMN icon_tint TEXT;",
     ),
 ];
 
@@ -216,14 +223,20 @@ mod tests {
         let conn = open_fresh();
         insert_provider(&conn, "p1");
         conn.execute(
+            "INSERT INTO routes (id, alias, display_name, protocol, enabled, created_at)
+             VALUES ('r1', 'r', 'R', 'openai', 1, '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
             "INSERT INTO request_logs (id, occurred_at, endpoint, method, status)
              VALUES ('l1', '2026-01-01T00:00:00Z', '/v1/chat/completions', 'POST', 'success')",
             [],
         )
         .unwrap();
-        // 模拟 v8 旧库：去掉 v9 才新增的列，数据与更低的版本号都保留。
-        conn.execute("ALTER TABLE request_logs DROP COLUMN attempt_index", [])
-            .unwrap();
+        // 模拟 v9 旧库：去掉 v10 才新增的路由图标列，数据与更低的版本号都保留。
+        conn.execute("ALTER TABLE routes DROP COLUMN icon", []).unwrap();
+        conn.execute("ALTER TABLE routes DROP COLUMN icon_tint", []).unwrap();
         conn.pragma_update(None, "user_version", SCHEMA_VERSION - 1)
             .unwrap();
 
@@ -234,7 +247,16 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM providers", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
-        // 流水不丢，且新列按默认值 0 补齐。
+        // 路由不丢，且新列按「继承」语义补齐为 NULL。
+        let routes: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM routes WHERE icon IS NULL AND icon_tint IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(routes, 1);
+        // 流水不丢，且 v9 列按默认值 0 补齐。
         let (logs, attempt): (i64, i64) = conn
             .query_row(
                 "SELECT COUNT(*), COALESCE(MAX(attempt_index), -1) FROM request_logs",

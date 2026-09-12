@@ -67,6 +67,8 @@ export type Route = {
   alias: string;
   displayName: string;
   protocol: Protocol;
+  icon: string | null;
+  iconTint: IconTint | null;
   enabled: boolean;
   createdAt: string;
 };
@@ -92,6 +94,8 @@ export type RouteInput = {
   alias: string;
   displayName: string;
   protocol?: Protocol;
+  icon?: string | null;
+  iconTint?: IconTint | null;
   enabled?: boolean;
   targets: RouteTargetInput[];
 };

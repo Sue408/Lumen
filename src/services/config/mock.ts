@@ -98,6 +98,8 @@ let routes: RouteWithTargets[] = [
     alias: "deepseek/deepseek-v4-flash",
     displayName: "DeepSeek V4 Flash",
     protocol: "anthropic",
+    icon: null,
+    iconTint: null,
     enabled: true,
     createdAt: "2026-09-01T02:05:00+00:00",
     targets: [
@@ -110,6 +112,8 @@ let routes: RouteWithTargets[] = [
     alias: "deepseek/deepseek-v4-reasoner",
     displayName: "DeepSeek V4 Reasoner",
     protocol: "anthropic",
+    icon: null,
+    iconTint: null,
     enabled: false,
     createdAt: "2026-09-04T09:00:00+00:00",
     targets: [
@@ -234,6 +238,9 @@ export function mockSaveRoute(input: RouteInput): RouteWithTargets {
     alias: input.alias,
     displayName: input.displayName,
     protocol: input.protocol ?? "openai",
+    // icon / iconTint 的 null 是「清回自动推断」的合法值，不能用 ?? 合并。
+    icon: input.icon !== undefined ? input.icon : existing?.icon ?? null,
+    iconTint: input.iconTint !== undefined ? input.iconTint : existing?.iconTint ?? null,
     enabled: input.enabled ?? true,
     createdAt: existing?.createdAt ?? nowIso(),
     targets: input.targets.map((target, index) => ({

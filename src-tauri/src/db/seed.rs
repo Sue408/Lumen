@@ -79,6 +79,10 @@ struct SeedRoute {
     display_name: String,
     #[serde(default = "default_protocol")]
     protocol: String,
+    #[serde(default)]
+    icon: Option<String>,
+    #[serde(default)]
+    icon_tint: Option<String>,
     #[serde(default = "default_true")]
     enabled: bool,
     #[serde(default)]
@@ -346,8 +350,16 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
         )? {
             Some(id) => {
                 tx.execute(
-                    "UPDATE routes SET display_name = ?1, protocol = ?2, enabled = ?3 WHERE id = ?4",
-                    params![display_name, route.protocol, route.enabled as i64, id],
+                    "UPDATE routes SET display_name = ?1, protocol = ?2, icon = ?3, icon_tint = ?4, enabled = ?5
+                       WHERE id = ?6",
+                    params![
+                        display_name,
+                        route.protocol,
+                        route.icon,
+                        route.icon_tint,
+                        route.enabled as i64,
+                        id
+                    ],
                 )?;
                 tx.execute("DELETE FROM route_targets WHERE route_id = ?1", params![id])?;
                 summary.routes.updated += 1;
@@ -356,13 +368,15 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
             None => {
                 let id = uuid::Uuid::new_v4().to_string();
                 tx.execute(
-                    "INSERT INTO routes (id, alias, display_name, protocol, enabled, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    "INSERT INTO routes (id, alias, display_name, protocol, icon, icon_tint, enabled, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     params![
                         id,
                         route.alias,
                         display_name,
                         route.protocol,
+                        route.icon,
+                        route.icon_tint,
                         route.enabled as i64,
                         now
                     ],
@@ -515,7 +529,8 @@ pub fn export_seed(conn: &Connection) -> Result<String, AppError> {
 
     let route_rows: Vec<(String, SeedRoute)> = {
         let mut stmt = conn.prepare(
-            "SELECT id, alias, display_name, protocol, enabled FROM routes ORDER BY created_at, alias",
+            "SELECT id, alias, display_name, protocol, enabled, icon, icon_tint
+             FROM routes ORDER BY created_at, alias",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -524,6 +539,8 @@ pub fn export_seed(conn: &Connection) -> Result<String, AppError> {
                     alias: row.get(1)?,
                     display_name: row.get(2)?,
                     protocol: row.get(3)?,
+                    icon: row.get(5)?,
+                    icon_tint: row.get(6)?,
                     enabled: row.get::<_, i64>(4)? != 0,
                     targets: Vec::new(),
                 },

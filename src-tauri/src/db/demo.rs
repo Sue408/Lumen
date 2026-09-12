@@ -633,6 +633,8 @@ fn write_config(conn: &Connection, set: &DemoSet) -> Result<DemoSummary, AppErro
                 alias: route.alias.to_string(),
                 display_name: route.display_name.to_string(),
                 protocol: route.protocol.to_string(),
+                icon: None,
+                icon_tint: None,
                 enabled: route.enabled,
                 targets,
             },

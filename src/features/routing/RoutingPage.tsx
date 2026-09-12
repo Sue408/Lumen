@@ -20,7 +20,8 @@ import {
   TogglePill,
 } from "../../components/ConfigControls";
 import { BrandGlyph } from "../brand/BrandMark";
-import { resolveBrand, type BrandId } from "../brand/brand";
+import { IconPicker } from "../brand/IconPicker";
+import { isBrandId, resolveBrand, type BrandId } from "../brand/brand";
 import { RegisterList } from "../../components/RegisterList";
 import {
   deleteRoute,
@@ -67,6 +68,27 @@ function buildBrandLookup(providers: Provider[], models: UpstreamModel[]): Map<s
 
 function markTint(mark: ModelMark | null | undefined): IconTint {
   return mark && mark.enabled ? mark.tint : "ink";
+}
+
+/** 按 priority 取首选目标的模型标记；draft 目标无 priority，保持数组顺序。 */
+function primaryModelMark(
+  targets: Array<{ upstreamModelId: string; priority?: number }>,
+  brands: Map<string, ModelMark>,
+): ModelMark | null {
+  if (targets.length === 0) return null;
+  const primary = [...targets].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))[0];
+  return brands.get(primary.upstreamModelId) ?? null;
+}
+
+/** 图标优先自动取「首选目标上游模型」的品牌；着色未显式指定时继承该模型。 */
+function routeAppearance(
+  fields: { icon: string | null; iconTint: IconTint | null; enabled: boolean },
+  mark: ModelMark | null,
+): { brand: BrandId | null; auto: BrandId | null; tint: IconTint } {
+  const auto = mark?.brand ?? null;
+  const brand = isBrandId(fields.icon) ? fields.icon : auto;
+  const tint: IconTint = fields.enabled ? fields.iconTint ?? mark?.tint ?? "ink" : "ink";
+  return { brand, auto, tint };
 }
 
 function groupedModels(providers: Provider[], models: UpstreamModel[], protocol: Protocol) {
@@ -279,6 +301,8 @@ export function RoutingPage() {
   });
 
   const brands = useMemo(() => buildBrandLookup(providers, models), [providers, models]);
+  const draftMark = draft ? primaryModelMark(draft.targets, brands) : null;
+  const draftAppearance = draft ? routeAppearance(draft, draftMark) : null;
   const modelProtocol = useMemo(() => {
     const providerProtocol = new Map(providers.map((provider) => [provider.id, provider.protocol]));
     return new Map(models.map((model) => [model.id, providerProtocol.get(model.providerId)]));
@@ -338,6 +362,8 @@ export function RoutingPage() {
           alias: draft.alias.trim(),
           displayName: draft.displayName.trim() || draft.alias.trim(),
           protocol: draft.protocol,
+          icon: draft.icon,
+          iconTint: draft.iconTint,
           enabled: draft.enabled,
           targets: draft.targets.map((target, index) => ({
             upstreamModelId: target.upstreamModelId,
@@ -361,6 +387,44 @@ export function RoutingPage() {
     if (!savedDraft) return;
     setDraft({ ...savedDraft, targets: savedDraft.targets.map((target) => ({ ...target })) });
     setFormError(null);
+  };
+
+  // 图标/着色即改即存：只改这两项，其余字段取已保存的实体，避免把未保存的表单改动一并写库。
+  const setRouteAppearance = async (patch: { icon?: string | null; iconTint?: IconTint | null }) => {
+    if (!draft) return;
+    const icon = patch.icon !== undefined ? patch.icon : draft.icon;
+    const iconTint = patch.iconTint !== undefined ? patch.iconTint : draft.iconTint;
+    const previousDraft = draft;
+    const previousSaved = savedDraft;
+    setDraft({ ...draft, icon, iconTint });
+    if (selectedId === "new") return;
+    const current = routes.find((route) => route.id === selectedId);
+    if (!current) return;
+    setSavedDraft((prev) => (prev ? { ...prev, icon, iconTint } : prev));
+    await run(
+      async () => {
+        await saveRoute({
+          id: current.id,
+          alias: current.alias,
+          displayName: current.displayName,
+          protocol: current.protocol,
+          icon,
+          iconTint,
+          enabled: current.enabled,
+          targets: current.targets.map((target) => ({
+            upstreamModelId: target.upstreamModelId,
+            priority: target.priority,
+            enabled: target.enabled,
+          })),
+        });
+        await refreshLists();
+      },
+      setFormError,
+      () => {
+        setDraft(previousDraft);
+        setSavedDraft(previousSaved);
+      },
+    );
   };
 
   const deleteSelected = async () => {
@@ -414,8 +478,7 @@ export function RoutingPage() {
                   selectedKey={selectedId === "new" ? null : selectedId}
                 >
                   {routes.map((route) => {
-                    const primary = [...route.targets].sort((a, b) => a.priority - b.priority)[0];
-                    const mark = primary ? brands.get(primary.upstreamModelId) ?? null : null;
+                    const look = routeAppearance(route, primaryModelMark(route.targets, brands));
                     return (
                       <button
                         className={`register-select${selectedId === route.id ? " is-selected" : ""}${route.enabled ? "" : " is-off"}`}
@@ -425,7 +488,7 @@ export function RoutingPage() {
                         aria-current={selectedId === route.id ? "true" : undefined}
                         onClick={() => requestSelect(route)}
                       >
-                        <BrandGlyph brand={mark?.brand ?? null} tint={markTint(mark)} size={20} fallback={<Route aria-hidden="true" />} />
+                        <BrandGlyph brand={look.brand} tint={look.tint} size={20} fallback={<Route aria-hidden="true" />} />
                         <span className="register-body">
                           <span className="register-name" title={route.alias}>{route.alias}</span>
                           <span className="register-meta">
@@ -447,12 +510,17 @@ export function RoutingPage() {
               {draft ? (
                 <>
                   <div className="sheet-head">
-                    <BrandGlyph
-                      brand={draft.targets[0] ? brands.get(draft.targets[0].upstreamModelId)?.brand ?? null : null}
-                      tint={draft.targets[0] ? markTint(brands.get(draft.targets[0].upstreamModelId)) : "ink"}
+                    <IconPicker
+                      icon={draft.icon}
+                      auto={draftAppearance?.auto ?? null}
+                      tint={draftAppearance?.tint ?? "ink"}
                       size={22}
-                      className={draft.enabled ? undefined : "is-off"}
+                      enabled={draft.enabled}
+                      glyphClassName={draft.enabled ? undefined : "is-off"}
                       fallback={<Route aria-hidden="true" />}
+                      disabled={busy}
+                      onChange={(value) => void setRouteAppearance({ icon: value })}
+                      onTintChange={(value) => void setRouteAppearance({ iconTint: value })}
                     />
                     <h2 className="sheet-title">{selectedId === "new" ? "新建路由" : draft.alias || "未命名路由"}</h2>
                     <TogglePill

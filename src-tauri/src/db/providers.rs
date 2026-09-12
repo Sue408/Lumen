@@ -253,6 +253,8 @@ mod tests {
                 alias: "r".into(),
                 display_name: "R".into(),
                 protocol: "openai".into(),
+                icon: None,
+                icon_tint: None,
                 enabled: true,
                 targets: vec![RouteTargetInput {
                     upstream_model_id: model.id,

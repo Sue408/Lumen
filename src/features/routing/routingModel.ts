@@ -1,5 +1,5 @@
 import { protocolLabel, type Protocol } from "../../services/protocol.ts";
-import type { RouteWithTargets } from "../../services/config";
+import type { IconTint, RouteWithTargets } from "../../services/config";
 
 export function moveTarget<T>(list: T[], index: number, delta: number): T[] {
   const next = index + delta;
@@ -20,6 +20,8 @@ export type RouteDraft = {
   alias: string;
   displayName: string;
   protocol: Protocol;
+  icon: string | null;
+  iconTint: IconTint | null;
   enabled: boolean;
   targets: RouteTargetDraft[];
 };
@@ -34,7 +36,16 @@ export function hasUsableBackup(targets: RouteTargetDraft[]): boolean {
 }
 
 export function emptyRouteDraft(): RouteDraft {
-  return { id: null, alias: "", displayName: "", protocol: "openai", enabled: true, targets: [] };
+  return {
+    id: null,
+    alias: "",
+    displayName: "",
+    protocol: "openai",
+    icon: null,
+    iconTint: null,
+    enabled: true,
+    targets: [],
+  };
 }
 
 export function routeToDraft(route: RouteWithTargets): RouteDraft {
@@ -43,6 +54,8 @@ export function routeToDraft(route: RouteWithTargets): RouteDraft {
     alias: route.alias,
     displayName: route.displayName,
     protocol: route.protocol,
+    icon: route.icon,
+    iconTint: route.iconTint,
     enabled: route.enabled,
     targets: [...route.targets]
       .sort((a, b) => a.priority - b.priority)
@@ -58,6 +71,8 @@ export function isRouteDraftDirty(draft: RouteDraft, original: RouteDraft): bool
   if (draft.alias !== original.alias) return true;
   if (draft.displayName !== original.displayName) return true;
   if (draft.protocol !== original.protocol) return true;
+  if (draft.icon !== original.icon) return true;
+  if (draft.iconTint !== original.iconTint) return true;
   if (draft.enabled !== original.enabled) return true;
   if (draft.targets.length !== original.targets.length) return true;
   return draft.targets.some((target, index) => {

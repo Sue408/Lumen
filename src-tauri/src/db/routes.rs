@@ -110,18 +110,22 @@ pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTarg
     let created_at = chrono::Utc::now().to_rfc3339();
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "INSERT INTO routes (id, alias, display_name, protocol, enabled, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "INSERT INTO routes (id, alias, display_name, protocol, icon, icon_tint, enabled, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(id) DO UPDATE SET
             alias = excluded.alias,
             display_name = excluded.display_name,
             protocol = excluded.protocol,
+            icon = excluded.icon,
+            icon_tint = excluded.icon_tint,
             enabled = excluded.enabled",
         params![
             id,
             input.alias,
             input.display_name,
             input.protocol,
+            input.icon,
+            input.icon_tint,
             input.enabled as i64,
             created_at
         ],
@@ -251,6 +255,8 @@ mod tests {
                 alias: "mix".into(),
                 display_name: "Mix".into(),
                 protocol: "openai".into(),
+                icon: None,
+                icon_tint: None,
                 enabled: true,
                 targets: vec![
                     RouteTargetInput {
@@ -281,6 +287,8 @@ mod tests {
                 alias: "claude".into(),
                 display_name: "Claude".into(),
                 protocol: "anthropic".into(),
+                icon: None,
+                icon_tint: None,
                 enabled: true,
                 targets: vec![RouteTargetInput {
                     upstream_model_id: anthropic,
@@ -291,6 +299,55 @@ mod tests {
         )
         .unwrap();
         assert_eq!(saved.route.protocol, "anthropic");
+    }
+
+    #[test]
+    fn save_route_persists_icon_overrides() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let model = seed_model(&conn, "openai", "gpt");
+        let saved = save_route(
+            &conn,
+            &RouteInput {
+                id: None,
+                alias: "icon".into(),
+                display_name: "Icon".into(),
+                protocol: "openai".into(),
+                icon: Some("openai".into()),
+                icon_tint: Some("brand".into()),
+                enabled: true,
+                targets: vec![RouteTargetInput {
+                    upstream_model_id: model,
+                    priority: 0,
+                    enabled: true,
+                }],
+            },
+        )
+        .unwrap();
+        assert_eq!(saved.route.icon.as_deref(), Some("openai"));
+        assert_eq!(saved.route.icon_tint.as_deref(), Some("brand"));
+
+        // 显式传 None 即清回「自动推断」（继承首选目标的上游模型）。
+        let cleared = save_route(
+            &conn,
+            &RouteInput {
+                id: Some(saved.route.id.clone()),
+                alias: "icon".into(),
+                display_name: "Icon".into(),
+                protocol: "openai".into(),
+                icon: None,
+                icon_tint: None,
+                enabled: true,
+                targets: vec![RouteTargetInput {
+                    upstream_model_id: saved.targets[0].upstream_model_id.clone(),
+                    priority: 0,
+                    enabled: true,
+                }],
+            },
+        )
+        .unwrap();
+        assert!(cleared.route.icon.is_none());
+        assert!(cleared.route.icon_tint.is_none());
     }
 
     #[test]
@@ -305,6 +362,8 @@ mod tests {
                 alias: "r".into(),
                 display_name: "R".into(),
                 protocol: "openai".into(),
+                icon: None,
+                icon_tint: None,
                 enabled: true,
                 targets: vec![RouteTargetInput {
                     upstream_model_id: openai,
@@ -322,6 +381,8 @@ mod tests {
                 alias: "r".into(),
                 display_name: "R".into(),
                 protocol: "anthropic".into(),
+                icon: None,
+                icon_tint: None,
                 enabled: true,
                 targets: Vec::new(),
             },
@@ -339,6 +400,8 @@ mod tests {
             alias: alias.into(),
             display_name: "R".into(),
             protocol: "openai".into(),
+            icon: None,
+            icon_tint: None,
             enabled: true,
             targets: vec![RouteTargetInput {
                 upstream_model_id: model.clone(),
@@ -362,6 +425,8 @@ mod tests {
             alias: alias.into(),
             display_name: "R".into(),
             protocol: "openai".into(),
+            icon: None,
+            icon_tint: None,
             enabled,
             targets,
         };
@@ -390,6 +455,8 @@ mod tests {
             alias: "r".into(),
             display_name: "R".into(),
             protocol: "openai".into(),
+            icon: None,
+            icon_tint: None,
             enabled: true,
             targets,
         }
@@ -432,6 +499,8 @@ mod tests {
                 alias: "r".into(),
                 display_name: "R".into(),
                 protocol: "openai".into(),
+                icon: None,
+                icon_tint: None,
                 enabled: true,
                 targets: vec![
                     RouteTargetInput {
@@ -498,6 +567,8 @@ mod tests {
                 alias: "r".into(),
                 display_name: "R".into(),
                 protocol: "openai".into(),
+                icon: None,
+                icon_tint: None,
                 enabled: true,
                 targets: vec![RouteTargetInput {
                     upstream_model_id: a.clone(),
@@ -584,6 +655,8 @@ mod tests {
                 alias: "r".into(),
                 display_name: "R".into(),
                 protocol: "openai".into(),
+                icon: None,
+                icon_tint: None,
                 enabled: true,
                 targets: vec![target(&b, 0), target(&a, 1)],
             },

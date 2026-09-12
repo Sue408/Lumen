@@ -150,6 +150,8 @@ mod tests {
                 alias: "lumen/x".into(),
                 display_name: "X".into(),
                 protocol: "openai".into(),
+                icon: None,
+                icon_tint: None,
                 enabled: true,
                 targets,
             },

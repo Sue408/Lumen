@@ -24,6 +24,8 @@ test("routeToDraft sorts targets by priority", () => {
     alias: "deepseek",
     displayName: "DeepSeek",
     protocol: "anthropic",
+    icon: null,
+    iconTint: null,
     enabled: true,
     createdAt: "",
     targets: [
@@ -49,6 +51,8 @@ test("isRouteDraftDirty detects field, target and order changes", () => {
     alias: "a",
     displayName: "A",
     protocol: "openai",
+    icon: null,
+    iconTint: null,
     enabled: true,
     createdAt: "",
     targets: [
@@ -59,6 +63,8 @@ test("isRouteDraftDirty detects field, target and order changes", () => {
   assert.equal(isRouteDraftDirty(base, base), false);
   assert.equal(isRouteDraftDirty({ ...base, alias: "b" }, base), true);
   assert.equal(isRouteDraftDirty({ ...base, protocol: "anthropic" }, base), true);
+  assert.equal(isRouteDraftDirty({ ...base, icon: "openai" }, base), true);
+  assert.equal(isRouteDraftDirty({ ...base, iconTint: "brand" }, base), true);
   assert.equal(isRouteDraftDirty({ ...base, enabled: false }, base), true);
   assert.equal(isRouteDraftDirty({ ...base, targets: base.targets.slice(0, 1) }, base), true);
   assert.equal(
