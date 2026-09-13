@@ -305,24 +305,6 @@ async fn forward(
         .await;
         return error.into_response();
     }
-    if first.route_protocol != first.upstream_protocol {
-        let error = AppError::message(format!(
-            "配置不一致：路由 {alias} 声明为 {} 协议，但上游提供商为 {} 协议",
-            first.route_protocol, first.upstream_protocol
-        ));
-        reject(
-            &state,
-            endpoint,
-            &alias,
-            is_stream,
-            None,
-            Some(key_id.clone()),
-            &error,
-        )
-        .await;
-        return error.into_response();
-    }
-
     // 过滤冷却中的目标；若因此无候选可用，直接回 502（并记一条 error）。
     let candidates: Vec<ResolvedRoute> = candidates
         .into_iter()
@@ -709,8 +691,8 @@ mod tests {
     use crate::db::keys::save_virtual_key;
     use crate::db::logs::{list_logs, LogFilter};
     use crate::db::models::{
-        HeaderReplace, ProviderHeaderRules, ProviderInput, RequestLog, RouteInput, RouteTargetInput,
-        UpstreamModelInput, VirtualKey, VirtualKeyInput,
+        HeaderReplace, ProviderEndpointInput, ProviderHeaderRules, ProviderInput, RequestLog,
+        RouteInput, RouteTargetInput, UpstreamModelInput, VirtualKey, VirtualKeyInput,
     };
     use crate::db::{open_in_memory, providers, routes, Db};
     use crate::state::{EventSink, GatewayStatus};
@@ -769,6 +751,21 @@ mod tests {
         }))
     }
 
+    /// 构造一个单协议端点，鉴权按协议惯例选择。
+    fn mock_endpoint(protocol: &str, base_url: &str) -> ProviderEndpointInput {
+        ProviderEndpointInput {
+            id: None,
+            protocol: protocol.into(),
+            base_url: base_url.to_string(),
+            auth_scheme: match protocol {
+                "anthropic" => "x-api-key".into(),
+                "gemini" => "x-goog-api-key".into(),
+                _ => "bearer".into(),
+            },
+            enabled: true,
+        }
+    }
+
     fn seed_upstream(db: &Db, base_url: &str, protocol: &str, alias: &str) {
         let conn = db.lock().unwrap();
         let provider = providers::save_provider(
@@ -776,14 +773,8 @@ mod tests {
             &ProviderInput {
                 id: None,
                 name: format!("mock-{protocol}"),
-                base_url: base_url.to_string(),
                 api_key: "secret".into(),
-                auth_scheme: match protocol {
-                    "anthropic" => "x-api-key".into(),
-                    "gemini" => "x-goog-api-key".into(),
-                    _ => "bearer".into(),
-                },
-                protocol: protocol.into(),
+                endpoints: vec![mock_endpoint(protocol, base_url)],
                 extra_headers: std::collections::BTreeMap::new(),
                 header_rules: Default::default(),
                 icon: None,
@@ -796,7 +787,7 @@ mod tests {
             &conn,
             &UpstreamModelInput {
                 id: None,
-                provider_id: provider.id,
+                provider_id: provider.provider.id,
                 model_id: "mock-model".into(),
                 display_name: "Mock".into(),
                 input_price: 1.0,
@@ -839,14 +830,8 @@ mod tests {
             &ProviderInput {
                 id: None,
                 name: format!("mock-{model_id}"),
-                base_url: base_url.to_string(),
                 api_key: "secret".into(),
-                auth_scheme: match protocol {
-                    "anthropic" => "x-api-key".into(),
-                    "gemini" => "x-goog-api-key".into(),
-                    _ => "bearer".into(),
-                },
-                protocol: protocol.into(),
+                endpoints: vec![mock_endpoint(protocol, base_url)],
                 extra_headers: std::collections::BTreeMap::new(),
                 header_rules: Default::default(),
                 icon: None,
@@ -859,7 +844,7 @@ mod tests {
             &conn,
             &UpstreamModelInput {
                 id: None,
-                provider_id: provider.id,
+                provider_id: provider.provider.id,
                 model_id: model_id.to_string(),
                 display_name: model_id.to_string(),
                 input_price: 1.0,
@@ -2026,10 +2011,8 @@ mod tests {
             &ProviderInput {
                 id: None,
                 name: "echo".into(),
-                base_url: base_url.to_string(),
                 api_key: "secret".into(),
-                auth_scheme: "bearer".into(),
-                protocol: protocol.into(),
+                endpoints: vec![mock_endpoint(protocol, base_url)],
                 extra_headers,
                 header_rules: rules,
                 icon: None,
@@ -2042,7 +2025,7 @@ mod tests {
             &conn,
             &UpstreamModelInput {
                 id: None,
-                provider_id: provider.id,
+                provider_id: provider.provider.id,
                 model_id: "mock-model".into(),
                 display_name: "Mock".into(),
                 input_price: 1.0,

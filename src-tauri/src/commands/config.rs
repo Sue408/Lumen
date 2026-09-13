@@ -9,8 +9,8 @@ use crate::db::keys::{
     delete_virtual_key, list_virtual_keys, save_virtual_key, virtual_key_usage,
 };
 use crate::db::models::{
-    Provider, ProviderInput, RouteWithTargets, RouteInput, UpstreamModel, UpstreamModelInput,
-    VirtualKey, VirtualKeyInput,
+    ProviderInput, ProviderWithEndpoints, RouteWithTargets, RouteInput, UpstreamModel,
+    UpstreamModelInput, VirtualKey, VirtualKeyInput,
 };
 use crate::db::providers::{
     delete_provider, delete_upstream_model, list_providers, list_upstream_models, save_provider,
@@ -26,7 +26,7 @@ use crate::util::round2;
 #[tauri::command]
 pub async fn list_providers_cmd(
     state: State<'_, Arc<AppState>>,
-) -> Result<Vec<Provider>, AppError> {
+) -> Result<Vec<ProviderWithEndpoints>, AppError> {
     with_db(&state.db, list_providers).await
 }
 
@@ -34,7 +34,7 @@ pub async fn list_providers_cmd(
 pub async fn save_provider_cmd(
     state: State<'_, Arc<AppState>>,
     input: ProviderInput,
-) -> Result<Provider, AppError> {
+) -> Result<ProviderWithEndpoints, AppError> {
     with_db(&state.db, move |conn| save_provider(conn, &input)).await
 }
 

@@ -1,38 +1,72 @@
+use std::collections::{HashMap, HashSet};
+
 use rusqlite::{params, Connection};
 
-use super::models::{is_known_capability, Provider, ProviderInput, UpstreamModel, UpstreamModelInput};
+use super::models::{
+    is_known_capability, is_known_protocol, Provider, ProviderEndpoint, ProviderEndpointInput,
+    ProviderInput, ProviderWithEndpoints, UpstreamModel, UpstreamModelInput,
+};
 use crate::error::AppError;
 
-pub fn list_providers(conn: &Connection) -> Result<Vec<Provider>, AppError> {
+pub fn list_providers(conn: &Connection) -> Result<Vec<ProviderWithEndpoints>, AppError> {
     let mut stmt = conn.prepare("SELECT * FROM providers ORDER BY created_at ASC")?;
     let rows = stmt.query_map([], Provider::from_row)?;
     let mut providers = Vec::new();
     for row in rows {
-        providers.push(row?);
+        let provider = row?;
+        let endpoints = list_endpoints(conn, &provider.id)?;
+        providers.push(ProviderWithEndpoints { provider, endpoints });
     }
     Ok(providers)
 }
 
-pub fn get_provider(conn: &Connection, id: &str) -> Result<Option<Provider>, AppError> {
+pub fn get_provider(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<ProviderWithEndpoints>, AppError> {
     let mut stmt = conn.prepare("SELECT * FROM providers WHERE id = ?1")?;
     let mut rows = stmt.query_map([id], Provider::from_row)?;
     match rows.next() {
-        Some(row) => Ok(Some(row?)),
+        Some(row) => {
+            let provider = row?;
+            let endpoints = list_endpoints(conn, &provider.id)?;
+            Ok(Some(ProviderWithEndpoints { provider, endpoints }))
+        }
         None => Ok(None),
     }
 }
 
-/// 引用该提供商名下模型的路由别名，用于协议变更前的冲突检测。
-fn routes_using_provider(conn: &Connection, provider_id: &str) -> Result<Vec<String>, AppError> {
+/// 某提供商的全部协议端点，按插入顺序返回。
+pub fn list_endpoints(
+    conn: &Connection,
+    provider_id: &str,
+) -> Result<Vec<ProviderEndpoint>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM provider_endpoints WHERE provider_id = ?1 ORDER BY rowid ASC",
+    )?;
+    let rows = stmt.query_map([provider_id], ProviderEndpoint::from_row)?;
+    let mut endpoints = Vec::new();
+    for row in rows {
+        endpoints.push(row?);
+    }
+    Ok(endpoints)
+}
+
+/// 引用该提供商、且路由协议为 `protocol` 的路由别名。用于端点移除前的冲突检测。
+fn routes_using_protocol(
+    conn: &Connection,
+    provider_id: &str,
+    protocol: &str,
+) -> Result<Vec<String>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT DISTINCT r.alias
            FROM routes r
            JOIN route_targets t   ON t.route_id = r.id
            JOIN upstream_models m ON m.id = t.upstream_model_id
-          WHERE m.provider_id = ?1
+          WHERE m.provider_id = ?1 AND r.protocol = ?2
           ORDER BY r.alias ASC",
     )?;
-    let rows = stmt.query_map([provider_id], |row| row.get(0))?;
+    let rows = stmt.query_map(params![provider_id, protocol], |row| row.get(0))?;
     let mut aliases = Vec::new();
     for row in rows {
         aliases.push(row?);
@@ -40,40 +74,81 @@ fn routes_using_provider(conn: &Connection, provider_id: &str) -> Result<Vec<Str
     Ok(aliases)
 }
 
-pub fn save_provider(conn: &Connection, input: &ProviderInput) -> Result<Provider, AppError> {
+/// 校验端点集合：至少一个、协议合法且不重复、上游地址非空。
+fn validate_endpoints(endpoints: &[ProviderEndpointInput]) -> Result<(), AppError> {
+    if endpoints.is_empty() {
+        return Err(AppError::message("提供商至少需要一个协议端点"));
+    }
+    let mut seen = HashSet::new();
+    for endpoint in endpoints {
+        if !is_known_protocol(&endpoint.protocol) {
+            return Err(AppError::message(format!("未知协议：{}", endpoint.protocol)));
+        }
+        if !seen.insert(endpoint.protocol.as_str()) {
+            return Err(AppError::message(format!(
+                "协议端点重复：{}",
+                endpoint.protocol
+            )));
+        }
+        if endpoint.base_url.trim().is_empty() {
+            return Err(AppError::message(format!(
+                "协议 {} 缺少上游地址",
+                endpoint.protocol
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub fn save_provider(
+    conn: &Connection,
+    input: &ProviderInput,
+) -> Result<ProviderWithEndpoints, AppError> {
     // 头规则与网关求值共用一套校验，非法配置在保存期就拒绝。
     crate::gateway::headers::validate_provider_header_rules(&input.header_rules)
         .map_err(AppError::message)?;
+    validate_endpoints(&input.endpoints)?;
+
     let id = input
         .id
         .clone()
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    // 协议创建后锁定：若改协议会让既有路由的目标失去协议同构，则阻断并报出受影响的路由。
+
+    // 端点是路由的协议依赖：被移除的协议若仍被路由引用，则阻断并报出受影响的路由。
     if let Some(existing) = get_provider(conn, &id)? {
-        if existing.protocol != input.protocol {
-            let aliases = routes_using_provider(conn, &id)?;
+        let existing_protocols: HashSet<&str> = existing
+            .endpoints
+            .iter()
+            .map(|endpoint| endpoint.protocol.as_str())
+            .collect();
+        let new_protocols: HashSet<&str> = input
+            .endpoints
+            .iter()
+            .map(|endpoint| endpoint.protocol.as_str())
+            .collect();
+        for removed in existing_protocols.difference(&new_protocols) {
+            let aliases = routes_using_protocol(conn, &id, removed)?;
             if !aliases.is_empty() {
                 return Err(AppError::message(format!(
-                    "协议创建后不可修改：路由 {} 仍引用该提供商的模型，请先移除或重建这些路由",
+                    "{removed} 协议端点仍被路由引用，无法移除：{}",
                     aliases.join("、")
                 )));
             }
         }
     }
+
     let created_at = chrono::Utc::now().to_rfc3339();
     let extra_headers = serde_json::to_string(&input.extra_headers)?;
     let header_rules = serde_json::to_string(&input.header_rules)?;
-    conn.execute(
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
         "INSERT INTO providers
-            (id, name, base_url, api_key, auth_scheme, protocol, extra_headers, header_rules, icon, icon_tint, enabled, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            (id, name, api_key, extra_headers, header_rules, icon, icon_tint, enabled, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
-            base_url = excluded.base_url,
             api_key = excluded.api_key,
-            auth_scheme = excluded.auth_scheme,
-            protocol = excluded.protocol,
             extra_headers = excluded.extra_headers,
             header_rules = excluded.header_rules,
             icon = excluded.icon,
@@ -82,10 +157,7 @@ pub fn save_provider(conn: &Connection, input: &ProviderInput) -> Result<Provide
         params![
             id,
             input.name,
-            input.base_url,
             input.api_key,
-            input.auth_scheme,
-            input.protocol,
             extra_headers,
             header_rules,
             input.icon,
@@ -94,6 +166,56 @@ pub fn save_provider(conn: &Connection, input: &ProviderInput) -> Result<Provide
             created_at,
         ],
     )?;
+    // 端点按自然键 `(provider_id, protocol)` upsert，使既有端点 id 保持稳定。
+    let mut existing: HashMap<String, String> = HashMap::new();
+    {
+        let mut stmt =
+            tx.prepare("SELECT id, protocol FROM provider_endpoints WHERE provider_id = ?1")?;
+        let rows = stmt.query_map([&id], |row| {
+            Ok((row.get::<_, String>(1)?, row.get::<_, String>(0)?))
+        })?;
+        for row in rows {
+            let (protocol, endpoint_id) = row?;
+            existing.insert(protocol, endpoint_id);
+        }
+    }
+    for endpoint in &input.endpoints {
+        match existing.remove(&endpoint.protocol) {
+            Some(endpoint_id) => {
+                tx.execute(
+                    "UPDATE provider_endpoints
+                        SET base_url = ?2, auth_scheme = ?3, enabled = ?4
+                      WHERE id = ?1",
+                    params![
+                        endpoint_id,
+                        endpoint.base_url,
+                        endpoint.auth_scheme,
+                        endpoint.enabled as i64,
+                    ],
+                )?;
+            }
+            None => {
+                tx.execute(
+                    "INSERT INTO provider_endpoints
+                        (id, provider_id, protocol, base_url, auth_scheme, enabled)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        uuid::Uuid::new_v4().to_string(),
+                        id,
+                        endpoint.protocol,
+                        endpoint.base_url,
+                        endpoint.auth_scheme,
+                        endpoint.enabled as i64,
+                    ],
+                )?;
+            }
+        }
+    }
+    // 输入中未出现的旧端点即被移除。
+    for endpoint_id in existing.values() {
+        tx.execute("DELETE FROM provider_endpoints WHERE id = ?1", [endpoint_id])?;
+    }
+    tx.commit()?;
     get_provider(conn, &id)?.ok_or_else(|| AppError::Message("保存提供商失败".into()))
 }
 
@@ -221,57 +343,49 @@ mod tests {
     use crate::db::routes::save_route;
     use std::collections::BTreeMap;
 
-    fn seed_provider(conn: &Connection, protocol: &str) -> Provider {
+    fn endpoint(protocol: &str, base_url: &str) -> ProviderEndpointInput {
+        ProviderEndpointInput {
+            id: None,
+            protocol: protocol.into(),
+            base_url: base_url.into(),
+            auth_scheme: "bearer".into(),
+            enabled: true,
+        }
+    }
+
+    fn provider_input(name: &str, endpoints: Vec<ProviderEndpointInput>) -> ProviderInput {
+        ProviderInput {
+            id: None,
+            name: name.into(),
+            api_key: "secret".into(),
+            endpoints,
+            extra_headers: BTreeMap::new(),
+            header_rules: Default::default(),
+            icon: None,
+            icon_tint: "ink".into(),
+            enabled: true,
+        }
+    }
+
+    fn seed_provider(conn: &Connection, protocol: &str) -> ProviderWithEndpoints {
         save_provider(
             conn,
-            &ProviderInput {
-                id: None,
-                name: format!("p-{protocol}"),
-                base_url: "https://example.com/v1".into(),
-                api_key: "secret".into(),
-                auth_scheme: "bearer".into(),
-                protocol: protocol.into(),
-                extra_headers: BTreeMap::new(),
-                header_rules: Default::default(),
-                icon: None,
-                icon_tint: "ink".into(),
-                enabled: true,
-            },
+            &provider_input(
+                &format!("p-{protocol}"),
+                vec![endpoint(protocol, "https://example.com/v1")],
+            ),
         )
         .unwrap()
     }
 
-    fn change_protocol(conn: &Connection, provider: &Provider, protocol: &str) -> Result<Provider, AppError> {
-        save_provider(
+    fn seed_model(conn: &Connection, provider_id: &str, model_id: &str) -> String {
+        save_upstream_model(
             conn,
-            &ProviderInput {
-                id: Some(provider.id.clone()),
-                name: provider.name.clone(),
-                base_url: provider.base_url.clone(),
-                api_key: provider.api_key.clone(),
-                auth_scheme: provider.auth_scheme.clone(),
-                protocol: protocol.into(),
-                extra_headers: BTreeMap::new(),
-                header_rules: Default::default(),
-                icon: None,
-                icon_tint: "ink".into(),
-                enabled: true,
-            },
-        )
-    }
-
-    #[test]
-    fn rejects_protocol_change_when_routes_reference_provider() {
-        let db = open_in_memory().unwrap();
-        let conn = db.lock().unwrap();
-        let provider = seed_provider(&conn, "openai");
-        let model = save_upstream_model(
-            &conn,
             &UpstreamModelInput {
                 id: None,
-                provider_id: provider.id.clone(),
-                model_id: "gpt".into(),
-                display_name: "GPT".into(),
+                provider_id: provider_id.to_string(),
+                model_id: model_id.into(),
+                display_name: model_id.into(),
                 input_price: 0.0,
                 output_price: 0.0,
                 cache_read_price: 0.0,
@@ -283,19 +397,97 @@ mod tests {
                 enabled: true,
             },
         )
+        .unwrap()
+        .id
+    }
+
+    #[test]
+    fn saves_multiple_protocol_endpoints() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let saved = save_provider(
+            &conn,
+            &provider_input(
+                "opencode-go",
+                vec![
+                    endpoint("openai", "https://go.example.com/v1"),
+                    endpoint("anthropic", "https://go.example.com/anthropic/v1"),
+                    endpoint("responses", "https://go.example.com/v1"),
+                ],
+            ),
+        )
         .unwrap();
+        assert_eq!(saved.endpoints.len(), 3);
+        let protocols: Vec<&str> = saved
+            .endpoints
+            .iter()
+            .map(|item| item.protocol.as_str())
+            .collect();
+        assert!(protocols.contains(&"openai"));
+        assert!(protocols.contains(&"anthropic"));
+        assert!(protocols.contains(&"responses"));
+    }
+
+    #[test]
+    fn rejects_duplicate_protocol_endpoints() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let result = save_provider(
+            &conn,
+            &provider_input(
+                "dup",
+                vec![
+                    endpoint("openai", "https://a/v1"),
+                    endpoint("openai", "https://b/v1"),
+                ],
+            ),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_protocol_endpoint() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let result = save_provider(&conn, &provider_input("x", vec![endpoint("cohere", "https://a")]));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_empty_endpoints() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        assert!(save_provider(&conn, &provider_input("empty", Vec::new())).is_err());
+    }
+
+    #[test]
+    fn rejects_removing_protocol_referenced_by_route() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = save_provider(
+            &conn,
+            &provider_input(
+                "multi",
+                vec![
+                    endpoint("openai", "https://a/v1"),
+                    endpoint("anthropic", "https://a/anthropic/v1"),
+                ],
+            ),
+        )
+        .unwrap();
+        let model = seed_model(&conn, &provider.provider.id, "m");
         save_route(
             &conn,
             &RouteInput {
                 id: None,
                 alias: "r".into(),
                 display_name: "R".into(),
-                protocol: "openai".into(),
+                protocol: "anthropic".into(),
                 icon: None,
                 icon_tint: None,
                 enabled: true,
                 targets: vec![RouteTargetInput {
-                    upstream_model_id: model.id,
+                    upstream_model_id: model,
                     priority: 0,
                     enabled: true,
                 }],
@@ -303,33 +495,72 @@ mod tests {
         )
         .unwrap();
 
-        assert!(change_protocol(&conn, &provider, "anthropic").is_err());
+        // 移除被 anthropic 路由引用的端点 → 拒绝。
+        let blocked = save_provider(
+            &conn,
+            &ProviderInput {
+                id: Some(provider.provider.id.clone()),
+                endpoints: vec![endpoint("openai", "https://a/v1")],
+                ..provider_input("multi", Vec::new())
+            },
+        );
+        assert!(blocked.is_err());
+
+        // 保留 anthropic 端点即可保存。
+        let ok = save_provider(
+            &conn,
+            &ProviderInput {
+                id: Some(provider.provider.id.clone()),
+                endpoints: vec![
+                    endpoint("openai", "https://a/v1"),
+                    endpoint("anthropic", "https://a/anthropic/v1"),
+                ],
+                ..provider_input("multi", Vec::new())
+            },
+        );
+        assert!(ok.is_ok());
     }
 
     #[test]
-    fn allows_protocol_change_when_no_routes_reference_provider() {
+    fn endpoint_ids_are_stable_across_resaves() {
         let db = open_in_memory().unwrap();
         let conn = db.lock().unwrap();
-        let provider = seed_provider(&conn, "openai");
-        let saved = change_protocol(&conn, &provider, "anthropic").unwrap();
-        assert_eq!(saved.protocol, "anthropic");
-    }
+        let saved = save_provider(
+            &conn,
+            &provider_input(
+                "stable",
+                vec![
+                    endpoint("openai", "https://a/v1"),
+                    endpoint("anthropic", "https://a/anthropic/v1"),
+                ],
+            ),
+        )
+        .unwrap();
+        let before: HashMap<String, String> = saved
+            .endpoints
+            .iter()
+            .map(|item| (item.protocol.clone(), item.id.clone()))
+            .collect();
 
-    fn model_input(provider_id: &str, capabilities: Vec<&str>) -> UpstreamModelInput {
-        UpstreamModelInput {
-            id: None,
-            provider_id: provider_id.to_string(),
-            model_id: "m".into(),
-            display_name: "M".into(),
-            input_price: 0.0,
-            output_price: 0.0,
-            cache_read_price: 0.0,
-            cache_creation_price: 0.0,
-            context_window: 0,
-            capabilities: capabilities.into_iter().map(str::to_string).collect(),
-            icon: None,
-            icon_tint: "ink".into(),
-            enabled: true,
+        let resaved = save_provider(
+            &conn,
+            &ProviderInput {
+                id: Some(saved.provider.id.clone()),
+                endpoints: vec![
+                    // 顺序调换、改地址，协议集合不变。
+                    endpoint("anthropic", "https://a/anthropic/v2"),
+                    endpoint("openai", "https://a/v2"),
+                ],
+                ..provider_input("stable", Vec::new())
+            },
+        )
+        .unwrap();
+        for item in &resaved.endpoints {
+            assert_eq!(
+                before.get(&item.protocol),
+                Some(&item.id),
+                "端点 id 应保持不变"
+            );
         }
     }
 
@@ -342,10 +573,8 @@ mod tests {
             &ProviderInput {
                 id: None,
                 name: "p".into(),
-                base_url: "https://example.com/v1".into(),
                 api_key: "secret".into(),
-                auth_scheme: "bearer".into(),
-                protocol: "openai".into(),
+                endpoints: vec![endpoint("openai", "https://example.com/v1")],
                 extra_headers: BTreeMap::new(),
                 header_rules: ProviderHeaderRules {
                     forward: vec!["session_id".into()],
@@ -361,15 +590,19 @@ mod tests {
             },
         )
         .unwrap();
-        let saved = get_provider(&conn, &provider.id).unwrap().unwrap();
-        assert_eq!(saved.header_rules, provider.header_rules);
+        let saved = get_provider(&conn, &provider.provider.id).unwrap().unwrap();
+        assert_eq!(saved.provider.header_rules, provider.provider.header_rules);
 
         // 空规则落库为 `{}`。
-        let empty = seed_provider(&conn, "anthropic");
+        save_provider(
+            &conn,
+            &provider_input("anthropic", vec![endpoint("anthropic", "https://a/v1")]),
+        )
+        .unwrap();
         let raw: String = conn
             .query_row(
-                "SELECT header_rules FROM providers WHERE id = ?1",
-                [&empty.id],
+                "SELECT header_rules FROM providers WHERE name = 'anthropic'",
+                [],
                 |row| row.get(0),
             )
             .unwrap();
@@ -383,7 +616,21 @@ mod tests {
         let provider = seed_provider(&conn, "openai");
         let saved = save_upstream_model(
             &conn,
-            &model_input(&provider.id, vec!["vision", "tools", "reasoning"]),
+            &UpstreamModelInput {
+                id: None,
+                provider_id: provider.provider.id.clone(),
+                model_id: "m".into(),
+                display_name: "M".into(),
+                input_price: 0.0,
+                output_price: 0.0,
+                cache_read_price: 0.0,
+                cache_creation_price: 0.0,
+                context_window: 0,
+                capabilities: vec!["vision".into(), "tools".into(), "reasoning".into()],
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
         )
         .unwrap();
         assert_eq!(saved.capabilities, vec!["vision", "tools", "reasoning"]);
@@ -394,8 +641,25 @@ mod tests {
         let db = open_in_memory().unwrap();
         let conn = db.lock().unwrap();
         let provider = seed_provider(&conn, "openai");
-        let error =
-            save_upstream_model(&conn, &model_input(&provider.id, vec!["audio"])).unwrap_err();
+        let error = save_upstream_model(
+            &conn,
+            &UpstreamModelInput {
+                id: None,
+                provider_id: provider.provider.id.clone(),
+                model_id: "m".into(),
+                display_name: "M".into(),
+                input_price: 0.0,
+                output_price: 0.0,
+                cache_read_price: 0.0,
+                cache_creation_price: 0.0,
+                context_window: 0,
+                capabilities: vec!["audio".into()],
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+        .unwrap_err();
         assert!(matches!(error, AppError::Message(_)), "got {error:?}");
     }
 }

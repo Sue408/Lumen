@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 
 use super::models::{is_known_protocol, Route, RouteInput, RouteTarget, RouteWithTargets};
 use crate::error::AppError;
@@ -41,18 +41,29 @@ fn list_targets(conn: &Connection, route_id: &str) -> Result<Vec<RouteTarget>, A
     Ok(targets)
 }
 
-/// 查上游模型所属提供商的协议，用于校验路由协议同构。
-fn target_protocol(conn: &Connection, upstream_model_id: &str) -> Result<Option<String>, AppError> {
-    conn.query_row(
-        "SELECT p.protocol
-           FROM upstream_models m
-           JOIN providers p ON p.id = m.provider_id
-          WHERE m.id = ?1",
-        [upstream_model_id],
-        |row| row.get(0),
-    )
-    .optional()
-    .map_err(AppError::from)
+/// 上游模型是否存在，以及其提供商是否提供指定协议的启用端点。
+/// 返回 `(模型是否存在, 是否有匹配端点)`。
+fn target_endpoint_status(
+    conn: &Connection,
+    upstream_model_id: &str,
+    protocol: &str,
+) -> Result<(bool, bool), AppError> {
+    let (exists, has_endpoint): (i64, i64) = conn.query_row(
+        "SELECT
+            EXISTS(SELECT 1 FROM upstream_models WHERE id = ?1),
+            EXISTS(
+                SELECT 1
+                  FROM upstream_models m
+                  JOIN provider_endpoints e
+                    ON e.provider_id = m.provider_id
+                   AND e.protocol = ?2
+                   AND e.enabled = 1
+                 WHERE m.id = ?1
+            )",
+        params![upstream_model_id, protocol],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    Ok((exists != 0, has_endpoint != 0))
 }
 
 pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTargets, AppError> {
@@ -83,22 +94,21 @@ pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTarg
             }
         }
     }
-    // 一个路由只允许一种协议：所有目标的上游提供商协议必须与路由声明一致。
+    // 同协议透传：每个目标的上游提供商必须提供路由协议的启用端点。
     for target in &input.targets {
-        match target_protocol(conn, &target.upstream_model_id)? {
-            Some(protocol) if protocol == input.protocol => {}
-            Some(protocol) => {
-                return Err(AppError::message(format!(
-                    "路由协议与上游模型不一致：目标为 {protocol} 协议，路由声明为 {}",
-                    input.protocol
-                )))
-            }
-            None => {
-                return Err(AppError::message(format!(
-                    "上游模型不存在：{}",
-                    target.upstream_model_id
-                )))
-            }
+        let (exists, has_endpoint) =
+            target_endpoint_status(conn, &target.upstream_model_id, &input.protocol)?;
+        if !exists {
+            return Err(AppError::message(format!(
+                "上游模型不存在：{}",
+                target.upstream_model_id
+            )));
+        }
+        if !has_endpoint {
+            return Err(AppError::message(format!(
+                "目标提供商未提供 {} 协议端点：{}",
+                input.protocol, target.upstream_model_id
+            )));
         }
     }
 
@@ -203,7 +213,9 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    use crate::db::models::{ProviderInput, RouteInput, RouteTargetInput, UpstreamModelInput};
+    use crate::db::models::{
+        ProviderEndpointInput, ProviderInput, RouteInput, RouteTargetInput, UpstreamModelInput,
+    };
     use crate::db::{open_in_memory, providers};
 
     fn seed_model(conn: &Connection, protocol: &str, model_id: &str) -> String {
@@ -212,10 +224,14 @@ mod tests {
             &ProviderInput {
                 id: None,
                 name: format!("p-{protocol}-{model_id}"),
-                base_url: "https://example.com/v1".into(),
                 api_key: "secret".into(),
-                auth_scheme: "bearer".into(),
-                protocol: protocol.into(),
+                endpoints: vec![ProviderEndpointInput {
+                    id: None,
+                    protocol: protocol.into(),
+                    base_url: "https://example.com/v1".into(),
+                    auth_scheme: "bearer".into(),
+                    enabled: true,
+                }],
                 extra_headers: BTreeMap::new(),
                 header_rules: Default::default(),
                 icon: None,
@@ -228,7 +244,7 @@ mod tests {
             conn,
             &UpstreamModelInput {
                 id: None,
-                provider_id: provider.id,
+                provider_id: provider.provider.id,
                 model_id: model_id.into(),
                 display_name: model_id.into(),
                 input_price: 0.0,
@@ -247,11 +263,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_mixed_protocol_targets() {
+    fn rejects_target_without_matching_endpoint() {
         let db = open_in_memory().unwrap();
         let conn = db.lock().unwrap();
         let openai = seed_model(&conn, "openai", "gpt");
         let anthropic = seed_model(&conn, "anthropic", "claude");
+        // openai 路由挂一个只有 anthropic 端点的目标 → 拒绝。
         let result = save_route(
             &conn,
             &RouteInput {
@@ -277,6 +294,84 @@ mod tests {
             },
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn multi_protocol_provider_serves_each_route_protocol() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        // 同一 provider、同一模型，挂 openai + anthropic 两个端点。
+        let provider = providers::save_provider(
+            &conn,
+            &ProviderInput {
+                id: None,
+                name: "multi".into(),
+                api_key: "secret".into(),
+                endpoints: vec![
+                    ProviderEndpointInput {
+                        id: None,
+                        protocol: "openai".into(),
+                        base_url: "https://a/v1".into(),
+                        auth_scheme: "bearer".into(),
+                        enabled: true,
+                    },
+                    ProviderEndpointInput {
+                        id: None,
+                        protocol: "anthropic".into(),
+                        base_url: "https://a/anthropic/v1".into(),
+                        auth_scheme: "x-api-key".into(),
+                        enabled: true,
+                    },
+                ],
+                extra_headers: BTreeMap::new(),
+                header_rules: Default::default(),
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+        .unwrap();
+        let model = providers::save_upstream_model(
+            &conn,
+            &UpstreamModelInput {
+                id: None,
+                provider_id: provider.provider.id.clone(),
+                model_id: "gpt".into(),
+                display_name: "GPT".into(),
+                input_price: 0.0,
+                output_price: 0.0,
+                cache_read_price: 0.0,
+                cache_creation_price: 0.0,
+                context_window: 0,
+                capabilities: Vec::new(),
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+        .unwrap()
+        .id;
+
+        for protocol in ["openai", "anthropic"] {
+            let route = save_route(
+                &conn,
+                &RouteInput {
+                    id: None,
+                    alias: format!("r-{protocol}"),
+                    display_name: "R".into(),
+                    protocol: protocol.into(),
+                    icon: None,
+                    icon_tint: None,
+                    enabled: true,
+                    targets: vec![RouteTargetInput {
+                        upstream_model_id: model.clone(),
+                        priority: 0,
+                        enabled: true,
+                    }],
+                },
+            );
+            assert!(route.is_ok(), "多协议 provider 应服务 {protocol} 路由");
+        }
     }
 
     #[test]

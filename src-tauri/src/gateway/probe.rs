@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::db::models::{
-    Provider, PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_RESPONSES,
+    Provider, ProviderEndpoint, PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_RESPONSES,
 };
 use crate::db::providers::{first_enabled_model, get_provider};
 use crate::db::with_db;
@@ -22,6 +22,8 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProbeResult {
+    /// 本次探测所用的协议端点。
+    pub protocol: String,
     pub ok: bool,
     pub http_status: Option<u16>,
     pub latency_ms: i64,
@@ -55,7 +57,13 @@ pub fn minimal_body(protocol: &str, model: &str) -> Value {
     }
 }
 
-fn route_for(provider: &Provider, model_id: &str, upstream_model_id: &str) -> ResolvedRoute {
+/// 用某个协议端点拼出一次探测所需的 `ResolvedRoute`（只用于 `send`，不落库）。
+fn route_for(
+    provider: &Provider,
+    endpoint: &ProviderEndpoint,
+    model_id: &str,
+    upstream_model_id: &str,
+) -> ResolvedRoute {
     ResolvedRoute {
         route_id: String::new(),
         upstream_model_id: upstream_model_id.to_string(),
@@ -66,11 +74,11 @@ fn route_for(provider: &Provider, model_id: &str, upstream_model_id: &str) -> Re
         cache_read_price: 0.0,
         cache_creation_price: 0.0,
         provider_id: provider.id.clone(),
-        base_url: provider.base_url.clone(),
+        base_url: endpoint.base_url.clone(),
         api_key: provider.api_key.clone(),
-        auth_scheme: provider.auth_scheme.clone(),
-        route_protocol: provider.protocol.clone(),
-        upstream_protocol: provider.protocol.clone(),
+        auth_scheme: endpoint.auth_scheme.clone(),
+        route_protocol: endpoint.protocol.clone(),
+        upstream_protocol: endpoint.protocol.clone(),
         extra_headers: provider.extra_headers.clone(),
         header_rules: provider.header_rules.clone(),
     }
@@ -94,54 +102,80 @@ fn describe(status: StatusCode, text: &str) -> String {
     }
 }
 
-/// 对提供商发起一次最小消息请求。**不写日志、不计费、不触发冷却**——它是用户
-/// 主动的一次性诊断，绝不能污染账本或干扰真实降级链。
-pub async fn probe(state: Arc<AppState>, provider_id: String) -> Result<ProbeResult, AppError> {
+/// 对提供商的**每个启用协议端点**发起一次最小消息请求，逐端点返回结果。
+/// **不写日志、不计费、不触发冷却**——它是用户主动的一次性诊断，绝不能污染账本
+/// 或干扰真实降级链。
+pub async fn probe(
+    state: Arc<AppState>,
+    provider_id: String,
+) -> Result<Vec<ProbeResult>, AppError> {
     let (provider, model) = with_db(&state.db, move |conn| {
         let provider = get_provider(conn, &provider_id)?
             .ok_or_else(|| AppError::message("上游提供商不存在"))?;
         let model = first_enabled_model(conn, &provider_id)?.ok_or_else(|| {
-            AppError::message(format!("「{}」名下没有启用的模型，无法探测", provider.name))
+            AppError::message(format!(
+                "「{}」名下没有启用的模型，无法探测",
+                provider.provider.name
+            ))
         })?;
         Ok((provider, model))
     })
     .await?;
 
-    let path = upstream_path(&provider.protocol, &model.model_id, false);
-    let body = minimal_body(&provider.protocol, &model.model_id);
-    let route = route_for(&provider, &model.model_id, &model.id);
-    let headers = HeaderMap::new();
-
-    let started = Instant::now();
-    let response = send(&state, &route, &body, &path, Some(PROBE_TIMEOUT), &headers).await;
-    let latency_ms = started.elapsed().as_millis() as i64;
-
-    match response {
-        Ok(response) => {
-            let status = response.status();
-            let ok = status.is_success();
-            let error = if ok {
-                None
-            } else {
-                let text = response.text().await.unwrap_or_default();
-                Some(describe(status, &text))
-            };
-            Ok(ProbeResult {
-                ok,
-                http_status: Some(status.as_u16()),
-                latency_ms,
-                model: model.model_id,
-                error,
-            })
-        }
-        Err(error) => Ok(ProbeResult {
-            ok: false,
-            http_status: None,
-            latency_ms,
-            model: model.model_id,
-            error: Some(error.to_string()),
-        }),
+    let endpoints: Vec<ProviderEndpoint> = provider
+        .endpoints
+        .iter()
+        .filter(|endpoint| endpoint.enabled)
+        .cloned()
+        .collect();
+    if endpoints.is_empty() {
+        return Err(AppError::message(format!(
+            "「{}」没有启用的协议端点，无法探测",
+            provider.provider.name
+        )));
     }
+
+    let mut results = Vec::with_capacity(endpoints.len());
+    for endpoint in &endpoints {
+        let path = upstream_path(&endpoint.protocol, &model.model_id, false);
+        let body = minimal_body(&endpoint.protocol, &model.model_id);
+        let route = route_for(&provider.provider, endpoint, &model.model_id, &model.id);
+        let headers = HeaderMap::new();
+
+        let started = Instant::now();
+        let response = send(&state, &route, &body, &path, Some(PROBE_TIMEOUT), &headers).await;
+        let latency_ms = started.elapsed().as_millis() as i64;
+
+        match response {
+            Ok(response) => {
+                let status = response.status();
+                let ok = status.is_success();
+                let error = if ok {
+                    None
+                } else {
+                    let text = response.text().await.unwrap_or_default();
+                    Some(describe(status, &text))
+                };
+                results.push(ProbeResult {
+                    protocol: endpoint.protocol.clone(),
+                    ok,
+                    http_status: Some(status.as_u16()),
+                    latency_ms,
+                    model: model.model_id.clone(),
+                    error,
+                });
+            }
+            Err(error) => results.push(ProbeResult {
+                protocol: endpoint.protocol.clone(),
+                ok: false,
+                http_status: None,
+                latency_ms,
+                model: model.model_id.clone(),
+                error: Some(error.to_string()),
+            }),
+        }
+    }
+    Ok(results)
 }
 
 #[cfg(test)]

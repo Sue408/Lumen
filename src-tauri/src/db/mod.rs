@@ -29,6 +29,7 @@ pub fn clear_business_data(conn: &Connection) -> Result<(), AppError> {
         "DELETE FROM route_targets;
          DELETE FROM routes;
          DELETE FROM upstream_models;
+         DELETE FROM provider_endpoints;
          DELETE FROM providers;
          DELETE FROM virtual_keys;
          DELETE FROM request_logs;",

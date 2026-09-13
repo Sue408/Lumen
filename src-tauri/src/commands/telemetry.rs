@@ -42,11 +42,11 @@ pub async fn query_telemetry_cmd(
     Ok(TelemetryDto { snapshot, cooling })
 }
 
-/// 手动连通性测试：对指定提供商发一次最小消息请求。
+/// 手动连通性测试：对提供商的每个启用协议端点各发一次最小消息请求。
 #[tauri::command]
 pub async fn test_provider_cmd(
     state: State<'_, Arc<AppState>>,
     provider_id: String,
-) -> Result<ProbeResult, AppError> {
+) -> Result<Vec<ProbeResult>, AppError> {
     probe::probe(state.inner().clone(), provider_id).await
 }

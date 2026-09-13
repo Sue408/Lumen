@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -23,16 +24,32 @@ struct SeedFile {
     virtual_keys: Vec<SeedVirtualKey>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SeedEndpoint {
+    protocol: String,
+    base_url: String,
+    #[serde(default = "default_auth_scheme")]
+    auth_scheme: String,
+    #[serde(default = "default_true")]
+    enabled: bool,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SeedProvider {
     name: String,
-    base_url: String,
+    /// 新格式：协议端点列表。
+    #[serde(default)]
+    endpoints: Vec<SeedEndpoint>,
     #[serde(default)]
     api_key: String,
-    #[serde(default = "default_auth_scheme")]
+    // 旧格式兼容字段（仅反序列化，导出不再写出）：当 `endpoints` 为空时合成一条端点。
+    #[serde(default, skip_serializing)]
+    base_url: String,
+    #[serde(default = "default_auth_scheme", skip_serializing)]
     auth_scheme: String,
-    #[serde(default = "default_protocol")]
+    #[serde(default = "default_protocol", skip_serializing)]
     protocol: String,
     #[serde(default)]
     extra_headers: BTreeMap<String, String>,
@@ -44,6 +61,26 @@ struct SeedProvider {
     icon_tint: String,
     #[serde(default = "default_true")]
     enabled: bool,
+}
+
+/// 归一化提供商端点：优先新格式；否则用旧格式的 `protocol / base_url / auth_scheme`
+/// 合成一条端点。两者皆空则报错。
+fn normalize_endpoints(provider: &SeedProvider) -> Result<Vec<SeedEndpoint>, AppError> {
+    if !provider.endpoints.is_empty() {
+        return Ok(provider.endpoints.clone());
+    }
+    if provider.base_url.trim().is_empty() {
+        return Err(AppError::message(format!(
+            "seed 提供商 {} 缺少协议端点（endpoints 或 baseUrl）",
+            provider.name
+        )));
+    }
+    Ok(vec![SeedEndpoint {
+        protocol: provider.protocol.clone(),
+        base_url: provider.base_url.clone(),
+        auth_scheme: provider.auth_scheme.clone(),
+        enabled: true,
+    }])
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -165,41 +202,49 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
     // 先载入库中已有的 provider / model：这样「只含部分条目」的文件也能引用
     // 未在本次文件里出现的既有 provider 与 model，而不是只能整包导入。
     let mut provider_ids: HashMap<String, String> = HashMap::new();
-    let mut provider_protocols: HashMap<String, String> = HashMap::new();
+    // provider_id -> 该提供商已有的协议端点集合，供路由目标校验。
+    let mut provider_protocols: HashMap<String, HashSet<String>> = HashMap::new();
     {
-        let mut stmt = tx.prepare("SELECT id, name, protocol FROM providers")?;
+        let mut stmt = tx.prepare("SELECT id, name FROM providers")?;
         let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
         for row in rows {
-            let (id, name, protocol) = row?;
-            provider_ids.insert(name.clone(), id);
-            provider_protocols.insert(name, protocol);
+            let (id, name) = row?;
+            provider_ids.insert(name, id);
+        }
+        let mut stmt = tx.prepare("SELECT provider_id, protocol FROM provider_endpoints")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (provider_id, protocol) = row?;
+            provider_protocols
+                .entry(provider_id)
+                .or_default()
+                .insert(protocol);
         }
     }
     for provider in &seed.providers {
+        let endpoints = normalize_endpoints(provider)?;
+        for endpoint in &endpoints {
+            if !is_known_protocol(&endpoint.protocol) {
+                return Err(AppError::message(format!(
+                    "seed 提供商 {} 使用了未知协议：{}",
+                    provider.name, endpoint.protocol
+                )));
+            }
+        }
         let extra_headers = serde_json::to_string(&provider.extra_headers)?;
         let header_rules = serde_json::to_string(&provider.header_rules)?;
-        let id = match existing_id(
-            &tx,
-            "SELECT id FROM providers WHERE name = ?1",
-            params![provider.name],
-        )? {
+        let id = match provider_ids.get(&provider.name).cloned() {
             Some(id) => {
                 tx.execute(
-                    "UPDATE providers SET base_url = ?1, api_key = ?2, auth_scheme = ?3,
-                        protocol = ?4, extra_headers = ?5, header_rules = ?6,
-                        icon = ?7, icon_tint = ?8, enabled = ?9
-                     WHERE id = ?10",
+                    "UPDATE providers SET api_key = ?1, extra_headers = ?2, header_rules = ?3,
+                        icon = ?4, icon_tint = ?5, enabled = ?6
+                     WHERE id = ?7",
                     params![
-                        provider.base_url,
                         provider.api_key,
-                        provider.auth_scheme,
-                        provider.protocol,
                         extra_headers,
                         header_rules,
                         provider.icon,
@@ -215,15 +260,12 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
                 let id = uuid::Uuid::new_v4().to_string();
                 tx.execute(
                     "INSERT INTO providers
-                        (id, name, base_url, api_key, auth_scheme, protocol, extra_headers, header_rules, icon, icon_tint, enabled, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                        (id, name, api_key, extra_headers, header_rules, icon, icon_tint, enabled, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     params![
                         id,
                         provider.name,
-                        provider.base_url,
                         provider.api_key,
-                        provider.auth_scheme,
-                        provider.protocol,
                         extra_headers,
                         header_rules,
                         provider.icon,
@@ -236,18 +278,39 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
                 id
             }
         };
-        provider_protocols.insert(provider.name.clone(), provider.protocol.clone());
+        // 端点全量替换：seed 是配置合并，不要求端点 id 稳定。
+        tx.execute("DELETE FROM provider_endpoints WHERE provider_id = ?1", [&id])?;
+        for endpoint in &endpoints {
+            tx.execute(
+                "INSERT INTO provider_endpoints
+                    (id, provider_id, protocol, base_url, auth_scheme, enabled)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    id,
+                    endpoint.protocol,
+                    endpoint.base_url,
+                    endpoint.auth_scheme,
+                    endpoint.enabled as i64,
+                ],
+            )?;
+        }
+        provider_protocols.insert(
+            id.clone(),
+            endpoints
+                .iter()
+                .map(|endpoint| endpoint.protocol.clone())
+                .collect(),
+        );
         provider_ids.insert(provider.name.clone(), id);
     }
 
     let mut model_ids: HashMap<String, String> = HashMap::new();
-    let mut model_protocols: HashMap<String, String> = HashMap::new();
+    // model_id -> provider_id，供路由目标校验该提供商是否提供目标协议端点。
+    let mut model_providers: HashMap<String, String> = HashMap::new();
     {
-        let mut stmt = tx.prepare(
-            "SELECT m.id, m.model_id, m.display_name, p.protocol
-               FROM upstream_models m
-               JOIN providers p ON p.id = m.provider_id",
-        )?;
+        let mut stmt =
+            tx.prepare("SELECT m.id, m.model_id, m.display_name, m.provider_id FROM upstream_models m")?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -257,8 +320,8 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
             ))
         })?;
         for row in rows {
-            let (id, model_id, display_name, protocol) = row?;
-            model_protocols.insert(id.clone(), protocol);
+            let (id, model_id, display_name, provider_id) = row?;
+            model_providers.insert(id.clone(), provider_id);
             model_ids.insert(model_id, id.clone());
             model_ids.entry(display_name).or_insert(id);
         }
@@ -329,10 +392,7 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
                 id
             }
         };
-        model_protocols.insert(
-            id.clone(),
-            provider_protocols.get(&model.provider).cloned().unwrap_or_default(),
-        );
+        model_providers.insert(id.clone(), provider_id.clone());
         model_ids.insert(model.model_id.clone(), id.clone());
         model_ids.entry(display_name).or_insert(id);
     }
@@ -398,14 +458,16 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
                     route.alias, target.upstream_model
                 ))
             })?;
-            let target_protocol = model_protocols
+            // 同协议透传：目标所属提供商必须提供路由协议的端点。
+            let supported = model_providers
                 .get(model_id)
-                .map(String::as_str)
-                .unwrap_or_default();
-            if target_protocol != route.protocol {
+                .and_then(|provider_id| provider_protocols.get(provider_id))
+                .map(|protocols| protocols.contains(&route.protocol))
+                .unwrap_or(false);
+            if !supported {
                 return Err(AppError::message(format!(
-                    "seed 路由 {} 协议不一致：目标为 {target_protocol}，声明为 {}",
-                    route.alias, route.protocol
+                    "seed 路由 {} 的目标提供商未提供 {} 协议端点：{}",
+                    route.alias, route.protocol, target.upstream_model
                 )));
             }
             tx.execute(
@@ -475,27 +537,46 @@ pub fn export_seed(conn: &Connection) -> Result<String, AppError> {
     let mut providers = Vec::new();
     {
         let mut stmt = conn.prepare(
-            "SELECT id, name, base_url, api_key, auth_scheme, protocol, extra_headers, header_rules, icon, icon_tint, enabled
+            "SELECT id, name, api_key, extra_headers, header_rules, icon, icon_tint, enabled
              FROM providers ORDER BY created_at, name",
         )?;
         let rows = stmt.query_map([], |row| {
-            let extra_raw: String = row.get(6)?;
-            let rules_raw: String = row.get(7)?;
-            Ok(SeedProvider {
-                name: row.get(1)?,
-                base_url: row.get(2)?,
-                api_key: row.get(3)?,
-                auth_scheme: row.get(4)?,
-                protocol: row.get(5)?,
-                extra_headers: serde_json::from_str(&extra_raw).unwrap_or_default(),
-                header_rules: serde_json::from_str(&rules_raw).unwrap_or_default(),
-                icon: row.get(8)?,
-                icon_tint: row.get(9)?,
-                enabled: row.get::<_, i64>(10)? != 0,
-            })
+            let extra_raw: String = row.get(3)?;
+            let rules_raw: String = row.get(4)?;
+            Ok((
+                row.get::<_, String>(0)?,
+                SeedProvider {
+                    name: row.get(1)?,
+                    endpoints: Vec::new(),
+                    api_key: row.get(2)?,
+                    base_url: String::new(),
+                    auth_scheme: default_auth_scheme(),
+                    protocol: default_protocol(),
+                    extra_headers: serde_json::from_str(&extra_raw).unwrap_or_default(),
+                    header_rules: serde_json::from_str(&rules_raw).unwrap_or_default(),
+                    icon: row.get(5)?,
+                    icon_tint: row.get(6)?,
+                    enabled: row.get::<_, i64>(7)? != 0,
+                },
+            ))
         })?;
+        let mut endpoint_stmt = conn.prepare(
+            "SELECT protocol, base_url, auth_scheme, enabled
+               FROM provider_endpoints WHERE provider_id = ?1 ORDER BY rowid ASC",
+        )?;
         for row in rows {
-            providers.push(row?);
+            let (id, mut provider) = row?;
+            provider.endpoints = endpoint_stmt
+                .query_map([&id], |row| {
+                    Ok(SeedEndpoint {
+                        protocol: row.get(0)?,
+                        base_url: row.get(1)?,
+                        auth_scheme: row.get(2)?,
+                        enabled: row.get::<_, i64>(3)? != 0,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            providers.push(provider);
         }
     }
 
@@ -668,6 +749,41 @@ mod tests {
         assert_eq!(openai["iconTint"], "brand");
         assert_eq!(anthropic["iconTint"], "ink");
         assert_eq!(anthropic["enabled"], false);
+        // 旧格式导入合成端点，导出统一为新格式。
+        assert_eq!(openai["endpoints"][0]["protocol"], "openai");
+        assert_eq!(openai["endpoints"][0]["baseUrl"], "https://api.openai.com/v1");
+        assert_eq!(anthropic["endpoints"][0]["protocol"], "anthropic");
+        assert_eq!(anthropic["endpoints"][0]["authScheme"], "x-api-key");
+    }
+
+    #[test]
+    fn imports_new_format_endpoints() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let seed: SeedFile = serde_json::from_str(
+            r#"{ "providers": [ { "name": "opencode-go", "apiKey": "sk-x",
+                 "endpoints": [
+                   { "protocol": "openai", "baseUrl": "https://go/v1" },
+                   { "protocol": "anthropic", "baseUrl": "https://go/anthropic/v1", "authScheme": "x-api-key" }
+                 ] } ] }"#,
+        )
+        .unwrap();
+        merge_seed(&conn, &seed, true).unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM provider_endpoints", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 2);
+        let anthropic_base: String = conn
+            .query_row(
+                "SELECT base_url FROM provider_endpoints WHERE protocol = 'anthropic'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(anthropic_base, "https://go/anthropic/v1");
     }
 
     #[test]

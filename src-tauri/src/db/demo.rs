@@ -5,7 +5,8 @@ use serde::Serialize;
 use super::keys::save_virtual_key;
 use super::logs::insert_log;
 use super::models::{
-    ProviderInput, RequestLog, RouteInput, RouteTargetInput, UpstreamModelInput, VirtualKeyInput,
+    ProviderEndpointInput, ProviderInput, RequestLog, RouteInput, RouteTargetInput,
+    UpstreamModelInput, VirtualKeyInput,
 };
 use super::{clear_business_data, providers, routes};
 use crate::error::AppError;
@@ -582,10 +583,14 @@ fn write_config(conn: &Connection, set: &DemoSet) -> Result<DemoSummary, AppErro
             &ProviderInput {
                 id: Some(provider.id.to_string()),
                 name: provider.name.to_string(),
-                base_url: provider.base_url.to_string(),
                 api_key: provider.api_key.to_string(),
-                auth_scheme: provider.auth_scheme.to_string(),
-                protocol: provider.protocol.to_string(),
+                endpoints: vec![ProviderEndpointInput {
+                    id: None,
+                    protocol: provider.protocol.to_string(),
+                    base_url: provider.base_url.to_string(),
+                    auth_scheme: provider.auth_scheme.to_string(),
+                    enabled: true,
+                }],
                 extra_headers: Default::default(),
                 header_rules: Default::default(),
                 icon: Some(provider.icon.to_string()),

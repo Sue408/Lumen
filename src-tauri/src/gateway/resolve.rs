@@ -17,12 +17,14 @@ pub struct ResolvedRoute {
     pub cache_read_price: f64,
     pub cache_creation_price: f64,
     pub provider_id: String,
+    /// 命中协议端点的上游地址。
     pub base_url: String,
     pub api_key: String,
+    /// 命中协议端点的鉴权方式。
     pub auth_scheme: String,
     /// 路由声明的入站协议（端点必须与之匹配）。
     pub route_protocol: String,
-    /// 上游提供商的协议（决定转发路径、鉴权头与计费口径）。
+    /// 上游协议。同协议透传，恒等于 `route_protocol`；决定转发路径与计费口径。
     pub upstream_protocol: String,
     pub extra_headers: BTreeMap<String, String>,
     /// 上游 provider 的请求头映射（透传 / 替换 / 移除）；与 `extra_headers` 同为 provider 级。
@@ -47,16 +49,20 @@ pub fn resolve_candidates(
             m.cache_read_price AS cache_read_price,
             m.cache_creation_price AS cache_creation_price,
             p.id            AS provider_id,
-            p.base_url      AS base_url,
+            e.base_url      AS base_url,
             p.api_key       AS api_key,
-            p.auth_scheme   AS auth_scheme,
-            p.protocol      AS upstream_protocol,
+            e.auth_scheme   AS auth_scheme,
+            r.protocol      AS upstream_protocol,
             p.extra_headers AS extra_headers,
             p.header_rules  AS header_rules
          FROM routes r
          JOIN route_targets t   ON t.route_id = r.id
          JOIN upstream_models m ON m.id = t.upstream_model_id
          JOIN providers p       ON p.id = m.provider_id
+         JOIN provider_endpoints e
+           ON e.provider_id = p.id
+          AND e.protocol = r.protocol
+          AND e.enabled = 1
          WHERE r.alias = ?1
            AND r.enabled = 1
            AND t.enabled = 1
@@ -101,7 +107,9 @@ pub async fn resolve_all(state: &AppState, alias: &str) -> Result<Vec<ResolvedRo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::models::{ProviderInput, RouteInput, RouteTargetInput, UpstreamModelInput};
+    use crate::db::models::{
+        ProviderEndpointInput, ProviderInput, RouteInput, RouteTargetInput, UpstreamModelInput,
+    };
     use crate::db::{open_in_memory, providers, routes, Db};
 
     fn seed_provider(conn: &Connection) -> String {
@@ -110,10 +118,14 @@ mod tests {
             &ProviderInput {
                 id: None,
                 name: "示例".into(),
-                base_url: "https://example.com/v1".into(),
                 api_key: "secret".into(),
-                auth_scheme: "bearer".into(),
-                protocol: "openai".into(),
+                endpoints: vec![ProviderEndpointInput {
+                    id: None,
+                    protocol: "openai".into(),
+                    base_url: "https://example.com/v1".into(),
+                    auth_scheme: "bearer".into(),
+                    enabled: true,
+                }],
                 extra_headers: BTreeMap::new(),
                 header_rules: Default::default(),
                 icon: None,
@@ -122,6 +134,7 @@ mod tests {
             },
         )
         .unwrap()
+        .provider
         .id
     }
 
@@ -277,5 +290,99 @@ mod tests {
         conn.execute("UPDATE route_targets SET enabled = 0", [])
             .unwrap();
         assert!(resolve_candidates(&conn, "lumen/x").unwrap().is_empty());
+    }
+
+    fn multi_provider(conn: &Connection) -> String {
+        providers::save_provider(
+            conn,
+            &ProviderInput {
+                id: None,
+                name: "multi".into(),
+                api_key: "secret".into(),
+                endpoints: vec![
+                    ProviderEndpointInput {
+                        id: None,
+                        protocol: "openai".into(),
+                        base_url: "https://a/v1".into(),
+                        auth_scheme: "bearer".into(),
+                        enabled: true,
+                    },
+                    ProviderEndpointInput {
+                        id: None,
+                        protocol: "anthropic".into(),
+                        base_url: "https://a/anthropic/v1".into(),
+                        auth_scheme: "x-api-key".into(),
+                        enabled: true,
+                    },
+                ],
+                extra_headers: BTreeMap::new(),
+                header_rules: Default::default(),
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+        .unwrap()
+        .provider
+        .id
+    }
+
+    fn route_for_protocol(conn: &Connection, alias: &str, protocol: &str, model: &str) {
+        routes::save_route(
+            conn,
+            &RouteInput {
+                id: None,
+                alias: alias.into(),
+                display_name: "R".into(),
+                protocol: protocol.into(),
+                icon: None,
+                icon_tint: None,
+                enabled: true,
+                targets: vec![RouteTargetInput {
+                    upstream_model_id: model.to_string(),
+                    priority: 0,
+                    enabled: true,
+                }],
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn resolves_matching_endpoint_per_route_protocol() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = multi_provider(&conn);
+        let model = seed_model(&conn, &provider, "gpt");
+        route_for_protocol(&conn, "r-openai", "openai", &model);
+        route_for_protocol(&conn, "r-anthropic", "anthropic", &model);
+
+        let openai = resolve_candidates(&conn, "r-openai").unwrap();
+        assert_eq!(openai.len(), 1);
+        assert_eq!(openai[0].upstream_protocol, "openai");
+        assert_eq!(openai[0].base_url, "https://a/v1");
+        assert_eq!(openai[0].auth_scheme, "bearer");
+
+        let anthropic = resolve_candidates(&conn, "r-anthropic").unwrap();
+        assert_eq!(anthropic.len(), 1);
+        assert_eq!(anthropic[0].upstream_protocol, "anthropic");
+        assert_eq!(anthropic[0].base_url, "https://a/anthropic/v1");
+        assert_eq!(anthropic[0].auth_scheme, "x-api-key");
+    }
+
+    #[test]
+    fn skips_disabled_endpoint() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = multi_provider(&conn);
+        let model = seed_model(&conn, &provider, "gpt");
+        route_for_protocol(&conn, "r-openai", "openai", &model);
+        // 停用 openai 端点 → 该协议无候选。
+        conn.execute(
+            "UPDATE provider_endpoints SET enabled = 0 WHERE protocol = 'openai'",
+            [],
+        )
+        .unwrap();
+        assert!(resolve_candidates(&conn, "r-openai").unwrap().is_empty());
     }
 }

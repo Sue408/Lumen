@@ -43,10 +43,7 @@ pub fn contains_cache_read(protocol: &str) -> bool {
 pub struct Provider {
     pub id: String,
     pub name: String,
-    pub base_url: String,
     pub api_key: String,
-    pub auth_scheme: String,
-    pub protocol: String,
     pub extra_headers: BTreeMap<String, String>,
     pub header_rules: ProviderHeaderRules,
     pub icon: Option<String>,
@@ -55,18 +52,51 @@ pub struct Provider {
     pub created_at: String,
 }
 
+/// 一个提供商对外提供的某协议端点：协议 + 该协议的上游地址与鉴权方式。
+/// 同一提供商的多种协议共享连接身份（名称 / 密钥 / 请求头），仅端点不同。
+/// 自然键 `(provider_id, protocol)`：一个提供商每种协议至多一个端点。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderEndpoint {
+    pub id: String,
+    pub provider_id: String,
+    pub protocol: String,
+    pub base_url: String,
+    pub auth_scheme: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderEndpointInput {
+    pub id: Option<String>,
+    pub protocol: String,
+    pub base_url: String,
+    #[serde(default = "default_auth_scheme")]
+    pub auth_scheme: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// 提供商连同其协议端点。列表 / 保存统一返回此形状，前端一次取全。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderWithEndpoints {
+    #[serde(flatten)]
+    pub provider: Provider,
+    pub endpoints: Vec<ProviderEndpoint>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderInput {
     pub id: Option<String>,
     pub name: String,
-    pub base_url: String,
     #[serde(default)]
     pub api_key: String,
-    #[serde(default = "default_auth_scheme")]
-    pub auth_scheme: String,
-    #[serde(default = "default_protocol")]
-    pub protocol: String,
+    /// 该提供商支持的协议端点；至少一条。
+    #[serde(default)]
+    pub endpoints: Vec<ProviderEndpointInput>,
     #[serde(default)]
     pub extra_headers: BTreeMap<String, String>,
     #[serde(default)]
@@ -104,16 +134,26 @@ impl Provider {
         Ok(Self {
             id: row.get("id")?,
             name: row.get("name")?,
-            base_url: row.get("base_url")?,
             api_key: row.get("api_key")?,
-            auth_scheme: row.get("auth_scheme")?,
-            protocol: row.get("protocol")?,
             extra_headers: parse_headers(&row.get::<_, String>("extra_headers")?),
             header_rules: parse_provider_header_rules(&row.get::<_, String>("header_rules")?),
             icon: row.get("icon")?,
             icon_tint: row.get("icon_tint")?,
             enabled: row.get::<_, i64>("enabled")? != 0,
             created_at: row.get("created_at")?,
+        })
+    }
+}
+
+impl ProviderEndpoint {
+    pub fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            provider_id: row.get("provider_id")?,
+            protocol: row.get("protocol")?,
+            base_url: row.get("base_url")?,
+            auth_scheme: row.get("auth_scheme")?,
+            enabled: row.get::<_, i64>("enabled")? != 0,
         })
     }
 }
