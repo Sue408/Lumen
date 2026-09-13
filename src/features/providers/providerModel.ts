@@ -167,6 +167,15 @@ export function isProviderDraftDirty(draft: ProviderDraft, original: ProviderDra
   );
 }
 
+/** 从上游地址取主机名，供端点条目紧凑展示；解析失败时原样返回。 */
+export function endpointHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl;
+  }
+}
+
 export function validateProviderDraft(draft: ProviderDraft): string | null {
   if (draft.name.trim().length === 0) return "请填写提供商名称。";
   if (draft.endpoints.length === 0) return "请至少添加一个协议端点。";

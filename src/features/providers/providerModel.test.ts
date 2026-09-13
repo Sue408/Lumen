@@ -4,6 +4,7 @@ import {
   capabilityOrder,
   contextWindowToNumber,
   emptyModelDraft,
+  endpointHost,
   formatContextWindow,
   formatExtraHeaders,
   isCapabilityId,
@@ -37,6 +38,11 @@ const provider: Provider = {
   enabled: true,
   createdAt: "2026-09-01T02:00:00+00:00",
 };
+
+test("endpointHost extracts the host and tolerates partial input", () => {
+  assert.equal(endpointHost("https://api.deepseek.com/anthropic/v1"), "api.deepseek.com");
+  assert.equal(endpointHost("not a url"), "not a url");
+});
 
 test("capabilityOrder mirrors the backend vocabulary", () => {
   // 与 src-tauri/src/db/models.rs 的 MODEL_CAPABILITIES 保持一致。

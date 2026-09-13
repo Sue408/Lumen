@@ -40,6 +40,7 @@ import {
   contextWindowToNumber,
   draftHeaderRules,
   emptyModelDraft,
+  endpointHost,
   emptyProviderDraft,
   formatContextWindow,
   isCapabilityId,
@@ -57,6 +58,7 @@ import {
 } from "./providerModel";
 import { capabilityIcons } from "./capabilityIcons";
 import { ModelForm } from "./ModelForm";
+import { ProviderBasicsModal, type ProviderBasicsValues } from "./ProviderBasicsModal";
 import { ProviderForm } from "./ProviderForm";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
 import { useRegisterSelection } from "../../hooks/useRegisterSelection";
@@ -70,14 +72,6 @@ import {
   type TelemetrySnapshot,
 } from "../../services/telemetry";
 
-function hostLabel(baseUrl: string): string {
-  try {
-    return new URL(baseUrl).host;
-  } catch {
-    return baseUrl;
-  }
-}
-
 export function ProvidersPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [models, setModels] = useState<UpstreamModel[]>([]);
@@ -89,6 +83,8 @@ export function ProvidersPage() {
   const [confirmingModelId, setConfirmingModelId] = useState<string | null>(null);
   const [probe, setProbe] = useState<ProbeResult[] | null>(null);
   const [probing, setProbing] = useState(false);
+  const [basicsOpen, setBasicsOpen] = useState(false);
+  const [basicsError, setBasicsError] = useState<string | null>(null);
   const { busy, run } = useAsyncAction();
   const { revision } = useLiveRevision();
   const [telemetry, setTelemetry] = useState<TelemetrySnapshot | null>(null);
@@ -172,6 +168,14 @@ export function ProvidersPage() {
     }
   };
 
+  // 新建上游时名称 / 密钥没有承载处，进入新建态即弹出基础信息弹窗。
+  useEffect(() => {
+    if (selectedId === "new") {
+      setBasicsError(null);
+      setBasicsOpen(true);
+    }
+  }, [selectedId]);
+
   const refreshLists = async () => {
     const [nextProviders, nextModels] = await Promise.all([
       listProviders(),
@@ -250,6 +254,28 @@ export function ProvidersPage() {
     if (!savedDraft) return;
     setDraft({ ...savedDraft });
     setFormError(null);
+  };
+
+  const openBasics = () => {
+    setBasicsError(null);
+    setBasicsOpen(true);
+  };
+
+  const applyBasics = (values: ProviderBasicsValues) => {
+    if (!draft) return;
+    if (values.name.length === 0) {
+      setBasicsError("请填写提供商名称。");
+      return;
+    }
+    if (draft.id === null && values.apiKey.trim().length === 0) {
+      setBasicsError("请填写 API Key。");
+      return;
+    }
+    setDraft((previous) =>
+      previous ? { ...previous, name: values.name, apiKey: values.apiKey } : previous,
+    );
+    setBasicsOpen(false);
+    setBasicsError(null);
   };
 
   const setProviderAppearance = async (
@@ -498,6 +524,9 @@ export function ProvidersPage() {
                       onChange={(next) => setDraft({ ...draft, enabled: next })}
                     />
                     <div className="sheet-actions">
+                      <GlyphButton label="编辑名称与密钥" disabled={busy} onClick={openBasics}>
+                        <Pencil aria-hidden="true" />
+                      </GlyphButton>
                       {selectedId !== "new" ? (
                         <>
                           <GlyphButton
@@ -531,10 +560,12 @@ export function ProvidersPage() {
                         className="sheet-summary-host"
                         title={draft.endpoints.map((endpoint) => endpoint.baseUrl).join("\n")}
                       >
-                        {hostLabel(draft.endpoints[0]?.baseUrl ?? "")}
+                        {endpointHost(draft.endpoints[0]?.baseUrl ?? "")}
                       </span>
                       <span className="sheet-summary-sep" aria-hidden="true">·</span>
                       <span>{selectedModels.length} 个模型</span>
+                      <span className="sheet-summary-sep" aria-hidden="true">·</span>
+                      <span>{draft.apiKey.trim() ? "密钥已配置" : "未配置密钥"}</span>
                     </p>
                   ) : null}
 
@@ -602,9 +633,8 @@ export function ProvidersPage() {
                     onChange={setDraft}
                     onDiscard={discardDraft}
                     onSubmit={() => void submitProvider()}
-                  />
-
-                  {selectedProvider ? (
+                  >
+                    {selectedProvider ? (
                     <section className="sheet-section">
                       <SectionTitle
                         icon={<Boxes aria-hidden="true" />}
@@ -623,6 +653,7 @@ export function ProvidersPage() {
                         }
                       >
                         上游模型
+                        <span className="section-count">{selectedModels.length}</span>
                       </SectionTitle>
 
                       <ul className="model-list">
@@ -633,7 +664,7 @@ export function ProvidersPage() {
                                 icon={model.icon}
                                 auto={detectBrand([selectedProvider.name, model.modelId])}
                                 tint={model.iconTint}
-                                size={20}
+                                size={22}
                                 enabled={model.enabled}
                                 fallback={<Boxes aria-hidden="true" />}
                                 disabled={busy}
@@ -732,7 +763,8 @@ export function ProvidersPage() {
                         </div>
                       ) : null}
                     </section>
-                  ) : null}
+                    ) : null}
+                  </ProviderForm>
                 </>
               ) : null}
             </section>
@@ -754,6 +786,20 @@ export function ProvidersPage() {
             onCancel={() => setModelDraft(null)}
           />
         </Modal>
+      ) : null}
+
+      {basicsOpen && draft ? (
+        <ProviderBasicsModal
+          initial={{ name: draft.name, apiKey: draft.apiKey }}
+          isNew={draft.id === null}
+          busy={busy}
+          error={basicsError}
+          onSubmit={applyBasics}
+          onClose={() => {
+            setBasicsOpen(false);
+            setBasicsError(null);
+          }}
+        />
       ) : null}
     </main>
   );
