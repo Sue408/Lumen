@@ -309,7 +309,6 @@ export function ProvidersPage() {
         protocol: values.protocol,
         baseUrl: values.baseUrl,
         authScheme: values.authScheme,
-        enabled: true,
       });
       if (endpointError) {
         setBasicsError(endpointError);
@@ -325,7 +324,6 @@ export function ProvidersPage() {
               protocol: values.protocol,
               baseUrl: values.baseUrl,
               authScheme: values.authScheme,
-              enabled: true,
             },
           ],
           extraHeaders: {},

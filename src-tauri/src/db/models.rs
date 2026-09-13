@@ -63,7 +63,6 @@ pub struct ProviderEndpoint {
     pub protocol: String,
     pub base_url: String,
     pub auth_scheme: String,
-    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,8 +73,6 @@ pub struct ProviderEndpointInput {
     pub base_url: String,
     #[serde(default = "default_auth_scheme")]
     pub auth_scheme: String,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
 }
 
 /// 提供商连同其协议端点。列表 / 保存统一返回此形状，前端一次取全。
@@ -153,7 +150,6 @@ impl ProviderEndpoint {
             protocol: row.get("protocol")?,
             base_url: row.get("base_url")?,
             auth_scheme: row.get("auth_scheme")?,
-            enabled: row.get::<_, i64>("enabled")? != 0,
         })
     }
 }

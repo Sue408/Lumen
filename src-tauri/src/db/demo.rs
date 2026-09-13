@@ -589,7 +589,6 @@ fn write_config(conn: &Connection, set: &DemoSet) -> Result<DemoSummary, AppErro
                     protocol: provider.protocol.to_string(),
                     base_url: provider.base_url.to_string(),
                     auth_scheme: provider.auth_scheme.to_string(),
-                    enabled: true,
                 }],
                 extra_headers: Default::default(),
                 header_rules: Default::default(),

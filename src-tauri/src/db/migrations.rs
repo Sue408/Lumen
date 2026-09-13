@@ -25,7 +25,6 @@ CREATE TABLE IF NOT EXISTS provider_endpoints (
     protocol    TEXT NOT NULL,
     base_url    TEXT NOT NULL,
     auth_scheme TEXT NOT NULL DEFAULT 'bearer',
-    enabled     INTEGER NOT NULL DEFAULT 1,
     UNIQUE(provider_id, protocol)
 );
 
@@ -140,7 +139,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_route_targets_route_model
 
 /// 最新 schema 版本。每次修改 `SCHEMA` 的**结构**（新建表 / 加列 / 改约束）就 +1，
 /// 并在 `MIGRATIONS` 补一条对应目标的增量语句；纯加索引不算（`SCHEMA` 幂等补建即可）。
-pub const SCHEMA_VERSION: i64 = 15;
+pub const SCHEMA_VERSION: i64 = 16;
 
 /// 把 `user_version` 从「目标版本 - 1」提升到「目标版本」的增量语句，按目标版本升序。
 /// 只允许增量（`ALTER TABLE ADD COLUMN` / `CREATE TABLE` / `CREATE [UNIQUE] INDEX`），
@@ -213,6 +212,23 @@ const MIGRATIONS: &[(i64, &str)] = &[
            FROM providers;
          DROP TABLE providers;
          ALTER TABLE providers_new RENAME TO providers;",
+    ),
+    // v16：端点的启停是伪需求（与 provider/model/target 的 enabled 语义重叠，且是
+    // 「路由静默失效」的唯一来源）。重建 provider_endpoints 去掉 `enabled` 列。
+    (
+        16,
+        "CREATE TABLE provider_endpoints_new (
+             id          TEXT PRIMARY KEY,
+             provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+             protocol    TEXT NOT NULL,
+             base_url    TEXT NOT NULL,
+             auth_scheme TEXT NOT NULL DEFAULT 'bearer',
+             UNIQUE(provider_id, protocol)
+         );
+         INSERT INTO provider_endpoints_new (id, provider_id, protocol, base_url, auth_scheme)
+         SELECT id, provider_id, protocol, base_url, auth_scheme FROM provider_endpoints;
+         DROP TABLE provider_endpoints;
+         ALTER TABLE provider_endpoints_new RENAME TO provider_endpoints;",
     ),
 ];
 

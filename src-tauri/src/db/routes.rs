@@ -41,7 +41,7 @@ fn list_targets(conn: &Connection, route_id: &str) -> Result<Vec<RouteTarget>, A
     Ok(targets)
 }
 
-/// 上游模型是否存在，以及其提供商是否提供指定协议的启用端点。
+/// 上游模型是否存在，以及其提供商是否提供指定协议的端点。
 /// 返回 `(模型是否存在, 是否有匹配端点)`。
 fn target_endpoint_status(
     conn: &Connection,
@@ -57,7 +57,6 @@ fn target_endpoint_status(
                   JOIN provider_endpoints e
                     ON e.provider_id = m.provider_id
                    AND e.protocol = ?2
-                   AND e.enabled = 1
                  WHERE m.id = ?1
             )",
         params![upstream_model_id, protocol],
@@ -230,7 +229,6 @@ mod tests {
                     protocol: protocol.into(),
                     base_url: "https://example.com/v1".into(),
                     auth_scheme: "bearer".into(),
-                    enabled: true,
                 }],
                 extra_headers: BTreeMap::new(),
                 header_rules: Default::default(),
@@ -313,14 +311,12 @@ mod tests {
                         protocol: "openai".into(),
                         base_url: "https://a/v1".into(),
                         auth_scheme: "bearer".into(),
-                        enabled: true,
                     },
                     ProviderEndpointInput {
                         id: None,
                         protocol: "anthropic".into(),
                         base_url: "https://a/anthropic/v1".into(),
                         auth_scheme: "x-api-key".into(),
-                        enabled: true,
                     },
                 ],
                 extra_headers: BTreeMap::new(),

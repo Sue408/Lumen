@@ -762,7 +762,6 @@ mod tests {
                 "gemini" => "x-goog-api-key".into(),
                 _ => "bearer".into(),
             },
-            enabled: true,
         }
     }
 

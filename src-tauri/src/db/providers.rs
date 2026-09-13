@@ -184,28 +184,22 @@ pub fn save_provider(
             Some(endpoint_id) => {
                 tx.execute(
                     "UPDATE provider_endpoints
-                        SET base_url = ?2, auth_scheme = ?3, enabled = ?4
+                        SET base_url = ?2, auth_scheme = ?3
                       WHERE id = ?1",
-                    params![
-                        endpoint_id,
-                        endpoint.base_url,
-                        endpoint.auth_scheme,
-                        endpoint.enabled as i64,
-                    ],
+                    params![endpoint_id, endpoint.base_url, endpoint.auth_scheme],
                 )?;
             }
             None => {
                 tx.execute(
                     "INSERT INTO provider_endpoints
-                        (id, provider_id, protocol, base_url, auth_scheme, enabled)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        (id, provider_id, protocol, base_url, auth_scheme)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
                         uuid::Uuid::new_v4().to_string(),
                         id,
                         endpoint.protocol,
                         endpoint.base_url,
                         endpoint.auth_scheme,
-                        endpoint.enabled as i64,
                     ],
                 )?;
             }
@@ -349,7 +343,6 @@ mod tests {
             protocol: protocol.into(),
             base_url: base_url.into(),
             auth_scheme: "bearer".into(),
-            enabled: true,
         }
     }
 

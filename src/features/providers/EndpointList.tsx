@@ -1,11 +1,6 @@
 import { useRef, useState } from "react";
 import { Network, Pencil, Plus, Trash2 } from "lucide-react";
-import {
-  GlyphButton,
-  SectionTitle,
-  StatusDot,
-  TogglePill,
-} from "../../components/ConfigControls";
+import { GlyphButton, SectionTitle } from "../../components/ConfigControls";
 import {
   authSchemeLabel,
   endpointHost,
@@ -24,7 +19,6 @@ function toDraft(endpoints: ProviderEndpoint[]): EndpointDraft[] {
     protocol: endpoint.protocol,
     baseUrl: endpoint.baseUrl,
     authScheme: endpoint.authScheme,
-    enabled: endpoint.enabled,
   }));
 }
 
@@ -34,7 +28,6 @@ function toInput(rows: EndpointDraft[]): ProviderEndpointInput[] {
     protocol: row.protocol,
     baseUrl: row.baseUrl,
     authScheme: row.authScheme,
-    enabled: row.enabled,
   }));
 }
 
@@ -126,7 +119,6 @@ export function EndpointList({
               key={row.id ?? `new-${index}`}
             >
               <div className="endpoint-item-head">
-                <StatusDot alive={row.enabled} />
                 <span className="endpoint-item-protocol">{protocolLabel[row.protocol]}</span>
                 <code className="endpoint-item-host" title={row.baseUrl}>
                   {row.baseUrl.trim() ? endpointHost(row.baseUrl) : "未填写地址"}
@@ -203,13 +195,6 @@ export function EndpointList({
                   </label>
                   {endpointError ? <p className="field-error">{endpointError}</p> : null}
                   <div className="endpoint-item-foot">
-                    <TogglePill
-                      small
-                      checked={row.enabled}
-                      label={row.enabled ? "停用该协议端点" : "启用该协议端点"}
-                      disabled={busy}
-                      onChange={(next) => patchCommit(index, { enabled: next })}
-                    />
                     <button
                       className="text-action"
                       type="button"

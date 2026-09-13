@@ -50,9 +50,7 @@ import { useAsyncAction } from "../../hooks/useAsyncAction";
 function groupedModels(providers: Provider[], models: UpstreamModel[], protocol: Protocol) {
   return providers
     .filter((provider) =>
-      provider.endpoints.some(
-        (endpoint) => endpoint.protocol === protocol && endpoint.enabled,
-      ),
+      provider.endpoints.some((endpoint) => endpoint.protocol === protocol),
     )
     .map((provider) => ({
       id: provider.id,

@@ -35,7 +35,6 @@ const providers: Provider[] = [
         protocol: "anthropic",
         baseUrl: "https://api.deepseek.com/anthropic/v1",
         authScheme: "x-api-key",
-        enabled: true,
       },
     ],
     extraHeaders: {},
@@ -56,7 +55,6 @@ const providers: Provider[] = [
         protocol: "openai",
         baseUrl: "https://api.openai.com/v1",
         authScheme: "bearer",
-        enabled: true,
       },
     ],
     extraHeaders: { "OpenAI-Beta": "assistants=v2" },
@@ -189,7 +187,6 @@ export function mockSaveProvider(input: ProviderInput): Provider {
     protocol: endpoint.protocol,
     baseUrl: endpoint.baseUrl,
     authScheme: endpoint.authScheme ?? "bearer",
-    enabled: endpoint.enabled ?? true,
   }));
   const provider: Provider = {
     id,

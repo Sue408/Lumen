@@ -31,8 +31,6 @@ struct SeedEndpoint {
     base_url: String,
     #[serde(default = "default_auth_scheme")]
     auth_scheme: String,
-    #[serde(default = "default_true")]
-    enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -79,7 +77,6 @@ fn normalize_endpoints(provider: &SeedProvider) -> Result<Vec<SeedEndpoint>, App
         protocol: provider.protocol.clone(),
         base_url: provider.base_url.clone(),
         auth_scheme: provider.auth_scheme.clone(),
-        enabled: true,
     }])
 }
 
@@ -283,15 +280,14 @@ fn merge_seed(conn: &Connection, seed: &SeedFile, commit: bool) -> Result<Import
         for endpoint in &endpoints {
             tx.execute(
                 "INSERT INTO provider_endpoints
-                    (id, provider_id, protocol, base_url, auth_scheme, enabled)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    (id, provider_id, protocol, base_url, auth_scheme)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     uuid::Uuid::new_v4().to_string(),
                     id,
                     endpoint.protocol,
                     endpoint.base_url,
                     endpoint.auth_scheme,
-                    endpoint.enabled as i64,
                 ],
             )?;
         }
@@ -561,7 +557,7 @@ pub fn export_seed(conn: &Connection) -> Result<String, AppError> {
             ))
         })?;
         let mut endpoint_stmt = conn.prepare(
-            "SELECT protocol, base_url, auth_scheme, enabled
+            "SELECT protocol, base_url, auth_scheme
                FROM provider_endpoints WHERE provider_id = ?1 ORDER BY rowid ASC",
         )?;
         for row in rows {
@@ -572,7 +568,6 @@ pub fn export_seed(conn: &Connection) -> Result<String, AppError> {
                         protocol: row.get(0)?,
                         base_url: row.get(1)?,
                         auth_scheme: row.get(2)?,
-                        enabled: row.get::<_, i64>(3)? != 0,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;

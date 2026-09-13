@@ -59,7 +59,6 @@ export type EndpointDraft = {
   protocol: Protocol;
   baseUrl: string;
   authScheme: AuthScheme;
-  enabled: boolean;
 };
 
 /** 端点的展示顺序，也是「新增端点」时挑选未占用协议的优先级。 */
@@ -70,7 +69,7 @@ export function emptyEndpointDraft(
   baseUrl = "",
   authScheme: AuthScheme = "bearer",
 ): EndpointDraft {
-  return { id: null, protocol, baseUrl, authScheme, enabled: true };
+  return { id: null, protocol, baseUrl, authScheme };
 }
 
 /** 新增端点：选一个未占用的协议，地址 / 鉴权预填首个端点，便于多协议共用同一 base。 */
@@ -147,7 +146,6 @@ export function endpointToInput(endpoint: ProviderEndpoint): ProviderEndpointInp
     protocol: endpoint.protocol,
     baseUrl: endpoint.baseUrl,
     authScheme: endpoint.authScheme,
-    enabled: endpoint.enabled,
   };
 }
 

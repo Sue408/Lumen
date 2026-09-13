@@ -122,15 +122,10 @@ pub async fn probe(
     })
     .await?;
 
-    let endpoints: Vec<ProviderEndpoint> = provider
-        .endpoints
-        .iter()
-        .filter(|endpoint| endpoint.enabled)
-        .cloned()
-        .collect();
+    let endpoints: Vec<ProviderEndpoint> = provider.endpoints.clone();
     if endpoints.is_empty() {
         return Err(AppError::message(format!(
-            "「{}」没有启用的协议端点，无法探测",
+            "「{}」没有协议端点，无法探测",
             provider.provider.name
         )));
     }

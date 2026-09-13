@@ -10,7 +10,6 @@ export type ProviderEndpoint = {
   protocol: Protocol;
   baseUrl: string;
   authScheme: AuthScheme;
-  enabled: boolean;
 };
 
 export type ProviderEndpointInput = {
@@ -18,7 +17,6 @@ export type ProviderEndpointInput = {
   protocol: Protocol;
   baseUrl: string;
   authScheme?: AuthScheme;
-  enabled?: boolean;
 };
 
 export type Provider = {

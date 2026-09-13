@@ -62,7 +62,6 @@ pub fn resolve_candidates(
          JOIN provider_endpoints e
            ON e.provider_id = p.id
           AND e.protocol = r.protocol
-          AND e.enabled = 1
          WHERE r.alias = ?1
            AND r.enabled = 1
            AND t.enabled = 1
@@ -124,7 +123,6 @@ mod tests {
                     protocol: "openai".into(),
                     base_url: "https://example.com/v1".into(),
                     auth_scheme: "bearer".into(),
-                    enabled: true,
                 }],
                 extra_headers: BTreeMap::new(),
                 header_rules: Default::default(),
@@ -305,14 +303,12 @@ mod tests {
                         protocol: "openai".into(),
                         base_url: "https://a/v1".into(),
                         auth_scheme: "bearer".into(),
-                        enabled: true,
                     },
                     ProviderEndpointInput {
                         id: None,
                         protocol: "anthropic".into(),
                         base_url: "https://a/anthropic/v1".into(),
                         auth_scheme: "x-api-key".into(),
-                        enabled: true,
                     },
                 ],
                 extra_headers: BTreeMap::new(),
@@ -371,18 +367,15 @@ mod tests {
     }
 
     #[test]
-    fn skips_disabled_endpoint() {
+    fn missing_endpoint_yields_no_candidate() {
         let db = open_in_memory().unwrap();
         let conn = db.lock().unwrap();
         let provider = multi_provider(&conn);
         let model = seed_model(&conn, &provider, "gpt");
         route_for_protocol(&conn, "r-openai", "openai", &model);
-        // 停用 openai 端点 → 该协议无候选。
-        conn.execute(
-            "UPDATE provider_endpoints SET enabled = 0 WHERE protocol = 'openai'",
-            [],
-        )
-        .unwrap();
+        // 端点被删除（等价于该协议不再被支持）→ 该协议无候选。
+        conn.execute("DELETE FROM provider_endpoints WHERE protocol = 'openai'", [])
+            .unwrap();
         assert!(resolve_candidates(&conn, "r-openai").unwrap().is_empty());
     }
 }

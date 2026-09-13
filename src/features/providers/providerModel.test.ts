@@ -30,7 +30,6 @@ const provider: Provider = {
       protocol: "anthropic",
       baseUrl: "https://api.deepseek.com/anthropic/v1",
       authScheme: "x-api-key",
-      enabled: true,
     },
   ],
   extraHeaders: { "X-Trace": "1" },
@@ -80,7 +79,6 @@ test("nextEndpointDraft picks an unused protocol and prefills the first endpoint
     protocol: endpoint.protocol,
     baseUrl: endpoint.baseUrl,
     authScheme: endpoint.authScheme,
-    enabled: endpoint.enabled,
   }));
   const added = nextEndpointDraft(first);
   assert.equal(added.protocol, "openai");
