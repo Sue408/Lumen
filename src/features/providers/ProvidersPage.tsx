@@ -648,7 +648,8 @@ export function ProvidersPage() {
                             }}
                             disabled={busy}
                           >
-                            ＋ 登记模型
+                            <Plus aria-hidden="true" />
+                            登记模型
                           </button>
                         }
                       >
