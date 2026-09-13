@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::Local;
+#[cfg(debug_assertions)]
 use tracing_subscriber::fmt::writer::Tee;
 use tracing_subscriber::fmt::MakeWriter;
 
