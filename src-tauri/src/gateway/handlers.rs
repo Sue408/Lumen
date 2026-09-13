@@ -407,6 +407,40 @@ async fn forward(
 
             if is_stream {
                 if matches!(action, AttemptAction::Served) {
+                    // 客户端要的是 SSE，上游却回了 HTML / JSON（典型是 base_url 漏了
+                    // `/v1`，请求打到了中转站的网页首页）。绝不能当成功流透传：客户端会
+                    // 报「流提前结束」，账本还会记一条无 token 的假成功。
+                    if is_stream_mismatch(content_type.as_ref()) {
+                        let text = response.text().await.unwrap_or_default();
+                        let message = stream_mismatch_message(status, content_type.as_ref(), &text);
+                        record_log(
+                            &state,
+                            LogContext {
+                                endpoint: endpoint.to_string(),
+                                alias: alias.clone(),
+                                is_stream: true,
+                                route: Some(candidate.clone()),
+                                latency_ms,
+                                status: "error".to_string(),
+                                http_status: Some(status.as_u16() as i64),
+                                error_message: Some(message.clone()),
+                                request_id: upstream_request_id,
+                                virtual_key_id: Some(key_id.clone()),
+                                usage: UsageTotals::missing(),
+                                attempt_index,
+                                session_id: session.clone(),
+                            },
+                        )
+                        .await;
+                        last_error = Some((
+                            StatusCode::BAD_GATEWAY,
+                            error_body(&message),
+                            Some(HeaderValue::from_static("application/json")),
+                        ));
+                        mark_cooling_for(&state, &candidate, status);
+                        attempt_index += 1;
+                        break;
+                    }
                     // 请求体在手，先估出输入 token；上游漏报时由它补齐。
                     let input_estimate =
                         Some(estimate::estimate_input(&candidate.model_id, &attempt_body));
@@ -625,6 +659,42 @@ fn error_message(value: &Value, fallback: &str) -> String {
                 fallback.to_string()
             }
         })
+}
+
+/// 客户端请求流式、上游返回的却不是 `text/event-stream`。缺少 Content-Type 时不判定
+/// 为不匹配（按 SSE 尽力处理，避免误伤不带该头的合规上游）。
+fn is_stream_mismatch(content_type: Option<&HeaderValue>) -> bool {
+    match content_type.and_then(|value| value.to_str().ok()) {
+        Some(value) => !value.to_ascii_lowercase().starts_with("text/event-stream"),
+        None => false,
+    }
+}
+
+/// 非 SSE 响应的诊断信息：带上状态码、content-type 与响应体片段，直接指向配置问题。
+fn stream_mismatch_message(
+    status: StatusCode,
+    content_type: Option<&HeaderValue>,
+    text: &str,
+) -> String {
+    let kind = content_type
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("未知");
+    let snippet: String = text.chars().take(160).collect();
+    let snippet = snippet.trim();
+    let tail = if snippet.is_empty() {
+        "响应体为空".to_string()
+    } else {
+        format!("响应体片段：{snippet}")
+    };
+    format!(
+        "上游对 stream 请求返回了非 SSE 响应（HTTP {status}，content-type: {kind}）：{tail}。\
+         请检查该提供商的 base_url 与端点是否按协议支持流式（常见是指向中转站首页）。"
+    )
+}
+
+/// 构造与 `error_response` 同形的错误体字符串，供降级链把最后一次错误透传出去。
+fn error_body(message: &str) -> String {
+    json!({ "error": { "message": message, "type": "lumen_error" } }).to_string()
 }
 
 #[cfg(test)]
@@ -1413,6 +1483,61 @@ mod tests {
         assert_eq!(logs[0].total_tokens, 105);
     }
 
+    /// 对任何请求都回 200 HTML 的上游，模拟 base_url 指到中转站首页的情况。
+    async fn start_html_upstream() -> String {
+        let app = axum::Router::new().route(
+            "/responses",
+            axum::routing::post(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                    "<!doctype html><html><head><title>New API</title></head></html>",
+                )
+            }),
+        );
+        serve(app).await
+    }
+
+    #[tokio::test]
+    async fn non_sse_upstream_on_stream_request_is_an_error() {
+        let base_url = start_html_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "responses", "lumen/resp");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/responses",
+                json!({ "model": "lumen/resp", "input": "hi", "stream": true }),
+            ))
+            .await
+            .unwrap();
+        // 200 HTML 不能当成功流：网关回 502，账本记 error 且不再假报估算 token。
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(value["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("非 SSE"));
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].status, "error");
+        assert_eq!(logs[0].http_status, Some(200));
+        assert_eq!(logs[0].usage_source, "missing");
+        assert!(logs[0]
+            .error_message
+            .as_deref()
+            .unwrap()
+            .contains("text/html"));
+    }
+
     #[tokio::test]
     async fn gemini_generate_passthrough_rewrites_path_and_auth() {
         let app = axum::Router::new()
@@ -1471,10 +1596,33 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
     }
 
+    /// 返回标准 SSE 的 Gemini 流式上游：把 path / query 回显进 `data:` 行便于断言。
+    async fn gemini_sse_upstream(
+        axum::extract::Path(model_action): axum::extract::Path<String>,
+        axum::extract::RawQuery(query): axum::extract::RawQuery,
+    ) -> impl axum::response::IntoResponse {
+        let payload = json!({
+            "candidates": [
+                { "content": { "parts": [{ "text": "hi" }] }, "finishReason": "STOP" }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 100,
+                "candidatesTokenCount": 20,
+                "totalTokenCount": 120
+            },
+            "_path": model_action,
+            "_query": query,
+        });
+        (
+            [(header::CONTENT_TYPE, "text/event-stream")],
+            format!("data: {payload}\n\n"),
+        )
+    }
+
     #[tokio::test]
     async fn gemini_stream_appends_alt_sse() {
         let app = axum::Router::new()
-            .route("/models/{model_action}", axum::routing::post(gemini_upstream));
+            .route("/models/{model_action}", axum::routing::post(gemini_sse_upstream));
         let base_url = serve(app).await;
         let db = open_in_memory().unwrap();
         seed_upstream(&db, &base_url, "gemini", "lumen/gemini");
@@ -1492,7 +1640,12 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        let text = String::from_utf8(bytes.to_vec()).unwrap();
+        let data = text
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .expect("应有一条 data 事件");
+        let value: Value = serde_json::from_str(data).unwrap();
         assert_eq!(value["_path"], "mock-model:streamGenerateContent");
         assert_eq!(value["_query"], "alt=sse");
     }
