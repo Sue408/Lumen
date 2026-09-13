@@ -33,35 +33,38 @@ import {
   saveUpstreamModel,
   type IconTint,
   type Provider,
+  type ProviderEndpointInput,
   type UpstreamModel,
 } from "../../services/config";
 import {
   capabilityLabel,
   contextWindowToNumber,
-  draftHeaderRules,
+  emptyEndpointDraft,
+  emptyHeaderDraft,
   emptyModelDraft,
   endpointHost,
-  emptyProviderDraft,
+  extraHeadersFromDraft,
   formatContextWindow,
+  headerDraftFromProvider,
+  headerRulesFromDraft,
   isCapabilityId,
-  isProviderDraftDirty,
+  isHeaderDraftDirty,
   modelToDraft,
   modelsForProvider,
-  parseExtraHeaders,
   priceToNumber,
   protocolLabel,
-  providerToDraft,
+  providerInputFrom,
+  validateEndpointDraft,
+  validateHeaderDraft,
   validateModelDraft,
-  validateProviderDraft,
   type ModelDraft,
-  type ProviderDraft,
+  type ProviderHeaderDraft,
 } from "./providerModel";
 import { capabilityIcons } from "./capabilityIcons";
 import { ModelForm } from "./ModelForm";
 import { ProviderBasicsModal, type ProviderBasicsValues } from "./ProviderBasicsModal";
 import { ProviderForm } from "./ProviderForm";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
-import { useRegisterSelection } from "../../hooks/useRegisterSelection";
 import { useLiveRevision } from "../../app/useLiveRevision";
 import { connectivityLabel, connectivityState, connectivitySummary, formatLatency, formatPercent } from "../../lib/telemetry";
 import {
@@ -72,53 +75,63 @@ import {
   type TelemetrySnapshot,
 } from "../../services/telemetry";
 
+type PendingSwitch = { kind: "existing"; id: string } | { kind: "create" };
+
+function createBasics(): ProviderBasicsValues {
+  const endpoint = emptyEndpointDraft();
+  return {
+    name: "",
+    apiKey: "",
+    protocol: endpoint.protocol,
+    baseUrl: endpoint.baseUrl,
+    authScheme: endpoint.authScheme,
+  };
+}
+
+function editBasics(provider: Provider): ProviderBasicsValues {
+  const endpoint = provider.endpoints[0];
+  return {
+    name: provider.name,
+    apiKey: provider.apiKey,
+    protocol: endpoint?.protocol ?? "openai",
+    baseUrl: endpoint?.baseUrl ?? "",
+    authScheme: endpoint?.authScheme ?? "bearer",
+  };
+}
+
 export function ProvidersPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [models, setModels] = useState<UpstreamModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [modelError, setModelError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [headerDraft, setHeaderDraft] = useState<ProviderHeaderDraft>(emptyHeaderDraft);
+  const [savedHeaderDraft, setSavedHeaderDraft] = useState<ProviderHeaderDraft>(emptyHeaderDraft);
+  const [pendingSwitch, setPendingSwitch] = useState<PendingSwitch | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [basicsMode, setBasicsMode] = useState<"create" | "edit" | null>(null);
+  const [basicsError, setBasicsError] = useState<string | null>(null);
+  const [headerError, setHeaderError] = useState<string | null>(null);
   const [modelDraft, setModelDraft] = useState<ModelDraft | null>(null);
+  const [modelError, setModelError] = useState<string | null>(null);
   const [confirmingModelId, setConfirmingModelId] = useState<string | null>(null);
   const [probe, setProbe] = useState<ProbeResult[] | null>(null);
   const [probing, setProbing] = useState(false);
-  const [basicsOpen, setBasicsOpen] = useState(false);
-  const [basicsError, setBasicsError] = useState<string | null>(null);
   const { busy, run } = useAsyncAction();
   const { revision } = useLiveRevision();
   const [telemetry, setTelemetry] = useState<TelemetrySnapshot | null>(null);
 
-  const {
-    selectedId,
-    draft,
-    savedDraft,
-    pending,
-    confirmingDelete,
-    setDraft,
-    setSavedDraft,
-    setSelectedId,
-    setPending,
-    setConfirmingDelete,
-    select,
-    selectNew,
-    requestSelect,
-    requestNew,
-    applyPending,
-    saveAndSwitch,
-  } = useRegisterSelection<Provider, ProviderDraft>({
-    entities: providers,
-    toDraft: providerToDraft,
-    emptyDraft: emptyProviderDraft,
-    isDirty: isProviderDraftDirty,
-    onSelect: () => {
-      setModelDraft(null);
-      setFormError(null);
-      setModelError(null);
-      setConfirmingModelId(null);
-      setProbe(null);
-    },
-  });
+  const selectedProvider =
+    selectedId !== null ? providers.find((provider) => provider.id === selectedId) ?? null : null;
+  const selectedModels = selectedProvider ? modelsForProvider(models, selectedProvider.id) : [];
+  const headerDirty = isHeaderDraftDirty(headerDraft, savedHeaderDraft);
+  const autoBrand = selectedProvider
+    ? detectBrand([
+        selectedProvider.name,
+        ...selectedProvider.endpoints.map((endpoint) => endpoint.baseUrl),
+        ...selectedModels.map((model) => model.modelId),
+      ])
+    : null;
 
   const connectivityById = useMemo(() => {
     const map = new Map<string, ProviderConnectivity>();
@@ -126,19 +139,6 @@ export function ProvidersPage() {
     return map;
   }, [telemetry]);
   const coolingModels = useMemo(() => new Set(telemetry?.cooling ?? []), [telemetry]);
-
-  const selectedProvider =
-    selectedId && selectedId !== "new"
-      ? providers.find((provider) => provider.id === selectedId) ?? null
-      : null;
-  const selectedModels = selectedProvider ? modelsForProvider(models, selectedProvider.id) : [];
-  const autoBrand = draft
-    ? detectBrand([
-        draft.name,
-        ...draft.endpoints.map((endpoint) => endpoint.baseUrl),
-        ...selectedModels.map((model) => model.modelId),
-      ])
-    : null;
 
   useEffect(() => {
     let alive = true;
@@ -152,29 +152,29 @@ export function ProvidersPage() {
     };
   }, [revision]);
 
-  const runProbe = async () => {
-    if (!selectedProvider) return;
+  const resetSheetState = () => {
+    setModelDraft(null);
+    setHeaderError(null);
+    setModelError(null);
+    setConfirmingModelId(null);
+    setConfirmingDelete(false);
     setProbe(null);
-    setProbing(true);
-    try {
-      const results = await testProvider(selectedProvider.id);
-      setProbe(results);
-    } catch (error) {
-      setProbe([
-        { protocol: "", ok: false, httpStatus: null, latencyMs: 0, model: "", error: String(error) },
-      ]);
-    } finally {
-      setProbing(false);
-    }
   };
 
-  // 新建上游时名称 / 密钥没有承载处，进入新建态即弹出基础信息弹窗。
-  useEffect(() => {
-    if (selectedId === "new") {
-      setBasicsError(null);
-      setBasicsOpen(true);
-    }
-  }, [selectedId]);
+  const selectProvider = (provider: Provider) => {
+    const draft = headerDraftFromProvider(provider);
+    setSelectedId(provider.id);
+    setHeaderDraft(draft);
+    setSavedHeaderDraft(draft);
+    resetSheetState();
+  };
+
+  const clearSelection = () => {
+    setSelectedId(null);
+    setHeaderDraft(emptyHeaderDraft());
+    setSavedHeaderDraft(emptyHeaderDraft());
+    resetSheetState();
+  };
 
   const refreshLists = async () => {
     const [nextProviders, nextModels] = await Promise.all([
@@ -199,8 +199,17 @@ export function ProvidersPage() {
         if (!alive) return;
         setProviders(nextProviders);
         setModels(nextModels);
-        if (nextProviders.length > 0) select(nextProviders[0]);
-        else selectNew();
+        if (nextProviders.length > 0) {
+          const first = nextProviders[0];
+          const draft = headerDraftFromProvider(first);
+          setSelectedId(first.id);
+          setHeaderDraft(draft);
+          setSavedHeaderDraft(draft);
+        } else {
+          setSelectedId(null);
+          setHeaderDraft(emptyHeaderDraft());
+          setSavedHeaderDraft(emptyHeaderDraft());
+        }
       } catch (err) {
         if (alive) setError(String(err));
       } finally {
@@ -212,110 +221,180 @@ export function ProvidersPage() {
     };
   }, []);
 
-  const submitProvider = async (): Promise<boolean> => {
-    if (!draft) return false;
-    const message = validateProviderDraft(draft);
+  // ---- 切换（仅请求头未保存时提示）----
+
+  const requestSelect = (provider: Provider) => {
+    if (headerDirty) setPendingSwitch({ kind: "existing", id: provider.id });
+    else selectProvider(provider);
+  };
+
+  const requestCreate = () => {
+    if (headerDirty) setPendingSwitch({ kind: "create" });
+    else openCreate();
+  };
+
+  const openCreate = () => {
+    setBasicsError(null);
+    setBasicsMode("create");
+  };
+
+  const applyPendingSwitch = () => {
+    const target = pendingSwitch;
+    setPendingSwitch(null);
+    if (!target) return;
+    if (target.kind === "create") {
+      openCreate();
+      return;
+    }
+    const provider = providers.find((item) => item.id === target.id);
+    if (provider) selectProvider(provider);
+  };
+
+  const discardPending = () => {
+    setHeaderDraft(savedHeaderDraft);
+    applyPendingSwitch();
+  };
+
+  // ---- 请求头映射：唯一显式保存 ----
+
+  const saveHeaderRules = async (): Promise<boolean> => {
+    if (!selectedProvider) return false;
+    const message = validateHeaderDraft(headerDraft);
     if (message) {
-      setFormError(message);
+      setHeaderError(message);
       return false;
     }
-    const saved = await run(
-      async () => {
-        const result = await saveProvider({
-          id: draft.id,
-          name: draft.name.trim(),
-          apiKey: draft.apiKey,
-          endpoints: draft.endpoints.map((endpoint) => ({
-            id: endpoint.id,
-            protocol: endpoint.protocol,
-            baseUrl: endpoint.baseUrl.trim(),
-            authScheme: endpoint.authScheme,
-            enabled: endpoint.enabled,
-          })),
-          extraHeaders: parseExtraHeaders(draft.extraHeadersText),
-          headerRules: draftHeaderRules(draft),
-          icon: draft.icon,
-          iconTint: draft.iconTint,
-          enabled: draft.enabled,
-        });
-        await refreshLists();
-        setSelectedId(result.id);
-        setDraft(providerToDraft(result));
-        setSavedDraft(providerToDraft(result));
-        setModelDraft(null);
-        return result;
-      },
-      setFormError,
-    );
-    return saved !== undefined;
+    const saved = await run(async () => {
+      await saveProvider(
+        providerInputFrom(selectedProvider, {
+          extraHeaders: extraHeadersFromDraft(headerDraft),
+          headerRules: headerRulesFromDraft(headerDraft),
+        }),
+      );
+      await refreshLists();
+      setSavedHeaderDraft(headerDraft);
+      return true;
+    }, setHeaderError);
+    return saved === true;
   };
 
-  const discardDraft = () => {
-    if (!savedDraft) return;
-    setDraft({ ...savedDraft });
-    setFormError(null);
+  const saveAndSwitch = async () => {
+    if (await saveHeaderRules()) applyPendingSwitch();
   };
 
-  const openBasics = () => {
-    setBasicsError(null);
-    setBasicsOpen(true);
+  // ---- 协议端点：静默保存 ----
+
+  const saveEndpoints = async (endpoints: ProviderEndpointInput[]) => {
+    if (!selectedProvider) return;
+    await run(async () => {
+      await saveProvider(providerInputFrom(selectedProvider, { endpoints }));
+      await refreshLists();
+    }, setError);
   };
 
-  const applyBasics = (values: ProviderBasicsValues) => {
-    if (!draft) return;
+  // ---- 基础信息弹窗 ----
+
+  const submitBasics = async (values: ProviderBasicsValues) => {
     if (values.name.length === 0) {
       setBasicsError("请填写提供商名称。");
       return;
     }
-    if (draft.id === null && values.apiKey.trim().length === 0) {
-      setBasicsError("请填写 API Key。");
+    if (basicsMode === "create") {
+      if (values.apiKey.trim().length === 0) {
+        setBasicsError("请填写 API Key。");
+        return;
+      }
+      const endpointError = validateEndpointDraft({
+        id: null,
+        protocol: values.protocol,
+        baseUrl: values.baseUrl,
+        authScheme: values.authScheme,
+        enabled: true,
+      });
+      if (endpointError) {
+        setBasicsError(endpointError);
+        return;
+      }
+      const created = await run(async () => {
+        const saved = await saveProvider({
+          id: null,
+          name: values.name,
+          apiKey: values.apiKey,
+          endpoints: [
+            {
+              protocol: values.protocol,
+              baseUrl: values.baseUrl,
+              authScheme: values.authScheme,
+              enabled: true,
+            },
+          ],
+          extraHeaders: {},
+          headerRules: { forward: [], replace: [], remove: [] },
+          icon: null,
+          iconTint: "ink",
+          enabled: true,
+        });
+        await refreshLists();
+        return saved;
+      }, setBasicsError);
+      if (created) {
+        setBasicsMode(null);
+        selectProvider(created);
+      }
       return;
     }
-    setDraft((previous) =>
-      previous ? { ...previous, name: values.name, apiKey: values.apiKey } : previous,
-    );
-    setBasicsOpen(false);
-    setBasicsError(null);
+    if (!selectedProvider) return;
+    const saved = await run(async () => {
+      const updated = await saveProvider(
+        providerInputFrom(selectedProvider, { name: values.name, apiKey: values.apiKey }),
+      );
+      await refreshLists();
+      return updated;
+    }, setBasicsError);
+    if (saved) {
+      setBasicsMode(null);
+      setSelectedId(saved.id);
+    }
+  };
+
+  // ---- 其它即改即存 ----
+
+  const toggleProviderEnabled = async () => {
+    if (!selectedProvider) return;
+    await run(async () => {
+      await saveProvider(
+        providerInputFrom(selectedProvider, { enabled: !selectedProvider.enabled }),
+      );
+      await refreshLists();
+    }, setError);
   };
 
   const setProviderAppearance = async (
     patch: { icon?: string | null; iconTint?: IconTint },
   ) => {
-    if (!draft) return;
-    const icon = patch.icon !== undefined ? patch.icon : draft.icon;
-    const iconTint = patch.iconTint ?? draft.iconTint;
-    const previousDraft = draft;
-    const previousSaved = savedDraft;
-    setDraft({ ...draft, icon, iconTint });
     if (!selectedProvider) return;
-    setSavedDraft((prev) => (prev ? { ...prev, icon, iconTint } : prev));
-    await run(
-      async () => {
-        await saveProvider({
-          id: selectedProvider.id,
-          name: selectedProvider.name,
-          apiKey: selectedProvider.apiKey,
-          endpoints: selectedProvider.endpoints.map((endpoint) => ({
-            id: endpoint.id,
-            protocol: endpoint.protocol,
-            baseUrl: endpoint.baseUrl,
-            authScheme: endpoint.authScheme,
-            enabled: endpoint.enabled,
-          })),
-          extraHeaders: selectedProvider.extraHeaders,
-          headerRules: selectedProvider.headerRules,
-          icon,
-          iconTint,
-          enabled: selectedProvider.enabled,
-        });
-        await refreshLists();
-      },
-      setFormError,
-      () => {
-        setDraft(previousDraft);
-        setSavedDraft(previousSaved);
-      },
-    );
+    const icon = patch.icon !== undefined ? patch.icon : selectedProvider.icon;
+    const iconTint = patch.iconTint ?? selectedProvider.iconTint;
+    await run(async () => {
+      await saveProvider(providerInputFrom(selectedProvider, { icon, iconTint }));
+      await refreshLists();
+    }, setError);
+  };
+
+  const runProbe = async () => {
+    if (!selectedProvider) return;
+    setProbe(null);
+    setProbing(true);
+    try {
+      const results = await testProvider(selectedProvider.id);
+      setProbe(results);
+    } catch (error) {
+      setProbe([
+        { protocol: "", ok: false, httpStatus: null, latencyMs: 0, model: "", error: String(error) },
+      ]);
+    } finally {
+      setProbing(false);
+    }
   };
 
   const deleteSelected = async () => {
@@ -325,12 +404,14 @@ export function ProvidersPage() {
         await deleteProvider(selectedProvider.id);
         const nextProviders = await refreshLists();
         setConfirmingDelete(false);
-        if (nextProviders.length > 0) select(nextProviders[0]);
-        else selectNew();
+        if (nextProviders.length > 0) selectProvider(nextProviders[0]);
+        else clearSelection();
       },
       setError,
     );
   };
+
+  // ---- 上游模型 ----
 
   const submitModel = async () => {
     if (!modelDraft) return;
@@ -441,7 +522,7 @@ export function ProvidersPage() {
             <section className="register-pane">
               <div className="register-head">
                 <span className="register-title">上游 · {providers.length} 家</span>
-                <GlyphButton label="登记上游" onClick={requestNew}>
+                <GlyphButton label="登记上游" onClick={requestCreate}>
                   <Plus aria-hidden="true" />
                 </GlyphButton>
               </div>
@@ -449,15 +530,12 @@ export function ProvidersPage() {
               {providers.length === 0 ? (
                 <div className="register-empty">
                   <EmptyNote>还没有登记上游提供商。</EmptyNote>
-                  <button className="text-action" type="button" onClick={requestNew}>
+                  <button className="text-action" type="button" onClick={requestCreate}>
                     登记第一个上游
                   </button>
                 </div>
               ) : (
-                <RegisterList
-                  ariaLabel="上游提供商列表"
-                  selectedKey={selectedId === "new" ? null : selectedId}
-                >
+                <RegisterList ariaLabel="上游提供商列表" selectedKey={selectedId}>
                   {providers.map((provider) => {
                     const providerModels = modelsForProvider(models, provider.id);
                     const brand = resolveBrand(provider.icon, [
@@ -501,73 +579,67 @@ export function ProvidersPage() {
             </section>
 
             <section className="workbench-sheet" aria-label="上游提供商编辑">
-              {draft ? (
+              {selectedProvider ? (
                 <>
                   <div className="sheet-head">
                     <IconPicker
-                      icon={draft.icon}
+                      icon={selectedProvider.icon}
                       auto={autoBrand}
-                      tint={draft.iconTint}
+                      tint={selectedProvider.iconTint}
                       size={22}
-                      enabled={draft.enabled}
-                      glyphClassName={draft.enabled ? undefined : "is-off"}
+                      enabled={selectedProvider.enabled}
+                      glyphClassName={selectedProvider.enabled ? undefined : "is-off"}
                       fallback={<Server aria-hidden="true" />}
                       disabled={busy}
                       onChange={(value) => void setProviderAppearance({ icon: value })}
                       onTintChange={(value) => void setProviderAppearance({ iconTint: value })}
                     />
-                    <h2 className="sheet-title">{selectedId === "new" ? "新上游" : draft.name || "未命名上游"}</h2>
+                    <h2 className="sheet-title">{selectedProvider.name || "未命名上游"}</h2>
                     <TogglePill
-                      checked={draft.enabled}
+                      checked={selectedProvider.enabled}
                       label="启用该上游"
                       disabled={busy}
-                      onChange={(next) => setDraft({ ...draft, enabled: next })}
+                      onChange={() => void toggleProviderEnabled()}
                     />
                     <div className="sheet-actions">
-                      <GlyphButton label="编辑名称与密钥" disabled={busy} onClick={openBasics}>
+                      <GlyphButton label="编辑名称与密钥" disabled={busy} onClick={() => { setBasicsError(null); setBasicsMode("edit"); }}>
                         <Pencil aria-hidden="true" />
                       </GlyphButton>
-                      {selectedId !== "new" ? (
-                        <>
-                          <GlyphButton
-                            label={probing ? "正在探测…" : "连通性测试"}
-                            disabled={busy || probing}
-                            onClick={() => void runProbe()}
-                          >
-                            {probing ? (
-                              <Loader2 className="is-spinning" aria-hidden="true" />
-                            ) : (
-                              <FlaskConical aria-hidden="true" />
-                            )}
-                          </GlyphButton>
-                          <GlyphButton label="删除该上游" danger disabled={busy} onClick={() => setConfirmingDelete(true)}>
-                            <Trash aria-hidden="true" />
-                          </GlyphButton>
-                        </>
-                      ) : null}
+                      <GlyphButton
+                        label={probing ? "正在探测…" : "连通性测试"}
+                        disabled={busy || probing}
+                        onClick={() => void runProbe()}
+                      >
+                        {probing ? (
+                          <Loader2 className="is-spinning" aria-hidden="true" />
+                        ) : (
+                          <FlaskConical aria-hidden="true" />
+                        )}
+                      </GlyphButton>
+                      <GlyphButton label="删除该上游" danger disabled={busy} onClick={() => setConfirmingDelete(true)}>
+                        <Trash aria-hidden="true" />
+                      </GlyphButton>
                     </div>
                   </div>
 
-                  {selectedId !== "new" ? (
-                    <p className="sheet-summary">
-                      <span className="sheet-summary-protocols">
-                        {draft.endpoints
-                          .map((endpoint) => protocolLabel[endpoint.protocol])
-                          .join(" · ")}
-                      </span>
-                      <span className="sheet-summary-sep" aria-hidden="true">·</span>
-                      <span
-                        className="sheet-summary-host"
-                        title={draft.endpoints.map((endpoint) => endpoint.baseUrl).join("\n")}
-                      >
-                        {endpointHost(draft.endpoints[0]?.baseUrl ?? "")}
-                      </span>
-                      <span className="sheet-summary-sep" aria-hidden="true">·</span>
-                      <span>{selectedModels.length} 个模型</span>
-                      <span className="sheet-summary-sep" aria-hidden="true">·</span>
-                      <span>{draft.apiKey.trim() ? "密钥已配置" : "未配置密钥"}</span>
-                    </p>
-                  ) : null}
+                  <p className="sheet-summary">
+                    <span className="sheet-summary-protocols">
+                      {selectedProvider.endpoints
+                        .map((endpoint) => protocolLabel[endpoint.protocol])
+                        .join(" · ")}
+                    </span>
+                    <span className="sheet-summary-sep" aria-hidden="true">·</span>
+                    <span
+                      className="sheet-summary-host"
+                      title={selectedProvider.endpoints.map((endpoint) => endpoint.baseUrl).join("\n")}
+                    >
+                      {endpointHost(selectedProvider.endpoints[0]?.baseUrl ?? "")}
+                    </span>
+                    <span className="sheet-summary-sep" aria-hidden="true">·</span>
+                    <span>{selectedModels.length} 个模型</span>
+                    <span className="sheet-summary-sep" aria-hidden="true">·</span>
+                    <span>{selectedProvider.apiKey.trim() ? "密钥已配置" : "未配置密钥"}</span>
+                  </p>
 
                   {probe ? (
                     <div className="probe-results" role="status">
@@ -595,16 +667,16 @@ export function ProvidersPage() {
                     </div>
                   ) : null}
 
-                  {pending ? (
+                  {pendingSwitch ? (
                     <div className="pending-bar">
-                      <span>有未保存的修改，切换前要保存吗？</span>
-                      <button className="quiet-button is-primary" type="button" onClick={() => void saveAndSwitch(submitProvider)} disabled={busy}>
+                      <span>有未保存的请求头修改，切换前要保存吗？</span>
+                      <button className="quiet-button is-primary" type="button" onClick={() => void saveAndSwitch()} disabled={busy}>
                         保存并切换
                       </button>
-                      <button className="quiet-button" type="button" onClick={applyPending} disabled={busy}>
+                      <button className="quiet-button" type="button" onClick={discardPending} disabled={busy}>
                         放弃并切换
                       </button>
-                      <button className="quiet-button" type="button" onClick={() => setPending(null)} disabled={busy}>
+                      <button className="quiet-button" type="button" onClick={() => setPendingSwitch(null)} disabled={busy}>
                         取消
                       </button>
                     </div>
@@ -625,16 +697,23 @@ export function ProvidersPage() {
                   ) : null}
 
                   <ProviderForm
-                    key={selectedId ?? "new"}
-                    draft={draft}
-                    savedDraft={savedDraft ?? draft}
+                    key={selectedProvider.id}
+                    provider={selectedProvider}
+                    headerDraft={headerDraft}
+                    savedHeaderDraft={savedHeaderDraft}
                     busy={busy}
-                    error={formError}
-                    onChange={setDraft}
-                    onDiscard={discardDraft}
-                    onSubmit={() => void submitProvider()}
+                    headerError={headerError}
+                    onHeaderChange={(draft) => {
+                      setHeaderDraft(draft);
+                      setHeaderError(null);
+                    }}
+                    onHeaderDiscard={() => {
+                      setHeaderDraft(savedHeaderDraft);
+                      setHeaderError(null);
+                    }}
+                    onHeaderSave={() => void saveHeaderRules()}
+                    onSaveEndpoints={(endpoints) => void saveEndpoints(endpoints)}
                   >
-                    {selectedProvider ? (
                     <section className="sheet-section">
                       <SectionTitle
                         icon={<Boxes aria-hidden="true" />}
@@ -764,10 +843,16 @@ export function ProvidersPage() {
                         </div>
                       ) : null}
                     </section>
-                    ) : null}
                   </ProviderForm>
                 </>
-              ) : null}
+              ) : (
+                <div className="register-empty">
+                  <EmptyNote>选择左侧上游，或登记一家新的。</EmptyNote>
+                  <button className="text-action" type="button" onClick={requestCreate}>
+                    登记上游
+                  </button>
+                </div>
+              )}
             </section>
           </div>
         )}
@@ -789,15 +874,19 @@ export function ProvidersPage() {
         </Modal>
       ) : null}
 
-      {basicsOpen && draft ? (
+      {basicsMode ? (
         <ProviderBasicsModal
-          initial={{ name: draft.name, apiKey: draft.apiKey }}
-          isNew={draft.id === null}
+          mode={basicsMode}
+          initial={
+            basicsMode === "edit" && selectedProvider
+              ? editBasics(selectedProvider)
+              : createBasics()
+          }
           busy={busy}
           error={basicsError}
-          onSubmit={applyBasics}
+          onSubmit={submitBasics}
           onClose={() => {
-            setBasicsOpen(false);
+            setBasicsMode(null);
             setBasicsError(null);
           }}
         />

@@ -2,6 +2,9 @@ import type {
   AuthScheme,
   IconTint,
   Provider,
+  ProviderEndpoint,
+  ProviderEndpointInput,
+  ProviderInput,
   Protocol,
   UpstreamModel,
 } from "../../services/config";
@@ -59,20 +62,6 @@ export type EndpointDraft = {
   enabled: boolean;
 };
 
-export type ProviderDraft = {
-  id: string | null;
-  name: string;
-  apiKey: string;
-  endpoints: EndpointDraft[];
-  extraHeadersText: string;
-  forwardText: string;
-  replaceText: string;
-  removeText: string;
-  icon: string | null;
-  iconTint: IconTint;
-  enabled: boolean;
-};
-
 /** 端点的展示顺序，也是「新增端点」时挑选未占用协议的优先级。 */
 export const protocolOrder: Protocol[] = ["openai", "responses", "anthropic", "gemini"];
 
@@ -92,38 +81,40 @@ export function nextEndpointDraft(endpoints: EndpointDraft[]): EndpointDraft {
   return emptyEndpointDraft(protocol, first?.baseUrl ?? "", first?.authScheme ?? "bearer");
 }
 
-function sameEndpoints(a: EndpointDraft[], b: EndpointDraft[]): boolean {
-  if (a.length !== b.length) return false;
-  return a.every((endpoint, index) => {
-    const other = b[index];
-    return (
-      endpoint.id === other.id &&
-      endpoint.protocol === other.protocol &&
-      endpoint.baseUrl === other.baseUrl &&
-      endpoint.authScheme === other.authScheme &&
-      endpoint.enabled === other.enabled
-    );
-  });
+/** 单个协议端点的即时校验（登记 / 收起前报错）。 */
+export function validateEndpointDraft(endpoint: EndpointDraft): string | null {
+  const baseUrl = endpoint.baseUrl.trim();
+  if (baseUrl.length === 0) return `「${protocolLabel[endpoint.protocol]}」端点缺少上游地址。`;
+  if (!/^https?:\/\//i.test(baseUrl)) return "上游地址需以 http:// 或 https:// 开头。";
+  return null;
 }
 
-export function emptyProviderDraft(): ProviderDraft {
+/**
+ * 请求头映射草稿：Provider 编辑里唯一需要显式保存的编辑态。
+ * 名称 / 密钥走弹窗即改即存，协议端点静默保存，因此不再有整条 provider 的草稿。
+ */
+export type ProviderHeaderDraft = {
+  extraHeadersText: string;
+  forwardText: string;
+  replaceText: string;
+  removeText: string;
+};
+
+export function emptyHeaderDraft(): ProviderHeaderDraft {
+  return { extraHeadersText: "", forwardText: "", replaceText: "", removeText: "" };
+}
+
+export function headerDraftFromProvider(provider: Provider): ProviderHeaderDraft {
+  const rules = provider.headerRules ?? { forward: [], replace: [], remove: [] };
   return {
-    id: null,
-    name: "",
-    apiKey: "",
-    endpoints: [emptyEndpointDraft()],
-    extraHeadersText: "",
-    forwardText: "",
-    replaceText: "",
-    removeText: "",
-    icon: null,
-    iconTint: "ink",
-    enabled: true,
+    extraHeadersText: formatExtraHeaders(provider.extraHeaders),
+    forwardText: linesToText(rules.forward ?? []),
+    replaceText: replacesToText(rules.replace ?? []),
+    removeText: linesToText(rules.remove ?? []),
   };
 }
 
-/** 由草稿的文本字段构建 provider 头规则（透传 / 替换 / 移除）。 */
-export function draftHeaderRules(draft: ProviderDraft): ProviderHeaderRules {
+export function headerRulesFromDraft(draft: ProviderHeaderDraft): ProviderHeaderRules {
   return {
     forward: textToLines(draft.forwardText),
     replace: textToReplaces(draft.replaceText),
@@ -131,40 +122,62 @@ export function draftHeaderRules(draft: ProviderDraft): ProviderHeaderRules {
   };
 }
 
-export function providerToDraft(provider: Provider): ProviderDraft {
-  const rules = provider.headerRules ?? { forward: [], replace: [], remove: [] };
+export function extraHeadersFromDraft(draft: ProviderHeaderDraft): Record<string, string> {
+  return parseExtraHeaders(draft.extraHeadersText);
+}
+
+export function isHeaderDraftDirty(
+  draft: ProviderHeaderDraft,
+  original: ProviderHeaderDraft,
+): boolean {
+  return (
+    JSON.stringify(headerRulesFromDraft(draft)) !== JSON.stringify(headerRulesFromDraft(original)) ||
+    !sameHeaders(extraHeadersFromDraft(draft), extraHeadersFromDraft(original))
+  );
+}
+
+export function validateHeaderDraft(draft: ProviderHeaderDraft): string | null {
+  const message = validateProviderHeaderRules(headerRulesFromDraft(draft));
+  return message ? `请求头映射：${message}` : null;
+}
+
+export function endpointToInput(endpoint: ProviderEndpoint): ProviderEndpointInput {
   return {
-    id: provider.id,
-    name: provider.name,
-    apiKey: provider.apiKey,
-    endpoints: (provider.endpoints ?? []).map((endpoint) => ({
-      id: endpoint.id,
-      protocol: endpoint.protocol,
-      baseUrl: endpoint.baseUrl,
-      authScheme: endpoint.authScheme,
-      enabled: endpoint.enabled,
-    })),
-    extraHeadersText: formatExtraHeaders(provider.extraHeaders),
-    forwardText: linesToText(rules.forward ?? []),
-    replaceText: replacesToText(rules.replace ?? []),
-    removeText: linesToText(rules.remove ?? []),
-    icon: provider.icon,
-    iconTint: provider.iconTint,
-    enabled: provider.enabled,
+    id: endpoint.id,
+    protocol: endpoint.protocol,
+    baseUrl: endpoint.baseUrl,
+    authScheme: endpoint.authScheme,
+    enabled: endpoint.enabled,
   };
 }
 
-export function isProviderDraftDirty(draft: ProviderDraft, original: ProviderDraft): boolean {
-  return (
-    draft.name !== original.name ||
-    draft.apiKey !== original.apiKey ||
-    !sameEndpoints(draft.endpoints, original.endpoints) ||
-    draft.icon !== original.icon ||
-    draft.iconTint !== original.iconTint ||
-    draft.enabled !== original.enabled ||
-    !sameHeaders(parseExtraHeaders(draft.extraHeadersText), parseExtraHeaders(original.extraHeadersText)) ||
-    JSON.stringify(draftHeaderRules(draft)) !== JSON.stringify(draftHeaderRules(original))
-  );
+type ProviderInputOverrides = {
+  name?: string;
+  apiKey?: string;
+  endpoints?: ProviderEndpointInput[];
+  extraHeaders?: Record<string, string>;
+  headerRules?: ProviderHeaderRules;
+  icon?: string | null;
+  iconTint?: IconTint;
+  enabled?: boolean;
+};
+
+/** 从已保存实体构建完整 ProviderInput，只覆盖传入字段；其余保持库中所存。 */
+export function providerInputFrom(
+  provider: Provider,
+  overrides: ProviderInputOverrides = {},
+): ProviderInput {
+  return {
+    id: provider.id,
+    name: overrides.name ?? provider.name,
+    apiKey: overrides.apiKey ?? provider.apiKey,
+    endpoints: overrides.endpoints ?? provider.endpoints.map(endpointToInput),
+    extraHeaders: overrides.extraHeaders ?? provider.extraHeaders,
+    headerRules: overrides.headerRules ?? provider.headerRules,
+    icon: overrides.icon !== undefined ? overrides.icon : provider.icon,
+    iconTint: overrides.iconTint ?? provider.iconTint,
+    enabled: overrides.enabled ?? provider.enabled,
+  };
 }
 
 /** 从上游地址取主机名，供端点条目紧凑展示；解析失败时原样返回。 */
@@ -174,29 +187,6 @@ export function endpointHost(baseUrl: string): string {
   } catch {
     return baseUrl;
   }
-}
-
-export function validateProviderDraft(draft: ProviderDraft): string | null {
-  if (draft.name.trim().length === 0) return "请填写提供商名称。";
-  if (draft.endpoints.length === 0) return "请至少添加一个协议端点。";
-  const protocols = new Set<string>();
-  for (const endpoint of draft.endpoints) {
-    if (protocols.has(endpoint.protocol)) {
-      return `协议端点重复：${protocolLabel[endpoint.protocol]}。`;
-    }
-    protocols.add(endpoint.protocol);
-    const baseUrl = endpoint.baseUrl.trim();
-    if (baseUrl.length === 0) {
-      return `「${protocolLabel[endpoint.protocol]}」端点缺少上游地址。`;
-    }
-    if (!/^https?:\/\//i.test(baseUrl)) {
-      return "上游地址需以 http:// 或 https:// 开头。";
-    }
-  }
-  if (draft.id === null && draft.apiKey.trim().length === 0) return "请填写 API Key。";
-  const headerMessage = validateProviderHeaderRules(draftHeaderRules(draft));
-  if (headerMessage) return `请求头映射：${headerMessage}`;
-  return null;
 }
 
 export type CapabilityId = "vision" | "tools" | "reasoning";

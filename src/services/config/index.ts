@@ -5,6 +5,8 @@ export type {
   AuthScheme,
   IconTint,
   Provider,
+  ProviderEndpoint,
+  ProviderEndpointInput,
   ProviderInput,
   ProviderHeaderRules,
   HeaderReplace,

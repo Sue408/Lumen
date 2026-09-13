@@ -3,18 +3,19 @@ import assert from "node:assert/strict";
 import {
   capabilityOrder,
   contextWindowToNumber,
+  emptyEndpointDraft,
   emptyModelDraft,
   endpointHost,
   formatContextWindow,
   formatExtraHeaders,
+  headerDraftFromProvider,
   isCapabilityId,
-  isProviderDraftDirty,
+  isHeaderDraftDirty,
   nextEndpointDraft,
   parseExtraHeaders,
   priceToNumber,
-  providerToDraft,
+  validateEndpointDraft,
   validateModelDraft,
-  validateProviderDraft,
 } from "./providerModel.ts";
 import type { Provider } from "../../services/config/index.ts";
 
@@ -63,29 +64,24 @@ test("parseExtraHeaders ignores blank lines and malformed entries", () => {
   assert.deepEqual(parsed, { "X-A": "1", "X-B": "2" });
 });
 
-test("isProviderDraftDirty normalises header text before comparing", () => {
-  const base = providerToDraft(provider);
-  assert.equal(isProviderDraftDirty(base, base), false);
-  assert.equal(isProviderDraftDirty({ ...base, name: "Other" }, base), true);
-  assert.equal(isProviderDraftDirty({ ...base, enabled: false }, base), true);
-  assert.equal(isProviderDraftDirty({ ...base, icon: "openai" }, base), true);
-  assert.equal(isProviderDraftDirty({ ...base, iconTint: "brand" }, base), true);
-  assert.equal(isProviderDraftDirty({ ...base, extraHeadersText: "  " }, base), true);
-  assert.equal(
-    isProviderDraftDirty({ ...base, extraHeadersText: "X-Trace: 1\n" }, base),
-    false,
-  );
-  assert.equal(
-    isProviderDraftDirty(
-      { ...base, endpoints: [{ ...base.endpoints[0], baseUrl: "https://other/v1" }] },
-      base,
-    ),
-    true,
-  );
+test("headerDraftFromProvider normalises rules and isHeaderDraftDirty compares them", () => {
+  const base = headerDraftFromProvider(provider);
+  assert.equal(isHeaderDraftDirty(base, base), false);
+  assert.equal(isHeaderDraftDirty({ ...base, forwardText: "session_id" }, base), true);
+  assert.equal(isHeaderDraftDirty({ ...base, removeText: "x-internal*" }, base), true);
+  // 文本规范化：多一个换行的等价输入不算改动。
+  assert.equal(isHeaderDraftDirty({ ...base, extraHeadersText: "X-Trace: 1\n" }, base), false);
+  assert.equal(isHeaderDraftDirty({ ...base, extraHeadersText: "" }, base), true);
 });
 
 test("nextEndpointDraft picks an unused protocol and prefills the first endpoint", () => {
-  const first = providerToDraft(provider).endpoints;
+  const first = provider.endpoints.map((endpoint) => ({
+    id: endpoint.id,
+    protocol: endpoint.protocol,
+    baseUrl: endpoint.baseUrl,
+    authScheme: endpoint.authScheme,
+    enabled: endpoint.enabled,
+  }));
   const added = nextEndpointDraft(first);
   assert.equal(added.protocol, "openai");
   assert.equal(added.baseUrl, "https://api.deepseek.com/anthropic/v1");
@@ -94,36 +90,16 @@ test("nextEndpointDraft picks an unused protocol and prefills the first endpoint
   assert.equal(nextEndpointDraft([...first, added]).protocol, "responses");
 });
 
-test("validateProviderDraft protects name, endpoints, address, and new-key requirements", () => {
-  const draft = providerToDraft(provider);
-  assert.equal(validateProviderDraft(draft), null);
-
-  assert.equal(validateProviderDraft({ ...draft, name: "  " }), "请填写提供商名称。");
-  assert.equal(validateProviderDraft({ ...draft, endpoints: [] }), "请至少添加一个协议端点。");
+test("validateEndpointDraft requires an http upstream address", () => {
+  const endpoint = emptyEndpointDraft("anthropic", "https://api.anthropic.com/v1", "x-api-key");
+  assert.equal(validateEndpointDraft(endpoint), null);
   assert.equal(
-    validateProviderDraft({
-      ...draft,
-      endpoints: [{ ...draft.endpoints[0], baseUrl: "" }],
-    }),
+    validateEndpointDraft({ ...endpoint, baseUrl: "" }),
     "「Anthropic Messages」端点缺少上游地址。",
   );
   assert.equal(
-    validateProviderDraft({
-      ...draft,
-      endpoints: [{ ...draft.endpoints[0], baseUrl: "api.openai.com/v1" }],
-    }),
+    validateEndpointDraft({ ...endpoint, baseUrl: "api.anthropic.com/v1" }),
     "上游地址需以 http:// 或 https:// 开头。",
-  );
-  assert.equal(
-    validateProviderDraft({
-      ...draft,
-      endpoints: [draft.endpoints[0], { ...draft.endpoints[0], id: "e2" }],
-    }),
-    "协议端点重复：Anthropic Messages。",
-  );
-  assert.equal(
-    validateProviderDraft({ ...draft, id: null, apiKey: "" }),
-    "请填写 API Key。",
   );
 });
 
