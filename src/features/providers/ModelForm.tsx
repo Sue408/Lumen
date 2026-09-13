@@ -1,9 +1,13 @@
-import { FormActions, InlineError, TogglePill } from "../../components/ConfigControls";
+import { FormActions, InlineError } from "../../components/ConfigControls";
+import type { ProviderEndpoint } from "../../services/config";
+import type { RemoteModel } from "../../services/telemetry";
 import { capabilityIcons } from "./capabilityIcons";
+import { RemoteModelPicker } from "./RemoteModelPicker";
 import { capabilityLabel, capabilityOrder, type ModelDraft } from "./providerModel";
 
 export function ModelForm({
   draft,
+  endpoints,
   busy,
   error,
   onChange,
@@ -11,6 +15,7 @@ export function ModelForm({
   onCancel,
 }: {
   draft: ModelDraft;
+  endpoints: ProviderEndpoint[];
   busy: boolean;
   error: string | null;
   onChange: (draft: ModelDraft) => void;
@@ -18,6 +23,16 @@ export function ModelForm({
   onCancel: () => void;
 }) {
   const set = (patch: Partial<ModelDraft>) => onChange({ ...draft, ...patch });
+
+  const pickRemote = (model: RemoteModel) => {
+    const patch: Partial<ModelDraft> = { modelId: model.id };
+    const current = draft.displayName.trim();
+    // 显示名未填（或仍等于旧模型名）时，顺势用上游给的展示名。
+    if (current === "" || current === draft.modelId.trim()) {
+      patch.displayName = model.displayName ?? "";
+    }
+    set(patch);
+  };
 
   return (
     <form
@@ -28,13 +43,32 @@ export function ModelForm({
       }}
     >
       <div className="field-grid">
-        <label className="field">
+        <div className="field field-wide">
           <span>上游模型名</span>
-          <input value={draft.modelId} onChange={(event) => set({ modelId: event.target.value })} placeholder="gpt-4o" spellCheck={false} autoFocus />
-        </label>
+          <div className="model-id-input">
+            <input
+              value={draft.modelId}
+              onChange={(event) => set({ modelId: event.target.value })}
+              placeholder="gpt-4o"
+              spellCheck={false}
+              autoFocus
+              aria-label="上游模型名"
+            />
+            <RemoteModelPicker
+              providerId={draft.providerId}
+              endpoints={endpoints}
+              disabled={busy}
+              onPick={pickRemote}
+            />
+          </div>
+        </div>
         <label className="field">
           <span>显示名</span>
           <input value={draft.displayName} onChange={(event) => set({ displayName: event.target.value })} placeholder="留空则同上" />
+        </label>
+        <label className="field">
+          <span>上下文长度 · Tokens</span>
+          <input inputMode="numeric" value={draft.contextWindow} placeholder="128000" onChange={(event) => set({ contextWindow: event.target.value })} />
         </label>
         <label className="field">
           <span>输入单价 · $ / 百万</span>
@@ -51,10 +85,6 @@ export function ModelForm({
         <label className="field">
           <span>缓存写单价 · $ / 百万</span>
           <input inputMode="decimal" value={draft.cacheCreationPrice} onChange={(event) => set({ cacheCreationPrice: event.target.value })} />
-        </label>
-        <label className="field">
-          <span>上下文长度 · Tokens</span>
-          <input inputMode="numeric" value={draft.contextWindow} placeholder="128000" onChange={(event) => set({ contextWindow: event.target.value })} />
         </label>
         <div className="field field-wide">
           <span>能力标签</span>
@@ -84,9 +114,6 @@ export function ModelForm({
               );
             })}
           </div>
-        </div>
-        <div className="field-inline">
-          <TogglePill checked={draft.enabled} label="启用该模型" disabled={busy} onChange={(next) => set({ enabled: next })} />
         </div>
       </div>
       {error ? <InlineError message={error} /> : null}

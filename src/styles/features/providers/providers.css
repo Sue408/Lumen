@@ -303,10 +303,44 @@
   color: var(--danger);
 }
 
+/* 连通性测试弹窗：模型 / 端点两个下拉并排，运行按钮右对齐。 */
+.probe-dialog {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.probe-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65rem;
+}
+
+.probe-controls .field {
+  flex: 1 1 9rem;
+  min-width: 9rem;
+}
+
+.probe-controls .select-trigger {
+  width: 100%;
+}
+
+.probe-run {
+  justify-self: end;
+}
+
 .probe-results {
   display: grid;
   gap: 0.25rem;
-  margin: 0.4rem 0 0;
+  margin: 0;
+}
+
+.probe-target {
+  color: var(--ink);
+}
+
+.probe-outcome {
+  color: inherit;
 }
 
 .probe-result {
@@ -357,4 +391,28 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.5;
+}
+
+/* 上游模型名 + 「拉取」按钮同一行，输入占据剩余宽度。 */
+.model-id-input {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.model-id-input input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 拉取面板头部：多端点时给一排协议切换，再接搜索框（复用模型选择器外观）。 */
+.remote-picker-head {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.remote-picker-protocols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }

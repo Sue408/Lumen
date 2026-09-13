@@ -1,7 +1,9 @@
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 
-use crate::db::models::{parse_provider_header_rules, ProviderHeaderRules};
+use crate::db::models::{
+    parse_provider_header_rules, Provider, ProviderEndpoint, ProviderHeaderRules,
+};
 use crate::db::with_db;
 use crate::error::AppError;
 use crate::state::AppState;
@@ -29,6 +31,29 @@ pub struct ResolvedRoute {
     pub extra_headers: BTreeMap<String, String>,
     /// 上游 provider 的请求头映射（透传 / 替换 / 移除）；与 `extra_headers` 同为 provider 级。
     pub header_rules: ProviderHeaderRules,
+}
+
+/// 仅凭 provider 与端点拼出一个 `ResolvedRoute`，供探测这类「只发请求、不落库」的场景复用。
+/// 模型相关字段留空、计费价为 0——只读请求不参与计费与日志，这些字段不会被读取。
+pub fn endpoint_route(provider: &Provider, endpoint: &ProviderEndpoint) -> ResolvedRoute {
+    ResolvedRoute {
+        route_id: String::new(),
+        upstream_model_id: String::new(),
+        model_id: String::new(),
+        display_name: String::new(),
+        input_price: 0.0,
+        output_price: 0.0,
+        cache_read_price: 0.0,
+        cache_creation_price: 0.0,
+        provider_id: provider.id.clone(),
+        base_url: endpoint.base_url.clone(),
+        api_key: provider.api_key.clone(),
+        auth_scheme: endpoint.auth_scheme.clone(),
+        route_protocol: endpoint.protocol.clone(),
+        upstream_protocol: endpoint.protocol.clone(),
+        extra_headers: provider.extra_headers.clone(),
+        header_rules: provider.header_rules.clone(),
+    }
 }
 
 /// 解析别名对应的**全部启用候选**，按 `priority` 升序（同级按插入顺序）。

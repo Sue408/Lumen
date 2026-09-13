@@ -246,6 +246,24 @@ pub fn first_enabled_model(
     }
 }
 
+/// 按真实模型名取提供商名下启用的上游模型，供连通性探测指定模型。
+pub fn enabled_model_by_model_id(
+    conn: &Connection,
+    provider_id: &str,
+    model_id: &str,
+) -> Result<Option<UpstreamModel>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM upstream_models
+          WHERE provider_id = ?1 AND model_id = ?2 AND enabled = 1
+          LIMIT 1",
+    )?;
+    let mut rows = stmt.query_map(params![provider_id, model_id], UpstreamModel::from_row)?;
+    match rows.next() {
+        Some(row) => Ok(Some(row?)),
+        None => Ok(None),
+    }
+}
+
 /// 所有启用上游模型的真实模型名（去重），供网关启动时后台预热 tokenizer。
 pub fn list_enabled_model_ids(conn: &Connection) -> Result<Vec<String>, AppError> {
     let mut stmt =

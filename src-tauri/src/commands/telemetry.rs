@@ -7,6 +7,7 @@ use tauri::State;
 use crate::db::stats::Period;
 use crate::db::telemetry::{query_snapshot, TelemetrySnapshot};
 use crate::error::AppError;
+use crate::gateway::models::{self, RemoteModel};
 use crate::gateway::probe::{self, ProbeResult};
 use crate::state::AppState;
 
@@ -42,11 +43,23 @@ pub async fn query_telemetry_cmd(
     Ok(TelemetryDto { snapshot, cooling })
 }
 
-/// 手动连通性测试：对提供商的每个启用协议端点各发一次最小消息请求。
+/// 手动连通性测试：对指定模型（缺省首个启用）在指定协议端点（缺省全部）各发一次最小消息请求。
 #[tauri::command]
 pub async fn test_provider_cmd(
     state: State<'_, Arc<AppState>>,
     provider_id: String,
+    model_id: Option<String>,
+    protocol: Option<String>,
 ) -> Result<Vec<ProbeResult>, AppError> {
-    probe::probe(state.inner().clone(), provider_id).await
+    probe::probe(state.inner().clone(), provider_id, model_id, protocol).await
+}
+
+/// 拉取上游某协议端点暴露的模型列表，供登记模型时选择；`protocol` 缺省用第一个端点。
+#[tauri::command]
+pub async fn list_remote_models_cmd(
+    state: State<'_, Arc<AppState>>,
+    provider_id: String,
+    protocol: Option<String>,
+) -> Result<Vec<RemoteModel>, AppError> {
+    models::list_remote_models(state.inner().clone(), provider_id, protocol).await
 }

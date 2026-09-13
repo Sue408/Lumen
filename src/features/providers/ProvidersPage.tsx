@@ -4,7 +4,6 @@ import {
   CircleAlert,
   CircleCheck,
   FlaskConical,
-  Loader2,
   Pencil,
   Plus,
   Server,
@@ -20,6 +19,7 @@ import {
   TogglePill,
 } from "../../components/ConfigControls";
 import { Modal } from "../../components/Modal";
+import { Select } from "../../components/Select";
 import { RegisterList } from "../../components/RegisterList";
 import { BrandGlyph } from "../brand/BrandMark";
 import { IconPicker } from "../brand/IconPicker";
@@ -117,6 +117,9 @@ export function ProvidersPage() {
   const [confirmingModelId, setConfirmingModelId] = useState<string | null>(null);
   const [probe, setProbe] = useState<ProbeResult[] | null>(null);
   const [probing, setProbing] = useState(false);
+  const [probeOpen, setProbeOpen] = useState(false);
+  const [probeModelId, setProbeModelId] = useState("");
+  const [probeProtocol, setProbeProtocol] = useState("");
   const { busy, run } = useAsyncAction();
   const { revision } = useLiveRevision();
   const [telemetry, setTelemetry] = useState<TelemetrySnapshot | null>(null);
@@ -125,6 +128,18 @@ export function ProvidersPage() {
     selectedId !== null ? providers.find((provider) => provider.id === selectedId) ?? null : null;
   const selectedModels = selectedProvider ? modelsForProvider(models, selectedProvider.id) : [];
   const headerDirty = isHeaderDraftDirty(headerDraft, savedHeaderDraft);
+  const probeModelValue =
+    probeModelId || selectedModels.find((model) => model.enabled)?.modelId || "";
+  const probeModelOptions = selectedModels
+    .filter((model) => model.enabled)
+    .map((model) => ({ value: model.modelId, label: model.displayName || model.modelId }));
+  const probeEndpointOptions = [
+    { value: "", label: "全部端点" },
+    ...(selectedProvider?.endpoints ?? []).map((endpoint) => ({
+      value: endpoint.protocol,
+      label: protocolLabel[endpoint.protocol] ?? endpoint.protocol,
+    })),
+  ];
   const autoBrand = selectedProvider
     ? detectBrand([
         selectedProvider.name,
@@ -159,6 +174,9 @@ export function ProvidersPage() {
     setConfirmingModelId(null);
     setConfirmingDelete(false);
     setProbe(null);
+    setProbeOpen(false);
+    setProbeModelId("");
+    setProbeProtocol("");
   };
 
   const selectProvider = (provider: Provider) => {
@@ -384,7 +402,11 @@ export function ProvidersPage() {
     setProbe(null);
     setProbing(true);
     try {
-      const results = await testProvider(selectedProvider.id);
+      const results = await testProvider(
+        selectedProvider.id,
+        probeModelValue || null,
+        probeProtocol || null,
+      );
       setProbe(results);
     } catch (error) {
       setProbe([
@@ -604,15 +626,11 @@ export function ProvidersPage() {
                         <Pencil aria-hidden="true" />
                       </GlyphButton>
                       <GlyphButton
-                        label={probing ? "正在探测…" : "连通性测试"}
-                        disabled={busy || probing}
-                        onClick={() => void runProbe()}
+                        label={probeOpen ? "收起连通性测试" : "连通性测试"}
+                        disabled={busy}
+                        onClick={() => setProbeOpen((value) => !value)}
                       >
-                        {probing ? (
-                          <Loader2 className="is-spinning" aria-hidden="true" />
-                        ) : (
-                          <FlaskConical aria-hidden="true" />
-                        )}
+                        <FlaskConical aria-hidden="true" />
                       </GlyphButton>
                       <GlyphButton label="删除该上游" danger disabled={busy} onClick={() => setConfirmingDelete(true)}>
                         <Trash aria-hidden="true" />
@@ -632,32 +650,6 @@ export function ProvidersPage() {
                     <span className="sheet-summary-sep" aria-hidden="true">·</span>
                     <span>{selectedProvider.apiKey.trim() ? "密钥已配置" : "未配置密钥"}</span>
                   </p>
-
-                  {probe ? (
-                    <div className="probe-results" role="status">
-                      {probe.map((result, index) => (
-                        <p
-                          className={`probe-result${result.ok ? " is-ok" : " is-fail"}`}
-                          key={result.protocol || index}
-                        >
-                          {result.ok ? (
-                            <CircleCheck aria-hidden="true" />
-                          ) : (
-                            <CircleAlert aria-hidden="true" />
-                          )}
-                          <span className="probe-protocol">
-                            {result.protocol
-                              ? protocolLabel[result.protocol as keyof typeof protocolLabel] ??
-                                result.protocol
-                              : "探测"}
-                          </span>
-                          {result.ok
-                            ? `连通正常 · 延迟 ${formatLatency(result.latencyMs)}`
-                            : `失败：${result.error ?? "未知错误"}`}
-                        </p>
-                      ))}
-                    </div>
-                  ) : null}
 
                   {pendingSwitch ? (
                     <div className="pending-bar">
@@ -857,6 +849,7 @@ export function ProvidersPage() {
         >
           <ModelForm
             draft={modelDraft}
+            endpoints={selectedProvider?.endpoints ?? []}
             busy={busy}
             error={modelError}
             onChange={setModelDraft}
@@ -882,6 +875,72 @@ export function ProvidersPage() {
             setBasicsError(null);
           }}
         />
+      ) : null}
+
+      {probeOpen && selectedProvider ? (
+        <Modal title="连通性测试" onClose={() => setProbeOpen(false)}>
+          <div className="probe-dialog">
+            <div className="probe-controls">
+              <label className="field">
+                <span>模型</span>
+                <Select
+                  label="探测模型"
+                  value={probeModelValue}
+                  options={probeModelOptions}
+                  onChange={setProbeModelId}
+                  placeholder="暂无启用模型"
+                />
+              </label>
+              <label className="field">
+                <span>端点</span>
+                <Select
+                  label="探测端点"
+                  value={probeProtocol}
+                  options={probeEndpointOptions}
+                  onChange={setProbeProtocol}
+                />
+              </label>
+            </div>
+
+            <button
+              className="quiet-button is-primary probe-run"
+              type="button"
+              disabled={busy || probing || selectedProvider.endpoints.length === 0}
+              onClick={() => void runProbe()}
+            >
+              {probing ? "正在探测…" : "开始探测"}
+            </button>
+
+            {probe ? (
+              <div className="probe-results" role="status">
+                {probe.map((result, index) => (
+                  <p
+                    className={`probe-result${result.ok ? " is-ok" : " is-fail"}`}
+                    key={`${result.model}-${result.protocol}-${index}`}
+                  >
+                    {result.ok ? (
+                      <CircleCheck aria-hidden="true" />
+                    ) : (
+                      <CircleAlert aria-hidden="true" />
+                    )}
+                    <span className="probe-target">{result.model || "探测"}</span>
+                    {result.protocol ? (
+                      <span className="probe-protocol">
+                        {protocolLabel[result.protocol as keyof typeof protocolLabel] ??
+                          result.protocol}
+                      </span>
+                    ) : null}
+                    <span className="probe-outcome">
+                      {result.ok
+                        ? `连通正常 · 延迟 ${formatLatency(result.latencyMs)}`
+                        : `失败：${result.error ?? "未知错误"}`}
+                    </span>
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </Modal>
       ) : null}
     </main>
   );

@@ -32,6 +32,26 @@ pub fn upstream_url(base_url: &str, path: &str) -> String {
     )
 }
 
+/// 把上游的非 2xx 响应整理成人话：优先取 `error.message`，否则截断原始文本。
+/// 探测与拉取模型列表共用。
+pub fn describe_upstream_error(status: StatusCode, text: &str) -> String {
+    let snippet = serde_json::from_str::<Value>(text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| text.chars().take(200).collect());
+    if snippet.trim().is_empty() {
+        format!("上游返回 {status}")
+    } else {
+        format!("上游返回 {status}：{}", snippet.trim())
+    }
+}
+
 /// 由上游协议与模型名决定转发路径；端点与协议绑定后，这是路径的唯一来源。
 /// Gemini 的模型名在 path 而非 body，流式端点强制 `alt=sse` 以取得标准 SSE。
 pub fn upstream_path(protocol: &str, model_id: &str, is_stream: bool) -> String {
@@ -49,24 +69,14 @@ pub fn upstream_path(protocol: &str, model_id: &str, is_stream: bool) -> String 
     }
 }
 
-/// 向上游发起请求：按 provider 的四意图（内置底座 / 透传 / 替换 / 添加 / 移除）构建上游头，
-/// 最后**无条件**注入鉴权。鉴权永远在规则之后，硬黑名单在求值阶段剥离。
-pub async fn send(
-    state: &AppState,
+/// 把 provider 的四意图（内置底座 / 透传 / 替换 / 添加 / 移除）与鉴权注入请求：
+/// 鉴权最后注入、无条件覆盖，硬黑名单在求值阶段剥离。转发与只读探测共用此装饰。
+fn decorate(
+    mut request: reqwest::RequestBuilder,
     route: &ResolvedRoute,
-    body: &Value,
-    upstream_path: &str,
-    timeout: Option<Duration>,
     client_headers: &HeaderMap,
-) -> Result<reqwest::Response, AppError> {
-    let url = upstream_url(&route.base_url, upstream_path);
+) -> reqwest::RequestBuilder {
     let mapped = build_upstream_headers(client_headers, &route.header_rules, &route.extra_headers);
-
-    let mut request = state.http().post(url).json(body);
-    if let Some(timeout) = timeout {
-        request = request.timeout(timeout);
-    }
-
     for (name, value) in mapped.iter() {
         request = request.header(name, value);
     }
@@ -84,7 +94,39 @@ pub async fn send(
     if route.upstream_protocol == PROTOCOL_ANTHROPIC && !mapped.contains_key("anthropic-version") {
         request = request.header("anthropic-version", "2023-06-01");
     }
-    Ok(request.send().await?)
+    request
+}
+
+/// 向上游发起请求：按 provider 的四意图构建上游头（见 `decorate`）。
+pub async fn send(
+    state: &AppState,
+    route: &ResolvedRoute,
+    body: &Value,
+    upstream_path: &str,
+    timeout: Option<Duration>,
+    client_headers: &HeaderMap,
+) -> Result<reqwest::Response, AppError> {
+    let url = upstream_url(&route.base_url, upstream_path);
+    let mut request = state.http().post(url).json(body);
+    if let Some(timeout) = timeout {
+        request = request.timeout(timeout);
+    }
+    Ok(decorate(request, route, client_headers).send().await?)
+}
+
+/// 向上游发起 GET（无 body）：供拉取模型列表等只读探测复用同一套头与鉴权。
+pub async fn fetch(
+    state: &AppState,
+    route: &ResolvedRoute,
+    upstream_path: &str,
+    timeout: Option<Duration>,
+) -> Result<reqwest::Response, AppError> {
+    let url = upstream_url(&route.base_url, upstream_path);
+    let mut request = state.http().get(url);
+    if let Some(timeout) = timeout {
+        request = request.timeout(timeout);
+    }
+    Ok(decorate(request, route, &HeaderMap::new()).send().await?)
 }
 
 /// 让 OpenAI 兼容上游在流末块返回完整 usage；客户端已显式设置时尊重其选择。

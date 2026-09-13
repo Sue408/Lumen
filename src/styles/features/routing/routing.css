@@ -90,7 +90,7 @@
   z-index: var(--z-popover);
   display: grid;
   gap: 0.55rem;
-  width: min(24rem, calc(100vw - 2rem));
+  width: min(30rem, calc(100vw - 2rem));
   padding: 0.8rem 0.9rem;
   background: var(--paper);
   border: 1px solid var(--line);

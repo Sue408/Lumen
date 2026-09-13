@@ -58,6 +58,13 @@ export type ProbeResult = {
   error: string | null;
 };
 
+/** 上游 `/models` 返回的一个模型条目。 */
+export type RemoteModel = {
+  /** 上游真实模型名，可直接写入 `upstream_models.model_id`。 */
+  id: string;
+  displayName: string | null;
+};
+
 const MOCK_GENERATION: GenerationSpeed[] = [
   { model: "GPT-5", tokensPerSec: 68.4, samples: 42 },
   { model: "Claude Sonnet", tokensPerSec: 52.1, samples: 31 },
@@ -158,11 +165,33 @@ export async function queryTelemetry(
   });
 }
 
-export async function testProvider(providerId: string): Promise<ProbeResult[]> {
+/**
+ * 连通性测试：`modelId` 缺省取上游首个启用模型、`protocol` 缺省测全部端点。
+ * 每个「模型 × 端点」各发一次最小消息请求。
+ */
+export async function testProvider(
+  providerId: string,
+  modelId?: string | null,
+  protocol?: string | null,
+): Promise<ProbeResult[]> {
   if (!isTauriRuntime(window)) {
     return [
       { protocol: "openai", ok: true, httpStatus: 200, latencyMs: 180, model: "mock-model", error: null },
     ];
   }
-  return invoke<ProbeResult[]>("test_provider_cmd", { providerId });
+  return invoke<ProbeResult[]>("test_provider_cmd", { providerId, modelId, protocol });
+}
+
+/** 拉取上游协议端点暴露的模型列表；`protocol` 缺省用第一个端点。 */
+export async function listRemoteModels(
+  providerId: string,
+  protocol?: string | null,
+): Promise<RemoteModel[]> {
+  if (!isTauriRuntime(window)) {
+    return [
+      { id: "gpt-4o", displayName: null },
+      { id: "gpt-4o-mini", displayName: "GPT-4o mini" },
+    ];
+  }
+  return invoke<RemoteModel[]>("list_remote_models_cmd", { providerId, protocol });
 }

@@ -28,6 +28,13 @@ export function ProtocolHelp() {
                 </dd>
               </div>
             ))}
+            <div className="protocol-help-row">
+              <dt>模型发现</dt>
+              <dd>
+                <code>GET /v1/models</code>
+                <em>返回本网关的全部别名（不暴露上游模型名），供客户端拉取可用模型；无需密钥</em>
+              </dd>
+            </div>
           </dl>
           <p className="protocol-help-foot">
             基址填 <code>http://127.0.0.1:{"{端口}"}</code> 或{" "}
