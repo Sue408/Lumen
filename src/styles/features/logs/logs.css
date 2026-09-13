@@ -109,6 +109,12 @@
   border-color: var(--ochre);
 }
 
+/* 展开态：赭石描边常驻，提示再点一次即收起（与 hover 同一种描边，不引入新样式）。 */
+.logs-filter-toggle.is-open {
+  color: var(--ink);
+  border-color: var(--ochre);
+}
+
 .logs-filter-toggle.is-active {
   color: var(--ink);
   border-color: var(--ochre);

@@ -70,8 +70,11 @@
   gap: 0.5rem;
 }
 
-.endpoint-auth {
-  max-width: 14rem;
+/* 协议与鉴权都是短类型选择，并排一行；上游地址单独占一行。 */
+.endpoint-item-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
 }
 
 .endpoint-item .field-error {

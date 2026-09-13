@@ -145,22 +145,36 @@ export function EndpointList({
               </div>
               {editing ? (
                 <div className="endpoint-item-body">
-                  <label className="field">
-                    <span>协议</span>
-                    <Select
-                      label="协议"
-                      value={row.protocol}
-                      options={protocolOrder.map((protocol) => ({
-                        value: protocol,
-                        label: protocolLabel[protocol],
-                        disabled: rows.some(
-                          (other, otherIndex) =>
-                            otherIndex !== index && other.protocol === protocol,
-                        ),
-                      }))}
-                      onChange={(protocol) => patchCommit(index, { protocol })}
-                    />
-                  </label>
+                  <div className="endpoint-item-row">
+                    <label className="field">
+                      <span>协议</span>
+                      <Select
+                        label="协议"
+                        value={row.protocol}
+                        options={protocolOrder.map((protocol) => ({
+                          value: protocol,
+                          label: protocolLabel[protocol],
+                          disabled: rows.some(
+                            (other, otherIndex) =>
+                              otherIndex !== index && other.protocol === protocol,
+                          ),
+                        }))}
+                        onChange={(protocol) => patchCommit(index, { protocol })}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>鉴权方式</span>
+                      <Select
+                        label="鉴权方式"
+                        value={row.authScheme}
+                        options={authSchemeOrder.map((scheme) => ({
+                          value: scheme,
+                          label: authSchemeLabel[scheme],
+                        }))}
+                        onChange={(authScheme) => patchCommit(index, { authScheme })}
+                      />
+                    </label>
+                  </div>
                   <label className="field">
                     <span>上游地址</span>
                     <input
@@ -170,18 +184,6 @@ export function EndpointList({
                       onBlur={() => commitBaseUrl(index)}
                       placeholder="https://api.example.com/v1"
                       spellCheck={false}
-                    />
-                  </label>
-                  <label className="field endpoint-auth">
-                    <span>鉴权方式</span>
-                    <Select
-                      label="鉴权方式"
-                      value={row.authScheme}
-                      options={authSchemeOrder.map((scheme) => ({
-                        value: scheme,
-                        label: authSchemeLabel[scheme],
-                      }))}
-                      onChange={(authScheme) => patchCommit(index, { authScheme })}
                     />
                   </label>
                   {endpointError ? <p className="field-error">{endpointError}</p> : null}
