@@ -8,6 +8,7 @@ type GatewaySectionProps = {
   savedProxyUrl: string;
   running: boolean;
   autostart: boolean | null;
+  autostartGateway: boolean;
   closeToTray: boolean;
   busy: boolean;
   formError: string | null;
@@ -16,6 +17,7 @@ type GatewaySectionProps = {
   onSubmitPort: () => void;
   onDiscardPort: () => void;
   onToggleAutostart: (next: boolean) => void;
+  onToggleAutostartGateway: (next: boolean) => void;
   onToggleCloseToTray: (next: boolean) => void;
 };
 
@@ -26,6 +28,7 @@ export function GatewaySection({
   savedProxyUrl,
   running,
   autostart,
+  autostartGateway,
   closeToTray,
   busy,
   formError,
@@ -34,6 +37,7 @@ export function GatewaySection({
   onSubmitPort,
   onDiscardPort,
   onToggleAutostart,
+  onToggleAutostartGateway,
   onToggleCloseToTray,
 }: GatewaySectionProps) {
   const dirty =
@@ -110,6 +114,22 @@ export function GatewaySection({
             )}
           </div>
           <span className="settings-row-note">开机后自动运行，并以最小化方式静默进入托盘</span>
+        </div>
+        <div className="settings-row">
+          <span className="settings-row-label">自启时自动开启网关</span>
+          <div className="settings-row-control">
+            <TogglePill
+              checked={autostartGateway}
+              label="自启时自动开启网关"
+              disabled={busy || autostart !== true}
+              onChange={onToggleAutostartGateway}
+            />
+          </div>
+          <span className="settings-row-note">
+            {autostart === true
+              ? "随系统启动时无需手动开启，网关自动就绪"
+              : "需先开启「随系统启动」"}
+          </span>
         </div>
         <div className="settings-row">
           <span className="settings-row-label">关闭窗口时收进托盘</span>

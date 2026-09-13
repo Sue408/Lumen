@@ -124,6 +124,38 @@ pub fn save_settings(conn: &Connection, settings: &Settings) -> Result<Settings,
     Ok(settings.clone())
 }
 
+/// 开机自启的**用户意图**，与注册表实际状态分开存储。
+///
+/// `None` 表示从未记录（首次运行或从旧版本升级）。启动时据此重放一次注册，即可修复
+/// 「重装后 exe 路径变了、注册表却仍指向旧路径」导致的自启失效。
+pub fn autostart_intent(conn: &Connection) -> Option<bool> {
+    read_value(conn, "autostart")
+        .ok()
+        .flatten()
+        .and_then(|value| value.parse::<bool>().ok())
+}
+
+pub fn set_autostart_intent(conn: &Connection, enabled: bool) -> Result<(), AppError> {
+    write_value(conn, "autostart", if enabled { "true" } else { "false" })
+}
+
+/// 「随系统启动时自动开启网关」开关。默认关闭。
+pub fn autostart_gateway(conn: &Connection) -> bool {
+    read_value(conn, "autostart_gateway")
+        .ok()
+        .flatten()
+        .and_then(|value| value.parse::<bool>().ok())
+        .unwrap_or(false)
+}
+
+pub fn set_autostart_gateway(conn: &Connection, enabled: bool) -> Result<(), AppError> {
+    write_value(
+        conn,
+        "autostart_gateway",
+        if enabled { "true" } else { "false" },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +265,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(get_settings(&conn).unwrap().proxy_url, None);
+    }
+
+    #[test]
+    fn autostart_intent_starts_unset_then_round_trips() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        assert_eq!(autostart_intent(&conn), None, "未记录时应为 None");
+        set_autostart_intent(&conn, true).unwrap();
+        assert_eq!(autostart_intent(&conn), Some(true));
+        set_autostart_intent(&conn, false).unwrap();
+        assert_eq!(autostart_intent(&conn), Some(false));
+    }
+
+    #[test]
+    fn autostart_gateway_defaults_off_and_round_trips() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        assert!(!autostart_gateway(&conn));
+        set_autostart_gateway(&conn, true).unwrap();
+        assert!(autostart_gateway(&conn));
     }
 }

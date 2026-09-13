@@ -9,11 +9,13 @@ import {
   exportConfig,
   getAppVersion,
   getAutostart,
+  getAutostartGateway,
   getSettings,
   importConfig,
   resetData,
   saveSettings,
   setAutostart as setAutostartEnabled,
+  setAutostartGateway,
   type ImportSummary,
 } from "../../services/settings";
 import { injectDemo, type DemoScenario } from "../../services/demo";
@@ -38,9 +40,11 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
   const [proxyUrl, setProxyUrl] = useState("");
   const [savedProxyUrl, setSavedProxyUrl] = useState("");
   const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [autostartGateway, setAutostartGatewayState] = useState(false);
   const [appVersion, setAppVersion] = useState("");
   const closeToTraySaving = useRef(false);
   const autostartSaving = useRef(false);
+  const autostartGatewaySaving = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -75,6 +79,12 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
       try {
         const enabled = await getAutostart();
         if (alive) setAutostart(enabled);
+      } catch (err) {
+        if (alive) setError(String(err));
+      }
+      try {
+        const enabled = await getAutostartGateway();
+        if (alive) setAutostartGatewayState(enabled);
       } catch (err) {
         if (alive) setError(String(err));
       }
@@ -178,6 +188,24 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
       setError(String(err));
     } finally {
       autostartSaving.current = false;
+    }
+  };
+
+  const toggleAutostartGateway = async (next: boolean) => {
+    if (autostartGatewaySaving.current) return;
+    autostartGatewaySaving.current = true;
+    const previous = autostartGateway;
+    setAutostartGatewayState(next);
+    try {
+      const actual = await setAutostartGateway(next);
+      setAutostartGatewayState(actual);
+      setError(null);
+    } catch (err) {
+      setAutostartGatewayState(previous);
+      setNotice(null);
+      setError(String(err));
+    } finally {
+      autostartGatewaySaving.current = false;
     }
   };
 
@@ -312,6 +340,7 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
                 savedProxyUrl={savedProxyUrl}
                 running={running}
                 autostart={autostart}
+                autostartGateway={autostartGateway}
                 closeToTray={closeToTray}
                 busy={busy}
                 formError={formError}
@@ -328,6 +357,7 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
                   setFormError(null);
                 }}
                 onToggleAutostart={(next) => void toggleAutostart(next)}
+                onToggleAutostartGateway={(next) => void toggleAutostartGateway(next)}
                 onToggleCloseToTray={(next) => void toggleCloseToTray(next)}
               />
 

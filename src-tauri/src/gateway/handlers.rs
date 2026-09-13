@@ -38,6 +38,41 @@ pub async fn health() -> Response {
     Json(json!({ "status": "ok" })).into_response()
 }
 
+/// 应用级请求日志：记录方法、路径、状态码与耗时。
+///
+/// 它落在**运行日志**（而非账户流水）里，专门回答「请求究竟有没有进网关、走了哪条
+/// 路径」。调用流水只覆盖进入 handler 的请求；路径写错命中兜底 404 的请求在这里才看得见。
+pub async fn log_request(
+    State(_state): State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    let started = Instant::now();
+    let response = next.run(request).await;
+    // /health 常被探针高频访问，逐条记录只会淹没真正的线索。
+    if path != "/health" {
+        tracing::info!(
+            "{} {} -> {} · {} ms",
+            method,
+            path,
+            response.status().as_u16(),
+            started.elapsed().as_millis()
+        );
+    }
+    response
+}
+
+/// 兜底：未匹配任何路由的请求。记录完整的「方法 + 路径」——这是排查客户端 `base_url`
+/// 或端点路径写错的第一手线索——并返回标准的 JSON 404。
+pub async fn not_found(request: axum::extract::Request) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    tracing::warn!("网关收到未知端点：{method} {path}（请检查客户端的 base_url 与路径）");
+    error_response(StatusCode::NOT_FOUND, &format!("未知端点：{method} {path}"))
+}
+
 pub async fn list_models(State(state): State<Arc<AppState>>) -> Response {
     match with_db(&state.db, list_enabled_aliases).await {
         Ok(aliases) => {
@@ -1349,6 +1384,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn versionless_responses_alias_serves_codex_path() {
+        let base_url = start_responses_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "responses", "lumen/resp");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        // Codex 把 base_url 配到根地址后拼出的真实路径：/responses（不带 /v1）。
+        let response = router
+            .oneshot(post(
+                "/responses",
+                json!({ "model": "lumen/resp", "input": "hi" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1);
+        // 流水按规范端点归档：无版本别名是兼容入口，账本里不出现两种路径。
+        assert_eq!(logs[0].endpoint, "/v1/responses");
+        assert_eq!(logs[0].total_tokens, 105);
+    }
+
+    #[tokio::test]
     async fn gemini_generate_passthrough_rewrites_path_and_auth() {
         let app = axum::Router::new()
             .route("/models/{model_action}", axum::routing::post(gemini_upstream));
@@ -1471,6 +1536,53 @@ mod tests {
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["error"]["code"], "protocol_mismatch");
+    }
+
+    #[tokio::test]
+    async fn versionless_aliases_are_registered() {
+        let base_url = start_mock_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "openai", "lumen/mock");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        // 无版本别名照常转发：Codex 这类把 base_url 配到根地址的客户端依赖它。
+        let response = router
+            .clone()
+            .oneshot(post(
+                "/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // `/responses` 已注册：命中协议校验（openai 路由不能走 responses 端点），
+        // 而不是落进兜底 404。
+        let response = router
+            .clone()
+            .oneshot(post(
+                "/responses",
+                json!({ "model": "lumen/mock", "input": "hi" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        // 真正未知的路径才落兜底 404，并回可读的 JSON 提示。
+        let response = router
+            .oneshot(post("/v2/unknown", json!({ "model": "lumen/mock" })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(value["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("未知端点"));
     }
 
     #[tokio::test]

@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod error;
 mod gateway;
+mod logging;
 mod state;
 mod tray;
 mod util;
@@ -10,6 +11,7 @@ use std::sync::Arc;
 
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_window_state::StateFlags;
 
 use crate::db::models::RequestLog;
@@ -75,7 +77,9 @@ macro_rules! register_handlers {
             commands::import_seed_cmd,
             commands::reset_data_cmd,
             commands::get_autostart_cmd,
-            commands::set_autostart_cmd
+            commands::set_autostart_cmd,
+            commands::get_autostart_gateway_cmd,
+            commands::set_autostart_gateway_cmd
             $(, $extra)*
         ]
     };
@@ -83,12 +87,6 @@ macro_rules! register_handlers {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_target(false)
-        .try_init()
-        .ok();
-
     let mut builder = tauri::Builder::default();
 
     // 单实例插件必须最先注册，第二次启动时唤起已运行的主窗口。
@@ -117,6 +115,9 @@ pub fn run() {
         )
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
+            // 先装日志：release 无控制台，不落盘就什么都看不到。
+            logging::init(&data_dir);
+
             let db_path = data_dir.join(db_file_name());
             #[cfg(debug_assertions)]
             tracing::info!("开发构建使用独立数据库：{}", db_path.display());
@@ -125,16 +126,36 @@ pub fn run() {
             let events = Arc::new(TauriEventSink {
                 app: app.handle().clone(),
             });
-            let (port, close_to_tray, session_headers, proxy_url) = {
+            let (port, close_to_tray, session_headers, proxy_url, autostart_gateway) = {
                 let conn = db
                     .lock()
                     .map_err(|_| error::AppError::message("数据库锁已中毒"))?;
                 let settings = db::settings::get_settings(&conn)?;
+
+                // 自启意图持久化 + 启动时自愈。重装后 exe 路径变了、注册表项名没变，
+                // `is_enabled()` 仍返回 true 却指向旧路径，表现为「设置里开着却不再自启」。
+                // 首次没有意图记录时，以系统当前状态为准落库；之后按意图重放一次注册，
+                // 把注册表刷成当前可执行文件。
+                let intent = match db::settings::autostart_intent(&conn) {
+                    Some(intent) => intent,
+                    None => {
+                        let current = app.autolaunch().is_enabled().unwrap_or(false);
+                        db::settings::set_autostart_intent(&conn, current)?;
+                        current
+                    }
+                };
+                let manager = app.autolaunch();
+                let applied = if intent { manager.enable() } else { manager.disable() };
+                if let Err(error) = applied {
+                    tracing::warn!("开机自启注册表自愈失败：{error}");
+                }
+
                 (
                     settings.port,
                     settings.close_to_tray,
                     settings.session_headers,
                     settings.proxy_url,
+                    db::settings::autostart_gateway(&conn),
                 )
             };
             let http = state::build_http_client(proxy_url.as_deref())?;
@@ -146,11 +167,29 @@ pub fn run() {
             tray::setup(app.handle())?;
             tray::refresh(app.handle(), false);
 
-            // 开机自启注册时附带 `--minimized`，实现静默进入托盘。
-            if std::env::args().any(|arg| arg == "--minimized") {
-                if let Some(window) = app.get_webview_window("main") {
+            // 开机自启注册时附带 `--minimized`：静默进入托盘，不闪主窗口。
+            let start_minimized = std::env::args().any(|arg| arg == "--minimized");
+            if let Some(window) = app.get_webview_window("main") {
+                if start_minimized {
                     let _ = window.hide();
+                } else {
+                    let _ = window.show();
+                    let _ = window.set_focus();
                 }
+            }
+
+            // 仅「随系统自启」这次启动自动拉起网关；手动打开时不自动开。
+            if start_minimized && autostart_gateway {
+                let state = app.state::<Arc<AppState>>().inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    tracing::info!("随系统自启：自动启动网关");
+                    if let Err(error) = gateway::start(state.clone()).await {
+                        tracing::warn!("随系统自启启动网关失败：{error}");
+                        state
+                            .events
+                            .status(&GatewayStatus::failed(state.port(), error.to_string()));
+                    }
+                });
             }
             Ok(())
         })

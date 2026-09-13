@@ -148,6 +148,12 @@
   color: var(--ink-muted);
 }
 
+.protocol-help-foot code {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
 /* ---- target editor ---- */
 
 .target-list {

@@ -53,6 +53,16 @@ export async function setAutostart(enabled: boolean): Promise<boolean> {
   return invoke<boolean>("set_autostart_cmd", { enabled });
 }
 
+export async function getAutostartGateway(): Promise<boolean> {
+  if (!isTauriRuntime(window)) return false;
+  return invoke<boolean>("get_autostart_gateway_cmd");
+}
+
+export async function setAutostartGateway(enabled: boolean): Promise<boolean> {
+  if (!isTauriRuntime(window)) return enabled;
+  return invoke<boolean>("set_autostart_gateway_cmd", { enabled });
+}
+
 export type ItemSummary = {
   created: number;
   updated: number;

@@ -15,6 +15,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::middleware;
 use axum::routing::{get, post};
 use axum::Router;
 use tokio::sync::oneshot;
@@ -28,13 +29,29 @@ use crate::state::{AppState, GatewayHandle, GatewayStatus};
 const STOP_GRACE: Duration = Duration::from_secs(10);
 
 pub fn build_router(state: Arc<AppState>) -> Router {
+    // 端点同时注册两套前缀：规范的 `/v1/...`，以及无版本别名。
+    // 部分客户端（如 Codex）把 provider 的 `base_url` 配到网关根地址，再自行拼接
+    // `/responses`、`/chat/completions`，因此根路径必须也能命中；否则请求会落进
+    // 兜底 404，且不进任何 handler、连调用流水都不会有，极难排查。
     Router::new()
         .route("/health", get(handlers::health))
         .route("/v1/models", get(handlers::list_models))
         .route("/v1/chat/completions", post(handlers::chat_completions))
         .route("/v1/messages", post(handlers::messages))
         .route("/v1/responses", post(handlers::responses))
-        .route("/v1beta/models/{*model_action}", post(handlers::gemini_generate))
+        .route(
+            "/v1beta/models/{*model_action}",
+            post(handlers::gemini_generate),
+        )
+        .route("/models", get(handlers::list_models))
+        .route("/chat/completions", post(handlers::chat_completions))
+        .route("/messages", post(handlers::messages))
+        .route("/responses", post(handlers::responses))
+        .fallback(handlers::not_found)
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            handlers::log_request,
+        ))
         .with_state(state)
 }
 
