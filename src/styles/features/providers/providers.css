@@ -16,16 +16,26 @@
 
 .endpoint-row {
   display: grid;
-  grid-template-columns: minmax(7rem, 0.9fr) minmax(0, 1.6fr) minmax(7rem, 0.9fr) auto;
-  gap: 0.5rem 0.75rem;
-  align-items: end;
-  padding: 0.7rem 0.75rem;
+  gap: 0.6rem;
+  padding: 0.75rem 0.8rem;
   border: 1px solid var(--line-faint);
   border-radius: 4px;
 }
 
-.endpoint-url {
+.endpoint-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.endpoint-protocol {
+  flex: 0 1 14rem;
   min-width: 0;
+}
+
+.endpoint-auth {
+  max-width: 14rem;
 }
 
 .endpoint-actions {
@@ -37,17 +47,6 @@
 
 .endpoint-actions .text-action.is-icon:hover:not(:disabled) {
   color: var(--danger);
-}
-
-@media (max-width: 720px) {
-  .endpoint-row {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .endpoint-url,
-  .endpoint-actions {
-    grid-column: 1 / -1;
-  }
 }
 
 /* ---- upstream model list ---- */
