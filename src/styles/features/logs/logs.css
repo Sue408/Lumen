@@ -140,7 +140,6 @@
   font-size: 0.8125rem;
 }
 
-.logs-filters select,
 .logs-filters input {
   height: 2rem;
   padding: 0.25rem 0.5rem;
@@ -149,18 +148,17 @@
   border: 1px solid var(--line-control);
   border-radius: 4px;
   font-size: 0.875rem;
-}
-
-.logs-filters select {
-  max-width: 18rem;
-  text-overflow: ellipsis;
-}
-
-.logs-filters input {
   font-variant-numeric: tabular-nums;
 }
 
-.logs-filters select:focus-visible,
+/* 下拉触发按钮在筛选行里按内容定宽，限制在可读区间内。 */
+.logs-filters .select-trigger {
+  width: auto;
+  min-width: 10rem;
+  max-width: 18rem;
+  height: 2rem;
+}
+
 .logs-filters input:focus-visible {
   outline: 2px solid var(--ochre);
   outline-offset: 2px;
@@ -214,10 +212,6 @@
   color: var(--ink-muted);
   font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
-}
-
-.logs-range-sep {
-  color: var(--ink-muted);
 }
 
 .logs-range-clear {

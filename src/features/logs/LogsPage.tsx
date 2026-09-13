@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLiveRevision } from "../../app/useLiveRevision";
 import { Check, ChevronDown, Copy, SlidersHorizontal, X } from "lucide-react";
 import { InlineError, LoadingLines } from "../../components/ConfigControls";
+import { DateRangePicker } from "../../components/DateRangePicker";
+import { Select } from "../../components/Select";
 import type { RequestLog } from "../../services/gateway";
 import {
   listLogAliases,
@@ -247,60 +249,45 @@ export function LogsPage() {
           <div className="logs-filters">
             <label>
               别名
-              <select
+              <Select
+                label="别名"
                 value={alias}
-                onChange={(event) => {
-                  setAlias(event.target.value);
-                  resetPaging();
-                }}
-              >
-                <option>{ALL_ALIASES}</option>
-                {aliases.map((item) => (
-                  <option key={item}>{item}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              会话
-              <select
-                value={session}
-                onChange={(event) => {
-                  setSession(event.target.value);
-                  resetPaging();
-                }}
-              >
-                <option>{ALL_SESSIONS}</option>
-                {sessions.map((item) => (
-                  <option
-                    key={`${item.virtualKeyId ?? ""}:${item.sessionId}`}
-                    value={item.sessionId}
-                  >
-                    {formatSessionLabel(item)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              开始
-              <input
-                type="date"
-                value={from}
-                max={to || undefined}
-                onChange={(event) => {
-                  setFrom(event.target.value);
+                options={[
+                  { value: ALL_ALIASES, label: ALL_ALIASES },
+                  ...aliases.map((item) => ({ value: item, label: item })),
+                ]}
+                onChange={(next) => {
+                  setAlias(next);
                   resetPaging();
                 }}
               />
             </label>
-            <span className="logs-range-sep">–</span>
             <label>
-              结束
-              <input
-                type="date"
-                value={to}
-                min={from || undefined}
-                onChange={(event) => {
-                  setTo(event.target.value);
+              会话
+              <Select
+                label="会话"
+                value={session}
+                options={[
+                  { value: ALL_SESSIONS, label: ALL_SESSIONS },
+                  ...sessions.map((item) => ({
+                    value: item.sessionId,
+                    label: formatSessionLabel(item),
+                  })),
+                ]}
+                onChange={(next) => {
+                  setSession(next);
+                  resetPaging();
+                }}
+              />
+            </label>
+            <label>
+              时间
+              <DateRangePicker
+                from={from}
+                to={to}
+                onChange={(nextFrom, nextTo) => {
+                  setFrom(nextFrom);
+                  setTo(nextTo);
                   resetPaging();
                 }}
               />

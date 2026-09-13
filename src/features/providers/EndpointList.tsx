@@ -1,8 +1,10 @@
 import { useRef, useState } from "react";
 import { Network, Pencil, Plus, Trash2 } from "lucide-react";
 import { GlyphButton, SectionTitle } from "../../components/ConfigControls";
+import { Select } from "../../components/Select";
 import {
   authSchemeLabel,
+  authSchemeOrder,
   endpointHost,
   nextEndpointDraft,
   protocolLabel,
@@ -145,27 +147,19 @@ export function EndpointList({
                 <div className="endpoint-item-body">
                   <label className="field">
                     <span>协议</span>
-                    <select
+                    <Select
+                      label="协议"
                       value={row.protocol}
-                      onChange={(event) =>
-                        patchCommit(index, {
-                          protocol: event.target.value as EndpointDraft["protocol"],
-                        })
-                      }
-                    >
-                      {protocolOrder.map((protocol) => (
-                        <option
-                          key={protocol}
-                          value={protocol}
-                          disabled={rows.some(
-                            (other, otherIndex) =>
-                              otherIndex !== index && other.protocol === protocol,
-                          )}
-                        >
-                          {protocolLabel[protocol]}
-                        </option>
-                      ))}
-                    </select>
+                      options={protocolOrder.map((protocol) => ({
+                        value: protocol,
+                        label: protocolLabel[protocol],
+                        disabled: rows.some(
+                          (other, otherIndex) =>
+                            otherIndex !== index && other.protocol === protocol,
+                        ),
+                      }))}
+                      onChange={(protocol) => patchCommit(index, { protocol })}
+                    />
                   </label>
                   <label className="field">
                     <span>上游地址</span>
@@ -180,18 +174,15 @@ export function EndpointList({
                   </label>
                   <label className="field endpoint-auth">
                     <span>鉴权方式</span>
-                    <select
+                    <Select
+                      label="鉴权方式"
                       value={row.authScheme}
-                      onChange={(event) =>
-                        patchCommit(index, {
-                          authScheme: event.target.value as EndpointDraft["authScheme"],
-                        })
-                      }
-                    >
-                      <option value="bearer">{authSchemeLabel.bearer}</option>
-                      <option value="x-api-key">{authSchemeLabel["x-api-key"]}</option>
-                      <option value="x-goog-api-key">{authSchemeLabel["x-goog-api-key"]}</option>
-                    </select>
+                      options={authSchemeOrder.map((scheme) => ({
+                        value: scheme,
+                        label: authSchemeLabel[scheme],
+                      }))}
+                      onChange={(authScheme) => patchCommit(index, { authScheme })}
+                    />
                   </label>
                   {endpointError ? <p className="field-error">{endpointError}</p> : null}
                   <div className="endpoint-item-foot">

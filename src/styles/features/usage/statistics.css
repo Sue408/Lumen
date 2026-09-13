@@ -181,20 +181,11 @@
   align-self: flex-end;
 }
 
-.scope-select select {
-  height: clamp(1.55rem, 2vw, 2rem);
+.scope-select .select-trigger {
+  width: auto;
+  min-width: 7rem;
   max-width: 10rem;
-  padding: 0 0.5rem;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--line-control);
-  border-radius: 4px;
-  font: inherit;
-  font-size: 0.875rem;
-}
-
-.scope-select select:focus-visible {
-  outline: 2px solid var(--ochre);
-  outline-offset: 2px;
+  height: clamp(1.55rem, 2vw, 2rem);
+  font-size: 0.8125rem;
 }
 

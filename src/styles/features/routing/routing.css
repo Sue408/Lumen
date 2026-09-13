@@ -87,7 +87,7 @@
 
 .protocol-help {
   position: fixed;
-  z-index: 60;
+  z-index: var(--z-popover);
   display: grid;
   gap: 0.55rem;
   width: min(24rem, calc(100vw - 2rem));
@@ -208,24 +208,6 @@
   border-color: var(--line-faint);
 }
 
-.target-row select {
-  flex: 1 1 14rem;
-  min-width: 0;
-  height: 2rem;
-  padding: 0 0.5rem;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--line-control);
-  border-radius: 4px;
-  font: inherit;
-  font-size: 0.875rem;
-}
-
-.target-row select:focus-visible {
-  outline: 2px solid var(--ochre);
-  outline-offset: 2px;
-}
-
 .target-move {
   display: inline-flex;
   align-items: center;
@@ -289,7 +271,7 @@
 /* portal 到 body，无法被 .routing-page 作用域覆盖（与品牌图标选择器同理）。 */
 .model-picker {
   position: fixed;
-  z-index: 70;
+  z-index: var(--z-popover);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0.5rem;

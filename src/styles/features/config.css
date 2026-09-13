@@ -357,7 +357,7 @@
 
 .brand-picker {
   position: fixed;
-  z-index: 60;
+  z-index: var(--z-popover);
   display: grid;
   gap: 0.5rem;
   width: 17.5rem;
@@ -834,7 +834,7 @@
 /* 浮层 portal 到 body，故为顶层类，不挂在页面根下。 */
 .section-help {
   position: fixed;
-  z-index: 60;
+  z-index: var(--z-popover);
   display: grid;
   gap: 0.55rem;
   width: min(24rem, calc(100vw - 2rem));
@@ -980,7 +980,6 @@
 }
 
 .field input,
-.field select,
 .field textarea {
   width: 100%;
   min-width: 0;
@@ -993,8 +992,7 @@
   font-size: 0.875rem;
 }
 
-.field input,
-.field select {
+.field input {
   height: 2rem;
 }
 
@@ -1010,7 +1008,6 @@
 }
 
 .field input:focus-visible,
-.field select:focus-visible,
 .field textarea:focus-visible {
   outline: 2px solid var(--ochre);
   outline-offset: 2px;
@@ -1084,7 +1081,7 @@
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  z-index: var(--z-modal);
   display: grid;
   padding: 2rem;
   background: var(--scrim);
@@ -1188,4 +1185,275 @@
   .header-rules-chevron {
     transition: none;
   }
+}
+
+/* ---- select (shared dropdown, replaces native <select>) ---- */
+
+.select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  height: 2rem;
+  padding: 0 0.5rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line-control);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.select-trigger:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+.select-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.select-trigger:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: 2px;
+}
+
+.select-value {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-placeholder {
+  color: var(--ink-muted);
+}
+
+.select-chevron {
+  flex: 0 0 auto;
+  width: 0.875rem;
+  height: 0.875rem;
+  color: var(--ink-muted);
+}
+
+/* portal 到 body，无法被页面作用域覆盖（与模型 / 品牌选择器同理）。 */
+.select-panel {
+  position: fixed;
+  z-index: var(--z-popover);
+  max-height: min(18rem, calc(100vh - 2rem));
+  padding: 0.25rem;
+  overflow: hidden auto;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow-float);
+}
+
+.select-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.45rem;
+  color: var(--ink);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.select-option-label {
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 活动项由键盘与指针共用同一高亮：纸面下沉，不加色块。 */
+.select-option.is-active:not(.is-disabled) {
+  background: var(--paper-deep);
+}
+
+.select-option.is-selected {
+  font-weight: 600;
+}
+
+.select-option.is-disabled {
+  color: var(--ink-faint);
+  cursor: not-allowed;
+}
+
+.select-check {
+  flex: 0 0 auto;
+  width: 0.875rem;
+  height: 0.875rem;
+  color: var(--ochre);
+}
+
+.select-empty {
+  margin: 0;
+  padding: 0.6rem 0.45rem;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+}
+
+/* ---- date range picker (shared calendar panel) ---- */
+
+.date-panel {
+  position: fixed;
+  z-index: var(--z-popover);
+  width: 16.5rem;
+  padding: 0.5rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow-float);
+}
+
+.date-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+  margin-bottom: 0.4rem;
+}
+
+.date-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.date-nav:hover {
+  color: var(--ink);
+  background: var(--surface-hover-soft);
+}
+
+.date-nav svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.date-title {
+  flex: 1 1 auto;
+  padding: 0.25rem;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.date-title:hover {
+  background: var(--surface-hover-soft);
+}
+
+.date-nav:focus-visible,
+.date-title:focus-visible,
+.date-cell:focus-visible,
+.date-month:focus-visible {
+  outline: 2px solid var(--ochre);
+  outline-offset: -2px;
+}
+
+.date-weekdays,
+.date-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+
+.date-weekdays {
+  margin-bottom: 2px;
+  color: var(--ink-faint);
+  font-size: 0.6875rem;
+  text-align: center;
+}
+
+.date-cell {
+  height: 1.9rem;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.date-cell.is-outside {
+  color: var(--ink-faint);
+}
+
+.date-cell:hover:not(.is-edge):not(.is-pending) {
+  background: var(--surface-hover-soft);
+}
+
+/* 区间中段：纸面下沉，两端才是赭石实心。 */
+.date-cell.is-in-range {
+  background: var(--surface-hover-soft);
+  border-radius: 0;
+}
+
+.date-cell.is-today {
+  color: var(--ochre);
+  font-weight: 600;
+}
+
+.date-cell.is-edge,
+.date-cell.is-pending {
+  color: var(--paper);
+  background: var(--ochre);
+  border-radius: 4px;
+}
+
+.date-month-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+}
+
+.date-month {
+  height: 2.2rem;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.date-month:hover {
+  background: var(--surface-hover-soft);
+}
+
+.date-month.is-active {
+  color: var(--ochre);
+  font-weight: 600;
+}
+
+.date-panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.4rem;
+  margin-top: 0.4rem;
+  border-top: 1px solid var(--line-faint);
 }

@@ -33,6 +33,14 @@
   --text-body: clamp(0.9rem, 0.8rem + 0.45vw, 1.125rem);
   --text-small: clamp(0.75rem, 0.68rem + 0.25vw, 0.875rem);
 
+  /*
+   * Stacking scale — portal 浮层（下拉 / 日历 / 选择器 / 说明）会挂到 body，
+   * 必须高于弹窗，否则在 Modal 内打开会被遮住。层值只在这里定义。
+   */
+  --z-chrome: 1000;
+  --z-modal: 1100;
+  --z-popover: 1200;
+
   font-family: var(--font-sans);
   color: var(--ink);
   background: var(--paper);

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Modal } from "../../components/Modal";
 import { FormActions, InlineError } from "../../components/ConfigControls";
-import { authSchemeLabel, protocolLabel, protocolOrder } from "./providerModel";
+import { Select } from "../../components/Select";
+import { authSchemeLabel, authSchemeOrder, protocolLabel, protocolOrder } from "./providerModel";
 import type { AuthScheme, Protocol } from "../../services/config";
 
 export type ProviderBasicsValues = {
@@ -75,27 +76,27 @@ export function ProviderBasicsModal({
             <>
               <label className="field">
                 <span>协议</span>
-                <select
+                <Select
+                  label="协议"
                   value={draft.protocol}
-                  onChange={(event) => set({ protocol: event.target.value as Protocol })}
-                >
-                  {protocolOrder.map((protocol) => (
-                    <option key={protocol} value={protocol}>
-                      {protocolLabel[protocol]}
-                    </option>
-                  ))}
-                </select>
+                  options={protocolOrder.map((protocol) => ({
+                    value: protocol,
+                    label: protocolLabel[protocol],
+                  }))}
+                  onChange={(protocol) => set({ protocol })}
+                />
               </label>
               <label className="field">
                 <span>鉴权方式</span>
-                <select
+                <Select
+                  label="鉴权方式"
                   value={draft.authScheme}
-                  onChange={(event) => set({ authScheme: event.target.value as AuthScheme })}
-                >
-                  <option value="bearer">{authSchemeLabel.bearer}</option>
-                  <option value="x-api-key">{authSchemeLabel["x-api-key"]}</option>
-                  <option value="x-goog-api-key">{authSchemeLabel["x-goog-api-key"]}</option>
-                </select>
+                  options={authSchemeOrder.map((scheme) => ({
+                    value: scheme,
+                    label: authSchemeLabel[scheme],
+                  }))}
+                  onChange={(authScheme) => set({ authScheme })}
+                />
               </label>
               <label className="field field-wide">
                 <span>上游地址</span>

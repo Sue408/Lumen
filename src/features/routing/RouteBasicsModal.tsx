@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { Modal } from "../../components/Modal";
 import { FormActions, InlineError } from "../../components/ConfigControls";
+import { Select } from "../../components/Select";
 import { protocolLabel, type Protocol } from "../../services/config";
+
+const protocolChoices: Protocol[] = ["openai", "anthropic", "responses", "gemini"];
 
 export type RouteBasicsDraft = {
   id: string | null;
@@ -59,15 +62,15 @@ export function RouteBasicsModal({
           <label className="field">
             <span>协议</span>
             {isNew ? (
-              <select
+              <Select
+                label="协议"
                 value={draft.protocol}
-                onChange={(event) => set({ protocol: event.target.value as Protocol })}
-              >
-                <option value="openai">{protocolLabel.openai}</option>
-                <option value="anthropic">{protocolLabel.anthropic}</option>
-                <option value="responses">{protocolLabel.responses}</option>
-                <option value="gemini">{protocolLabel.gemini}</option>
-              </select>
+                options={protocolChoices.map((protocol) => ({
+                  value: protocol,
+                  label: protocolLabel[protocol],
+                }))}
+                onChange={(protocol) => set({ protocol })}
+              />
             ) : (
               <span className="field-static">{protocolLabel[draft.protocol]}</span>
             )}

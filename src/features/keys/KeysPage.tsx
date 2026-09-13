@@ -10,13 +10,13 @@ import {
   TogglePill,
 } from "../../components/ConfigControls";
 import { Modal } from "../../components/Modal";
+import { Select } from "../../components/Select";
 import {
   deleteVirtualKey,
   listVirtualKeys,
   queryVirtualKeysUsage,
   saveVirtualKey,
   type KeyUsage,
-  type QuotaPeriod,
   type VirtualKey,
 } from "../../services/config";
 import {
@@ -93,16 +93,15 @@ function KeyEditor({
           </label>
           <label className="field">
             <span>周期</span>
-            <select
+            <Select
+              label="周期"
               value={draft.quotaPeriod}
-              onChange={(event) => set({ quotaPeriod: event.target.value as QuotaPeriod })}
-            >
-              {quotaPeriodOrder.map((period) => (
-                <option key={period} value={period}>
-                  {quotaPeriodLabel[period]}
-                </option>
-              ))}
-            </select>
+              options={quotaPeriodOrder.map((period) => ({
+                value: period,
+                label: quotaPeriodLabel[period],
+              }))}
+              onChange={(quotaPeriod) => set({ quotaPeriod })}
+            />
           </label>
         </div>
 

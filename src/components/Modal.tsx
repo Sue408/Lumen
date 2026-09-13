@@ -22,6 +22,11 @@ export function Modal({
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        const active = document.activeElement;
+        // 内层浮层（如下拉面板）先接管 Escape：焦点在其内时不关闭整个弹窗。
+        if (active instanceof HTMLElement && active.closest('[data-escape-scope="local"]')) {
+          return;
+        }
         event.stopPropagation();
         onCloseRef.current();
         return;

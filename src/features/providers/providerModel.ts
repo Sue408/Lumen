@@ -24,6 +24,9 @@ export const authSchemeLabel: Record<AuthScheme, string> = {
   "x-goog-api-key": "x-goog-api-key",
 };
 
+/** 鉴权方式的展示顺序。 */
+export const authSchemeOrder: AuthScheme[] = ["bearer", "x-api-key", "x-goog-api-key"];
+
 export { protocolLabel };
 
 export function formatExtraHeaders(headers: Record<string, string>): string {

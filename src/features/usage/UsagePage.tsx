@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLiveRevision } from "../../app/useLiveRevision";
 import { InlineError, LoadingLines } from "../../components/ConfigControls";
+import { Select } from "../../components/Select";
 import { listVirtualKeys, type VirtualKey } from "../../services/config";
 import { queryUsageOverview } from "../../services/usage";
 import { AnimatedMetricValue } from "./AnimatedMetricValue";
@@ -146,15 +147,16 @@ export function UsagePage() {
         <div className="header-actions">
           <label className="scope-select">
             <span className="sr-only">按虚拟密钥筛选</span>
-            <select value={scope} onChange={(event) => setScope(event.target.value)}>
-              <option value={ALL_SCOPE}>全部</option>
-              <option value={UNASSIGNED_SCOPE}>未归属</option>
-              {keys.map((key) => (
-                <option key={key.id} value={key.id}>
-                  {key.name}
-                </option>
-              ))}
-            </select>
+            <Select
+              label="按虚拟密钥筛选"
+              value={scope}
+              options={[
+                { value: ALL_SCOPE, label: "全部" },
+                { value: UNASSIGNED_SCOPE, label: "未归属" },
+                ...keys.map((key) => ({ value: key.id, label: key.name })),
+              ]}
+              onChange={setScope}
+            />
           </label>
           <div className="header-utility-actions" aria-label="账本操作">
             <button
