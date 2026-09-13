@@ -621,12 +621,6 @@ export function ProvidersPage() {
                   </div>
 
                   <p className="sheet-summary">
-                    <span className="sheet-summary-protocols">
-                      {selectedProvider.endpoints
-                        .map((endpoint) => protocolLabel[endpoint.protocol])
-                        .join(" · ")}
-                    </span>
-                    <span className="sheet-summary-sep" aria-hidden="true">·</span>
                     <span
                       className="sheet-summary-host"
                       title={selectedProvider.endpoints.map((endpoint) => endpoint.baseUrl).join("\n")}
