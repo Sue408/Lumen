@@ -6,6 +6,7 @@ import type {
   UpstreamModel,
 } from "../../services/config";
 import type { ProviderHeaderRules } from "../../services/config/types.ts";
+import { protocolLabel } from "../../services/protocol.ts";
 import {
   linesToText,
   replacesToText,
@@ -20,7 +21,7 @@ export const authSchemeLabel: Record<AuthScheme, string> = {
   "x-goog-api-key": "x-goog-api-key",
 };
 
-export { protocolLabel } from "../../services/protocol.ts";
+export { protocolLabel };
 
 export function formatExtraHeaders(headers: Record<string, string>): string {
   return Object.entries(headers)
@@ -50,13 +51,19 @@ function sameHeaders(a: Record<string, string>, b: Record<string, string>): bool
   return aKeys.every((key, index) => key === bKeys[index] && a[key] === b[key]);
 }
 
+export type EndpointDraft = {
+  id: string | null;
+  protocol: Protocol;
+  baseUrl: string;
+  authScheme: AuthScheme;
+  enabled: boolean;
+};
+
 export type ProviderDraft = {
   id: string | null;
   name: string;
-  baseUrl: string;
   apiKey: string;
-  authScheme: AuthScheme;
-  protocol: Protocol;
+  endpoints: EndpointDraft[];
   extraHeadersText: string;
   forwardText: string;
   replaceText: string;
@@ -66,14 +73,45 @@ export type ProviderDraft = {
   enabled: boolean;
 };
 
+/** 端点的展示顺序，也是「新增端点」时挑选未占用协议的优先级。 */
+export const protocolOrder: Protocol[] = ["openai", "responses", "anthropic", "gemini"];
+
+export function emptyEndpointDraft(
+  protocol: Protocol = "openai",
+  baseUrl = "",
+  authScheme: AuthScheme = "bearer",
+): EndpointDraft {
+  return { id: null, protocol, baseUrl, authScheme, enabled: true };
+}
+
+/** 新增端点：选一个未占用的协议，地址 / 鉴权预填首个端点，便于多协议共用同一 base。 */
+export function nextEndpointDraft(endpoints: EndpointDraft[]): EndpointDraft {
+  const used = new Set(endpoints.map((endpoint) => endpoint.protocol));
+  const protocol = protocolOrder.find((value) => !used.has(value)) ?? "openai";
+  const first = endpoints[0];
+  return emptyEndpointDraft(protocol, first?.baseUrl ?? "", first?.authScheme ?? "bearer");
+}
+
+function sameEndpoints(a: EndpointDraft[], b: EndpointDraft[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((endpoint, index) => {
+    const other = b[index];
+    return (
+      endpoint.id === other.id &&
+      endpoint.protocol === other.protocol &&
+      endpoint.baseUrl === other.baseUrl &&
+      endpoint.authScheme === other.authScheme &&
+      endpoint.enabled === other.enabled
+    );
+  });
+}
+
 export function emptyProviderDraft(): ProviderDraft {
   return {
     id: null,
     name: "",
-    baseUrl: "",
     apiKey: "",
-    authScheme: "bearer",
-    protocol: "openai",
+    endpoints: [emptyEndpointDraft()],
     extraHeadersText: "",
     forwardText: "",
     replaceText: "",
@@ -98,10 +136,14 @@ export function providerToDraft(provider: Provider): ProviderDraft {
   return {
     id: provider.id,
     name: provider.name,
-    baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
-    authScheme: provider.authScheme,
-    protocol: provider.protocol,
+    endpoints: (provider.endpoints ?? []).map((endpoint) => ({
+      id: endpoint.id,
+      protocol: endpoint.protocol,
+      baseUrl: endpoint.baseUrl,
+      authScheme: endpoint.authScheme,
+      enabled: endpoint.enabled,
+    })),
     extraHeadersText: formatExtraHeaders(provider.extraHeaders),
     forwardText: linesToText(rules.forward ?? []),
     replaceText: replacesToText(rules.replace ?? []),
@@ -115,10 +157,8 @@ export function providerToDraft(provider: Provider): ProviderDraft {
 export function isProviderDraftDirty(draft: ProviderDraft, original: ProviderDraft): boolean {
   return (
     draft.name !== original.name ||
-    draft.baseUrl !== original.baseUrl ||
     draft.apiKey !== original.apiKey ||
-    draft.authScheme !== original.authScheme ||
-    draft.protocol !== original.protocol ||
+    !sameEndpoints(draft.endpoints, original.endpoints) ||
     draft.icon !== original.icon ||
     draft.iconTint !== original.iconTint ||
     draft.enabled !== original.enabled ||
@@ -129,9 +169,21 @@ export function isProviderDraftDirty(draft: ProviderDraft, original: ProviderDra
 
 export function validateProviderDraft(draft: ProviderDraft): string | null {
   if (draft.name.trim().length === 0) return "请填写提供商名称。";
-  const baseUrl = draft.baseUrl.trim();
-  if (baseUrl.length === 0) return "请填写上游地址。";
-  if (!/^https?:\/\//i.test(baseUrl)) return "上游地址需以 http:// 或 https:// 开头。";
+  if (draft.endpoints.length === 0) return "请至少添加一个协议端点。";
+  const protocols = new Set<string>();
+  for (const endpoint of draft.endpoints) {
+    if (protocols.has(endpoint.protocol)) {
+      return `协议端点重复：${protocolLabel[endpoint.protocol]}。`;
+    }
+    protocols.add(endpoint.protocol);
+    const baseUrl = endpoint.baseUrl.trim();
+    if (baseUrl.length === 0) {
+      return `「${protocolLabel[endpoint.protocol]}」端点缺少上游地址。`;
+    }
+    if (!/^https?:\/\//i.test(baseUrl)) {
+      return "上游地址需以 http:// 或 https:// 开头。";
+    }
+  }
   if (draft.id === null && draft.apiKey.trim().length === 0) return "请填写 API Key。";
   const headerMessage = validateProviderHeaderRules(draftHeaderRules(draft));
   if (headerMessage) return `请求头映射：${headerMessage}`;

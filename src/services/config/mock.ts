@@ -1,6 +1,7 @@
 import type {
   KeyUsage,
   Provider,
+  ProviderEndpoint,
   ProviderHeaderRules,
   ProviderInput,
   QuotaPeriod,
@@ -26,10 +27,17 @@ const providers: Provider[] = [
   {
     id: "p-deepseek",
     name: "DeepSeek",
-    baseUrl: "https://api.deepseek.com/anthropic/v1",
     apiKey: "sk-demo-deepseek-0000000000000000",
-    authScheme: "x-api-key",
-    protocol: "anthropic",
+    endpoints: [
+      {
+        id: "pe-ds-anthropic",
+        providerId: "p-deepseek",
+        protocol: "anthropic",
+        baseUrl: "https://api.deepseek.com/anthropic/v1",
+        authScheme: "x-api-key",
+        enabled: true,
+      },
+    ],
     extraHeaders: {},
     headerRules: emptyProviderHeaderRules(),
     icon: "deepseek",
@@ -40,10 +48,17 @@ const providers: Provider[] = [
   {
     id: "p-openai",
     name: "OpenAI",
-    baseUrl: "https://api.openai.com/v1",
     apiKey: "sk-proj-demo-key-000000000000",
-    authScheme: "bearer",
-    protocol: "openai",
+    endpoints: [
+      {
+        id: "pe-openai",
+        providerId: "p-openai",
+        protocol: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        authScheme: "bearer",
+        enabled: true,
+      },
+    ],
     extraHeaders: { "OpenAI-Beta": "assistants=v2" },
     headerRules: emptyProviderHeaderRules(),
     icon: "openai",
@@ -168,13 +183,19 @@ export function mockListProviders(): Provider[] {
 export function mockSaveProvider(input: ProviderInput): Provider {
   const id = input.id ?? uuid();
   const existing = providers.find((provider) => provider.id === id);
+  const endpoints: ProviderEndpoint[] = input.endpoints.map((endpoint) => ({
+    id: endpoint.id ?? uuid(),
+    providerId: id,
+    protocol: endpoint.protocol,
+    baseUrl: endpoint.baseUrl,
+    authScheme: endpoint.authScheme ?? "bearer",
+    enabled: endpoint.enabled ?? true,
+  }));
   const provider: Provider = {
     id,
     name: input.name,
-    baseUrl: input.baseUrl,
-    apiKey: input.apiKey ?? "",
-    authScheme: input.authScheme ?? "bearer",
-    protocol: input.protocol ?? "openai",
+    apiKey: input.apiKey ?? existing?.apiKey ?? "",
+    endpoints,
     extraHeaders: input.extraHeaders ?? {},
     headerRules: input.headerRules ?? existing?.headerRules ?? emptyProviderHeaderRules(),
     icon: input.icon ?? existing?.icon ?? null,
@@ -184,7 +205,7 @@ export function mockSaveProvider(input: ProviderInput): Provider {
   };
   if (existing) Object.assign(existing, provider);
   else providers.push(provider);
-  return { ...provider };
+  return structuredClone(provider);
 }
 
 export function mockDeleteProvider(id: string): void {

@@ -7,6 +7,49 @@
   overflow: hidden;
 }
 
+/* ---- protocol endpoints (provider form) ---- */
+
+.endpoint-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.endpoint-row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.9fr) minmax(0, 1.6fr) minmax(7rem, 0.9fr) auto;
+  gap: 0.5rem 0.75rem;
+  align-items: end;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--line-faint);
+  border-radius: 4px;
+}
+
+.endpoint-url {
+  min-width: 0;
+}
+
+.endpoint-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding-bottom: 2px;
+}
+
+.endpoint-actions .text-action.is-icon:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+@media (max-width: 720px) {
+  .endpoint-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .endpoint-url,
+  .endpoint-actions {
+    grid-column: 1 / -1;
+  }
+}
+
 /* ---- upstream model list ---- */
 
 .model-list {
@@ -215,13 +258,23 @@
   color: var(--danger);
 }
 
+.probe-results {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.4rem 0 0;
+}
+
 .probe-result {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  margin: 0.4rem 0 0;
+  margin: 0;
   font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
+}
+
+.probe-protocol {
+  color: var(--ink-soft);
 }
 
 .probe-result.is-ok {

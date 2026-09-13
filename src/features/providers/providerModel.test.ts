@@ -8,6 +8,7 @@ import {
   formatExtraHeaders,
   isCapabilityId,
   isProviderDraftDirty,
+  nextEndpointDraft,
   parseExtraHeaders,
   priceToNumber,
   providerToDraft,
@@ -19,10 +20,17 @@ import type { Provider } from "../../services/config/index.ts";
 const provider: Provider = {
   id: "p1",
   name: "DeepSeek",
-  baseUrl: "https://api.deepseek.com/v1",
   apiKey: "sk-demo-deepseek-0000000000000000",
-  authScheme: "x-api-key",
-  protocol: "anthropic",
+  endpoints: [
+    {
+      id: "e1",
+      providerId: "p1",
+      protocol: "anthropic",
+      baseUrl: "https://api.deepseek.com/anthropic/v1",
+      authScheme: "x-api-key",
+      enabled: true,
+    },
+  ],
   extraHeaders: { "X-Trace": "1" },
   icon: null,
   iconTint: "ink",
@@ -61,17 +69,51 @@ test("isProviderDraftDirty normalises header text before comparing", () => {
     isProviderDraftDirty({ ...base, extraHeadersText: "X-Trace: 1\n" }, base),
     false,
   );
+  assert.equal(
+    isProviderDraftDirty(
+      { ...base, endpoints: [{ ...base.endpoints[0], baseUrl: "https://other/v1" }] },
+      base,
+    ),
+    true,
+  );
 });
 
-test("validateProviderDraft protects name, address, and new-key requirements", () => {
+test("nextEndpointDraft picks an unused protocol and prefills the first endpoint", () => {
+  const first = providerToDraft(provider).endpoints;
+  const added = nextEndpointDraft(first);
+  assert.equal(added.protocol, "openai");
+  assert.equal(added.baseUrl, "https://api.deepseek.com/anthropic/v1");
+  assert.equal(added.authScheme, "x-api-key");
+  // 已占用 anthropic + openai → 下一个是 responses。
+  assert.equal(nextEndpointDraft([...first, added]).protocol, "responses");
+});
+
+test("validateProviderDraft protects name, endpoints, address, and new-key requirements", () => {
   const draft = providerToDraft(provider);
   assert.equal(validateProviderDraft(draft), null);
 
   assert.equal(validateProviderDraft({ ...draft, name: "  " }), "请填写提供商名称。");
-  assert.equal(validateProviderDraft({ ...draft, baseUrl: "" }), "请填写上游地址。");
+  assert.equal(validateProviderDraft({ ...draft, endpoints: [] }), "请至少添加一个协议端点。");
   assert.equal(
-    validateProviderDraft({ ...draft, baseUrl: "api.openai.com/v1" }),
+    validateProviderDraft({
+      ...draft,
+      endpoints: [{ ...draft.endpoints[0], baseUrl: "" }],
+    }),
+    "「Anthropic Messages」端点缺少上游地址。",
+  );
+  assert.equal(
+    validateProviderDraft({
+      ...draft,
+      endpoints: [{ ...draft.endpoints[0], baseUrl: "api.openai.com/v1" }],
+    }),
     "上游地址需以 http:// 或 https:// 开头。",
+  );
+  assert.equal(
+    validateProviderDraft({
+      ...draft,
+      endpoints: [draft.endpoints[0], { ...draft.endpoints[0], id: "e2" }],
+    }),
+    "协议端点重复：Anthropic Messages。",
   );
   assert.equal(
     validateProviderDraft({ ...draft, id: null, apiKey: "" }),

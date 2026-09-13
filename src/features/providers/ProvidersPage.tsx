@@ -36,7 +36,6 @@ import {
   type UpstreamModel,
 } from "../../services/config";
 import {
-  authSchemeLabel,
   capabilityLabel,
   contextWindowToNumber,
   draftHeaderRules,
@@ -88,7 +87,7 @@ export function ProvidersPage() {
   const [modelError, setModelError] = useState<string | null>(null);
   const [modelDraft, setModelDraft] = useState<ModelDraft | null>(null);
   const [confirmingModelId, setConfirmingModelId] = useState<string | null>(null);
-  const [probe, setProbe] = useState<ProbeResult | null>(null);
+  const [probe, setProbe] = useState<ProbeResult[] | null>(null);
   const [probing, setProbing] = useState(false);
   const { busy, run } = useAsyncAction();
   const { revision } = useLiveRevision();
@@ -138,7 +137,11 @@ export function ProvidersPage() {
       : null;
   const selectedModels = selectedProvider ? modelsForProvider(models, selectedProvider.id) : [];
   const autoBrand = draft
-    ? detectBrand([draft.name, draft.baseUrl, ...selectedModels.map((model) => model.modelId)])
+    ? detectBrand([
+        draft.name,
+        ...draft.endpoints.map((endpoint) => endpoint.baseUrl),
+        ...selectedModels.map((model) => model.modelId),
+      ])
     : null;
 
   useEffect(() => {
@@ -158,10 +161,12 @@ export function ProvidersPage() {
     setProbe(null);
     setProbing(true);
     try {
-      const result = await testProvider(selectedProvider.id);
-      setProbe(result);
+      const results = await testProvider(selectedProvider.id);
+      setProbe(results);
     } catch (error) {
-      setProbe({ ok: false, httpStatus: null, latencyMs: 0, model: "", error: String(error) });
+      setProbe([
+        { protocol: "", ok: false, httpStatus: null, latencyMs: 0, model: "", error: String(error) },
+      ]);
     } finally {
       setProbing(false);
     }
@@ -215,10 +220,14 @@ export function ProvidersPage() {
         const result = await saveProvider({
           id: draft.id,
           name: draft.name.trim(),
-          baseUrl: draft.baseUrl.trim(),
           apiKey: draft.apiKey,
-          authScheme: draft.authScheme,
-          protocol: draft.protocol,
+          endpoints: draft.endpoints.map((endpoint) => ({
+            id: endpoint.id,
+            protocol: endpoint.protocol,
+            baseUrl: endpoint.baseUrl.trim(),
+            authScheme: endpoint.authScheme,
+            enabled: endpoint.enabled,
+          })),
           extraHeaders: parseExtraHeaders(draft.extraHeadersText),
           headerRules: draftHeaderRules(draft),
           icon: draft.icon,
@@ -259,10 +268,14 @@ export function ProvidersPage() {
         await saveProvider({
           id: selectedProvider.id,
           name: selectedProvider.name,
-          baseUrl: selectedProvider.baseUrl,
           apiKey: selectedProvider.apiKey,
-          authScheme: selectedProvider.authScheme,
-          protocol: selectedProvider.protocol,
+          endpoints: selectedProvider.endpoints.map((endpoint) => ({
+            id: endpoint.id,
+            protocol: endpoint.protocol,
+            baseUrl: endpoint.baseUrl,
+            authScheme: endpoint.authScheme,
+            enabled: endpoint.enabled,
+          })),
           extraHeaders: selectedProvider.extraHeaders,
           headerRules: selectedProvider.headerRules,
           icon,
@@ -423,7 +436,7 @@ export function ProvidersPage() {
                     const providerModels = modelsForProvider(models, provider.id);
                     const brand = resolveBrand(provider.icon, [
                       provider.name,
-                      provider.baseUrl,
+                      ...provider.endpoints.map((endpoint) => endpoint.baseUrl),
                       ...providerModels.map((model) => model.modelId),
                     ]);
                     const connection = connectivityById.get(provider.id) ?? null;
@@ -508,12 +521,17 @@ export function ProvidersPage() {
 
                   {selectedId !== "new" ? (
                     <p className="sheet-summary">
-                      <span>{protocolLabel[draft.protocol]} 协议</span>
+                      <span className="sheet-summary-protocols">
+                        {draft.endpoints
+                          .map((endpoint) => protocolLabel[endpoint.protocol])
+                          .join(" · ")}
+                      </span>
                       <span className="sheet-summary-sep" aria-hidden="true">·</span>
-                      <span>{authSchemeLabel[draft.authScheme]}</span>
-                      <span className="sheet-summary-sep" aria-hidden="true">·</span>
-                      <span className="sheet-summary-host" title={draft.baseUrl}>
-                        {hostLabel(draft.baseUrl)}
+                      <span
+                        className="sheet-summary-host"
+                        title={draft.endpoints.map((endpoint) => endpoint.baseUrl).join("\n")}
+                      >
+                        {hostLabel(draft.endpoints[0]?.baseUrl ?? "")}
                       </span>
                       <span className="sheet-summary-sep" aria-hidden="true">·</span>
                       <span>{selectedModels.length} 个模型</span>
@@ -521,19 +539,29 @@ export function ProvidersPage() {
                   ) : null}
 
                   {probe ? (
-                    <p
-                      className={`probe-result${probe.ok ? " is-ok" : " is-fail"}`}
-                      role="status"
-                    >
-                      {probe.ok ? (
-                        <CircleCheck aria-hidden="true" />
-                      ) : (
-                        <CircleAlert aria-hidden="true" />
-                      )}
-                      {probe.ok
-                        ? `连通正常 · 延迟 ${formatLatency(probe.latencyMs)}`
-                        : `探测失败：${probe.error ?? "未知错误"}`}
-                    </p>
+                    <div className="probe-results" role="status">
+                      {probe.map((result, index) => (
+                        <p
+                          className={`probe-result${result.ok ? " is-ok" : " is-fail"}`}
+                          key={result.protocol || index}
+                        >
+                          {result.ok ? (
+                            <CircleCheck aria-hidden="true" />
+                          ) : (
+                            <CircleAlert aria-hidden="true" />
+                          )}
+                          <span className="probe-protocol">
+                            {result.protocol
+                              ? protocolLabel[result.protocol as keyof typeof protocolLabel] ??
+                                result.protocol
+                              : "探测"}
+                          </span>
+                          {result.ok
+                            ? `连通正常 · 延迟 ${formatLatency(result.latencyMs)}`
+                            : `失败：${result.error ?? "未知错误"}`}
+                        </p>
+                      ))}
+                    </div>
                   ) : null}
 
                   {pending ? (

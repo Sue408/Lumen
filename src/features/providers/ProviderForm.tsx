@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { ChevronDown, Repeat, SlidersHorizontal } from "lucide-react";
-import { InlineError, SaveBar, SectionTitle } from "../../components/ConfigControls";
+import { ChevronDown, Network, Plus, Repeat, SlidersHorizontal, Trash2 } from "lucide-react";
+import { InlineError, SaveBar, SectionTitle, TogglePill } from "../../components/ConfigControls";
 import {
   authSchemeLabel,
   draftHeaderRules,
   isProviderDraftDirty,
+  nextEndpointDraft,
   protocolLabel,
+  protocolOrder,
+  type EndpointDraft,
   type ProviderDraft,
 } from "./providerModel";
 import { summarizeProviderHeaderRules } from "./providerHeaderModel.ts";
@@ -33,6 +36,17 @@ export function ProviderForm({
   const set = (patch: Partial<ProviderDraft>) => onChange({ ...draft, ...patch });
   const dirty = isProviderDraftDirty(draft, savedDraft);
 
+  const setEndpoint = (index: number, patch: Partial<EndpointDraft>) =>
+    set({
+      endpoints: draft.endpoints.map((endpoint, current) =>
+        current === index ? { ...endpoint, ...patch } : endpoint,
+      ),
+    });
+  const addEndpoint = () =>
+    set({ endpoints: [...draft.endpoints, nextEndpointDraft(draft.endpoints)] });
+  const removeEndpoint = (index: number) =>
+    set({ endpoints: draft.endpoints.filter((_, current) => current !== index) });
+
   return (
     <form
       className="entry-form"
@@ -47,10 +61,6 @@ export function ProviderForm({
           <label className="field">
             <span>名称</span>
             <input value={draft.name} onChange={(event) => set({ name: event.target.value })} placeholder="例如 DeepSeek" />
-          </label>
-          <label className="field">
-            <span>上游地址</span>
-            <input value={draft.baseUrl} onChange={(event) => set({ baseUrl: event.target.value })} placeholder="https://api.example.com/v1" spellCheck={false} />
           </label>
           <label className="field field-wide">
             <span>API Key</span>
@@ -68,28 +78,87 @@ export function ProviderForm({
               </button>
             </span>
           </label>
-          <label className="field">
-            <span>鉴权方式</span>
-            <select value={draft.authScheme} onChange={(event) => set({ authScheme: event.target.value as ProviderDraft["authScheme"] })}>
-              <option value="bearer">{authSchemeLabel.bearer}</option>
-              <option value="x-api-key">{authSchemeLabel["x-api-key"]}</option>
-              <option value="x-goog-api-key">{authSchemeLabel["x-goog-api-key"]}</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>协议</span>
-            {draft.id === null ? (
-              <select value={draft.protocol} onChange={(event) => set({ protocol: event.target.value as ProviderDraft["protocol"] })}>
-                <option value="openai">{protocolLabel.openai}</option>
-                <option value="anthropic">{protocolLabel.anthropic}</option>
-                <option value="responses">{protocolLabel.responses}</option>
-                <option value="gemini">{protocolLabel.gemini}</option>
-              </select>
-            ) : (
-              <span className="field-static">{protocolLabel[draft.protocol]}</span>
-            )}
-          </label>
         </div>
+      </section>
+
+      <section className="sheet-section">
+        <SectionTitle
+          icon={<Network aria-hidden="true" />}
+          action={
+            <button className="text-action" type="button" onClick={addEndpoint} disabled={busy}>
+              <Plus aria-hidden="true" />
+              添加协议端点
+            </button>
+          }
+        >
+          协议端点
+        </SectionTitle>
+        <div className="endpoint-list">
+          {draft.endpoints.map((endpoint, index) => (
+            <div className="endpoint-row" key={endpoint.id ?? `new-${index}`}>
+              <label className="field">
+                <span>协议</span>
+                <select
+                  value={endpoint.protocol}
+                  onChange={(event) =>
+                    setEndpoint(index, { protocol: event.target.value as EndpointDraft["protocol"] })
+                  }
+                >
+                  {protocolOrder.map((protocol) => (
+                    <option key={protocol} value={protocol}>
+                      {protocolLabel[protocol]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field endpoint-url">
+                <span>上游地址</span>
+                <input
+                  value={endpoint.baseUrl}
+                  onChange={(event) => setEndpoint(index, { baseUrl: event.target.value })}
+                  placeholder="https://api.example.com/v1"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="field">
+                <span>鉴权方式</span>
+                <select
+                  value={endpoint.authScheme}
+                  onChange={(event) =>
+                    setEndpoint(index, {
+                      authScheme: event.target.value as EndpointDraft["authScheme"],
+                    })
+                  }
+                >
+                  <option value="bearer">{authSchemeLabel.bearer}</option>
+                  <option value="x-api-key">{authSchemeLabel["x-api-key"]}</option>
+                  <option value="x-goog-api-key">{authSchemeLabel["x-goog-api-key"]}</option>
+                </select>
+              </label>
+              <div className="endpoint-actions">
+                <TogglePill
+                  small
+                  checked={endpoint.enabled}
+                  label={endpoint.enabled ? "停用该协议端点" : "启用该协议端点"}
+                  disabled={busy}
+                  onChange={(next) => setEndpoint(index, { enabled: next })}
+                />
+                <button
+                  className="text-action is-icon"
+                  type="button"
+                  aria-label="删除该协议端点"
+                  disabled={busy || draft.endpoints.length <= 1}
+                  onClick={() => removeEndpoint(index)}
+                >
+                  <Trash2 aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="field-hint">
+          一个提供商可挂多个协议端点，模型在多协议间共享；同一模型可被不同协议的路由复用。
+        </p>
       </section>
 
       <section className="sheet-section">

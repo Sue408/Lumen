@@ -3,13 +3,30 @@ import type { Protocol } from "../protocol";
 export type AuthScheme = "bearer" | "x-api-key" | "x-goog-api-key";
 export type IconTint = "ink" | "brand";
 
+/** 一个提供商对外提供的某协议端点：协议 + 该协议的上游地址与鉴权方式。 */
+export type ProviderEndpoint = {
+  id: string;
+  providerId: string;
+  protocol: Protocol;
+  baseUrl: string;
+  authScheme: AuthScheme;
+  enabled: boolean;
+};
+
+export type ProviderEndpointInput = {
+  id?: string | null;
+  protocol: Protocol;
+  baseUrl: string;
+  authScheme?: AuthScheme;
+  enabled?: boolean;
+};
+
 export type Provider = {
   id: string;
   name: string;
-  baseUrl: string;
   apiKey: string;
-  authScheme: AuthScheme;
-  protocol: Protocol;
+  /** 该提供商支持的协议端点；一个提供商可挂多种协议，模型多协议共享。 */
+  endpoints: ProviderEndpoint[];
   extraHeaders: Record<string, string>;
   headerRules: ProviderHeaderRules;
   icon: string | null;
@@ -21,10 +38,8 @@ export type Provider = {
 export type ProviderInput = {
   id?: string | null;
   name: string;
-  baseUrl: string;
   apiKey?: string;
-  authScheme?: AuthScheme;
-  protocol?: Protocol;
+  endpoints: ProviderEndpointInput[];
   extraHeaders?: Record<string, string>;
   headerRules?: ProviderHeaderRules;
   icon?: string | null;

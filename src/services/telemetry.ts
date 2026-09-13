@@ -49,6 +49,8 @@ export type TelemetrySnapshot = {
 };
 
 export type ProbeResult = {
+  /** 本次探测所用的协议端点。 */
+  protocol: string;
   ok: boolean;
   httpStatus: number | null;
   latencyMs: number;
@@ -156,9 +158,11 @@ export async function queryTelemetry(
   });
 }
 
-export async function testProvider(providerId: string): Promise<ProbeResult> {
+export async function testProvider(providerId: string): Promise<ProbeResult[]> {
   if (!isTauriRuntime(window)) {
-    return { ok: true, httpStatus: 200, latencyMs: 180, model: "mock-model", error: null };
+    return [
+      { protocol: "openai", ok: true, httpStatus: 200, latencyMs: 180, model: "mock-model", error: null },
+    ];
   }
-  return invoke<ProbeResult>("test_provider_cmd", { providerId });
+  return invoke<ProbeResult[]>("test_provider_cmd", { providerId });
 }
