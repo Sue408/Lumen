@@ -187,7 +187,8 @@ pub async fn gemini_generate(
     .await
 }
 
-/// 端点协议与路由协议绑定：不匹配则在网关处拒绝，绝不把错误形状的 body 盲发上游。
+/// 按**入站协议**解析候选：端点路径决定协议，`resolve` 只保留其 provider 提供该
+/// 协议端点的目标，绝不把错误形状的 body 盲发上游。
 /// `path_alias` / `path_stream` 供 Gemini 等「模型或动作在路径上」的协议覆写。
 ///
 /// 解析出**有序候选**后按序尝试（降级链）：仅连接失败 / 超时 / 5xx / 429 触发切换；
@@ -267,11 +268,11 @@ async fn forward(
         return error.into_response();
     }
 
-    let candidates = match resolve_all(&state, &alias).await {
+    let candidates = match resolve_all(&state, &alias, required_protocol).await {
         Ok(candidates) => candidates,
         Err(error) => return error.into_response(),
     };
-    let Some(first) = candidates.first() else {
+    if candidates.is_empty() {
         let error = AppError::ModelNotFound(alias.clone());
         reject(
             &state,
@@ -284,27 +285,8 @@ async fn forward(
         )
         .await;
         return error.into_response();
-    };
-
-    // 协议校验是路由级不变式：同路由候选协议一致，取首个即可。
-    if first.route_protocol != required_protocol {
-        let error = AppError::ProtocolMismatch {
-            alias: alias.clone(),
-            expected: required_protocol.to_string(),
-            actual: first.route_protocol.clone(),
-        };
-        reject(
-            &state,
-            endpoint,
-            &alias,
-            is_stream,
-            None,
-            Some(key_id.clone()),
-            &error,
-        )
-        .await;
-        return error.into_response();
     }
+
     // 过滤冷却中的目标；若因此无候选可用，直接回 502（并记一条 error）。
     let candidates: Vec<ResolvedRoute> = candidates
         .into_iter()
@@ -1203,7 +1185,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chat_endpoint_rejects_anthropic_route() {
+    async fn chat_endpoint_misses_anthropic_only_route() {
         let db = open_in_memory().unwrap();
         seed_upstream(&db, "http://127.0.0.1:1", "anthropic", "lumen/claude");
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
@@ -1211,6 +1193,7 @@ mod tests {
         let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         let router = crate::gateway::build_router(state);
 
+        // 只有 anthropic 端点的别名，经 openai 端点调用时无候选 → 404。
         let response = router
             .oneshot(post(
                 "/v1/chat/completions",
@@ -1218,10 +1201,10 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let value: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(value["error"]["code"], "protocol_mismatch");
+        assert_eq!(value["error"]["code"], "model_not_found");
 
         let logs = {
             let conn = db.lock().unwrap();
@@ -1229,11 +1212,11 @@ mod tests {
         };
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].status, "error");
-        assert_eq!(logs[0].http_status, Some(400));
+        assert_eq!(logs[0].http_status, Some(404));
     }
 
     #[tokio::test]
-    async fn messages_endpoint_rejects_openai_route() {
+    async fn messages_endpoint_misses_openai_only_route() {
         let db = open_in_memory().unwrap();
         seed_upstream(&db, "http://127.0.0.1:1", "openai", "lumen/gpt");
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
@@ -1248,14 +1231,14 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
         let logs = {
             let conn = db.lock().unwrap();
             list_logs(&conn, &LogFilter::default()).unwrap()
         };
         assert_eq!(logs.len(), 1);
-        assert_eq!(logs[0].http_status, Some(400));
+        assert_eq!(logs[0].http_status, Some(404));
     }
 
     #[tokio::test]
@@ -1654,7 +1637,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chat_endpoint_rejects_gemini_route() {
+    async fn chat_endpoint_misses_gemini_only_route() {
         let db = open_in_memory().unwrap();
         seed_upstream(&db, "http://127.0.0.1:1", "gemini", "lumen/gemini");
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
@@ -1669,10 +1652,10 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let value: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(value["error"]["code"], "protocol_mismatch");
+        assert_eq!(value["error"]["code"], "model_not_found");
     }
 
     #[tokio::test]
@@ -1696,8 +1679,8 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
-        // `/responses` 已注册：命中协议校验（openai 路由不能走 responses 端点），
-        // 而不是落进兜底 404。
+        // `/responses` 已注册：openai 路由没有 responses 端点，解析无候选 → 404
+        // 且回 `model_not_found`；兜底 404 则会回「未知端点」。
         let response = router
             .clone()
             .oneshot(post(
@@ -1706,7 +1689,10 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["error"]["code"], "model_not_found");
 
         // 真正未知的路径才落兜底 404，并回可读的 JSON 提示。
         let response = router

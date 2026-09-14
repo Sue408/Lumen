@@ -20,12 +20,6 @@ pub enum AppError {
     NotRunning,
     #[error("未找到模型：{0}")]
     ModelNotFound(String),
-    #[error("协议不匹配：别名 {alias} 的上游为 {actual} 协议，不能通过需要 {expected} 协议的端点调用")]
-    ProtocolMismatch {
-        alias: String,
-        expected: String,
-        actual: String,
-    },
     #[error("缺少或无效的虚拟密钥")]
     Unauthorized,
     #[error("虚拟密钥「{name}」已超出额度：已用 ${spent:.2} / 上限 ${limit:.2}（{period}）")]
@@ -57,7 +51,6 @@ impl AppError {
     pub fn status_code(&self) -> StatusCode {
         match self {
             AppError::ModelNotFound(_) => StatusCode::NOT_FOUND,
-            AppError::ProtocolMismatch { .. } => StatusCode::BAD_REQUEST,
             AppError::Unauthorized => StatusCode::UNAUTHORIZED,
             AppError::QuotaExceeded { .. } => StatusCode::TOO_MANY_REQUESTS,
             AppError::NotRunning | AppError::AlreadyRunning => StatusCode::CONFLICT,
@@ -101,7 +94,6 @@ impl IntoResponse for AppError {
 fn error_code(error: &AppError) -> &'static str {
     match error {
         AppError::ModelNotFound(_) => "model_not_found",
-        AppError::ProtocolMismatch { .. } => "protocol_mismatch",
         AppError::Unauthorized => "unauthorized",
         AppError::QuotaExceeded { .. } => "quota_exceeded",
         AppError::AlreadyRunning => "already_running",

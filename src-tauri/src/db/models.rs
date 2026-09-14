@@ -229,6 +229,7 @@ pub struct Route {
     pub id: String,
     pub alias: String,
     pub display_name: String,
+    /// 创建时的协议，仅作兼容与展示；入站解析以请求端点协议为准，不再约束路由。
     pub protocol: String,
     /// 显式选择的品牌图标；`None` 时回落到首选目标上游模型的图标。
     pub icon: Option<String>,

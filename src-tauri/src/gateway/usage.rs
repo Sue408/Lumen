@@ -589,7 +589,6 @@ mod tests {
             base_url: "https://example.com/v1".into(),
             api_key: "secret".into(),
             auth_scheme: "bearer".into(),
-            route_protocol: PROTOCOL_OPENAI.into(),
             upstream_protocol: PROTOCOL_OPENAI.into(),
             extra_headers: std::collections::BTreeMap::new(),
             header_rules: Default::default(),

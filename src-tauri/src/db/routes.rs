@@ -41,12 +41,11 @@ fn list_targets(conn: &Connection, route_id: &str) -> Result<Vec<RouteTarget>, A
     Ok(targets)
 }
 
-/// 上游模型是否存在，以及其提供商是否提供指定协议的端点。
-/// 返回 `(模型是否存在, 是否有匹配端点)`。
+/// 上游模型是否存在，以及其提供商是否提供任一端点。
+/// 返回 `(模型是否存在, 是否有任一端点)`。
 fn target_endpoint_status(
     conn: &Connection,
     upstream_model_id: &str,
-    protocol: &str,
 ) -> Result<(bool, bool), AppError> {
     let (exists, has_endpoint): (i64, i64) = conn.query_row(
         "SELECT
@@ -54,12 +53,10 @@ fn target_endpoint_status(
             EXISTS(
                 SELECT 1
                   FROM upstream_models m
-                  JOIN provider_endpoints e
-                    ON e.provider_id = m.provider_id
-                   AND e.protocol = ?2
+                  JOIN provider_endpoints e ON e.provider_id = m.provider_id
                  WHERE m.id = ?1
             )",
-        params![upstream_model_id, protocol],
+        [upstream_model_id],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     Ok((exists != 0, has_endpoint != 0))
@@ -83,20 +80,10 @@ pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTarg
             )));
         }
     }
-    // 协议创建后锁定：改协议等于换了对外契约，应删除重建而非原地修改。
-    if let Some(existing_id) = input.id.as_deref().filter(|value| !value.is_empty()) {
-        if let Some(existing) = get_route(conn, existing_id)? {
-            if existing.route.protocol != input.protocol {
-                return Err(AppError::message(
-                    "协议创建后不可修改：请删除该路由后重建".to_string(),
-                ));
-            }
-        }
-    }
-    // 同协议透传：每个目标的上游提供商必须提供路由协议的启用端点。
+    // 协议仅作兼容展示，不再约束目标；改协议不会破坏对外契约。
+    // 每个目标的上游提供商至少要有一个协议端点，否则入站解析时永远无候选。
     for target in &input.targets {
-        let (exists, has_endpoint) =
-            target_endpoint_status(conn, &target.upstream_model_id, &input.protocol)?;
+        let (exists, has_endpoint) = target_endpoint_status(conn, &target.upstream_model_id)?;
         if !exists {
             return Err(AppError::message(format!(
                 "上游模型不存在：{}",
@@ -105,8 +92,8 @@ pub fn save_route(conn: &Connection, input: &RouteInput) -> Result<RouteWithTarg
         }
         if !has_endpoint {
             return Err(AppError::message(format!(
-                "目标提供商未提供 {} 协议端点：{}",
-                input.protocol, target.upstream_model_id
+                "目标提供商没有任何协议端点：{}",
+                target.upstream_model_id
             )));
         }
     }
@@ -261,12 +248,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_target_without_matching_endpoint() {
+    fn accepts_targets_across_protocols() {
         let db = open_in_memory().unwrap();
         let conn = db.lock().unwrap();
         let openai = seed_model(&conn, "openai", "gpt");
         let anthropic = seed_model(&conn, "anthropic", "claude");
-        // openai 路由挂一个只有 anthropic 端点的目标 → 拒绝。
+        // 隐式多协议后，同一路由可挂不同协议端点的上游目标。
         let result = save_route(
             &conn,
             &RouteInput {
@@ -289,6 +276,33 @@ mod tests {
                         enabled: true,
                     },
                 ],
+            },
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn rejects_target_without_any_endpoint() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let model = seed_model(&conn, "openai", "gpt");
+        // 端点被全部删除（等价于该提供商不再可用）→ 拒绝挂上。
+        conn.execute("DELETE FROM provider_endpoints", []).unwrap();
+        let result = save_route(
+            &conn,
+            &RouteInput {
+                id: None,
+                alias: "no-endpoint".into(),
+                display_name: "N".into(),
+                protocol: "openai".into(),
+                icon: None,
+                icon_tint: None,
+                enabled: true,
+                targets: vec![RouteTargetInput {
+                    upstream_model_id: model,
+                    priority: 0,
+                    enabled: true,
+                }],
             },
         );
         assert!(result.is_err());
@@ -443,46 +457,6 @@ mod tests {
         .unwrap();
         assert!(cleared.route.icon.is_none());
         assert!(cleared.route.icon_tint.is_none());
-    }
-
-    #[test]
-    fn rejects_protocol_change_on_existing_route() {
-        let db = open_in_memory().unwrap();
-        let conn = db.lock().unwrap();
-        let openai = seed_model(&conn, "openai", "gpt");
-        let saved = save_route(
-            &conn,
-            &RouteInput {
-                id: None,
-                alias: "r".into(),
-                display_name: "R".into(),
-                protocol: "openai".into(),
-                icon: None,
-                icon_tint: None,
-                enabled: true,
-                targets: vec![RouteTargetInput {
-                    upstream_model_id: openai,
-                    priority: 0,
-                    enabled: true,
-                }],
-            },
-        )
-        .unwrap();
-
-        let result = save_route(
-            &conn,
-            &RouteInput {
-                id: Some(saved.route.id.clone()),
-                alias: "r".into(),
-                display_name: "R".into(),
-                protocol: "anthropic".into(),
-                icon: None,
-                icon_tint: None,
-                enabled: true,
-                targets: Vec::new(),
-            },
-        );
-        assert!(result.is_err());
     }
 
     #[test]
