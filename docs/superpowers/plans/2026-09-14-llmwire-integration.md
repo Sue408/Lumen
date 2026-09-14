@@ -96,9 +96,9 @@
 - Modify: `src-tauri/src/gateway/convert.rs`
 - Modify: `src-tauri/src/gateway/handlers.rs`
 
-- [ ] 转换前置校验并**显式拒绝**（清晰错误，不静默）：Responses `store=true` / 带 `previous_response_id`；Chat 流式 `n > 1`；图片 `file_id`。仅在 `needs_conversion` 时生效。
-- [ ] `Report` → `tracing` 日志：遍历 `unmapped` / `warnings`，映射 `Severity`；出现 `Fatal` 视为该次失败。
-- [ ] 测试：上述被拒场景返回预期错误；`Report` 非空时日志可见（可用断言辅助函数）。
+- [x] 转换前置校验并**显式拒绝**（清晰错误，不静默）：Responses `store=true` / 带 `previous_response_id`；Chat 流式 `n > 1`；图片 `file_id`。仅在 `needs_conversion` 时生效。
+- [x] `Report` → `tracing` 日志：遍历 `unmapped` / `warnings`，映射 `Severity`；出现 `Fatal` 视为该次失败。
+- [x] 测试：上述被拒场景返回预期错误；`Report` 非空时日志可见（可用断言辅助函数）。
 - Verify: `cargo test`、`cargo clippy -- -D warnings`。
 
 ### Task 6: 记账口径与同协议回归

@@ -392,6 +392,9 @@ pub fn stream_response(
                     }
                     Err(error) => failure = Some(error.to_string()),
                 }
+                if failure.is_none() && conversion.log_report("流式响应转换") {
+                    failure = Some("协议转换出现不可恢复的降级".to_string());
+                }
             }
         }
         drop(tx);

@@ -2,10 +2,9 @@
 //!
 //! 这里是 `llmwire` 在 Lumen 内的**唯一适配点**——协议标识映射、能力策略装配、
 //! 请求 / 响应 / 流式转换与报告收集都在此收口。同协议路径不经过本模块，继续字节透传。
-// Task 2/3 把本模块接入 handlers / forward 之前，入口尚无调用点。
-#![allow(dead_code)]
 
-use llmwire::{converter, resolve, Converter, ProtocolId, Report, Termination};
+use llmwire::{converter, resolve, Converter, ProtocolId, Termination};
+use serde_json::Value;
 
 use crate::db::models::{PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI, PROTOCOL_RESPONSES};
 use crate::error::AppError;
@@ -28,6 +27,44 @@ pub fn is_convertible(protocol: &str) -> bool {
 /// 本次请求是否需要转换：两端都可转换且协议不同。同协议与含 Gemini 的组合都走透传。
 pub fn needs_conversion(inbound: &str, upstream: &str) -> bool {
     inbound != upstream && is_convertible(inbound) && is_convertible(upstream)
+}
+
+/// 请求用到了转换核无法安全表达的语义，且**需要跨协议转换**时给出显式原因。
+///
+/// 这些特性依赖上游服务端状态或 host 侧预解析，跨协议无法保真；调用方应显式拒绝
+/// （或改用同协议端点），绝不能静默降级成错误语义。
+pub fn unsupported_request(body: &Value, is_stream: bool, inbound: &str) -> Option<String> {
+    if inbound == PROTOCOL_RESPONSES {
+        if body.get("store").and_then(Value::as_bool) == Some(true) {
+            return Some("responses 的 store=true 依赖上游服务端状态，无法跨协议转换".to_string());
+        }
+        if body.get("previous_response_id").is_some() {
+            return Some(
+                "responses 的 previous_response_id 依赖上游服务端状态，无法跨协议转换".to_string(),
+            );
+        }
+    }
+    if inbound == PROTOCOL_OPENAI
+        && is_stream
+        && body.get("n").and_then(Value::as_u64).is_some_and(|n| n > 1)
+    {
+        return Some("chat 流式 n>1 无法跨协议转换".to_string());
+    }
+    if contains_file_id(body) {
+        return Some("图片 file_id 需要 host 预解析，无法跨协议转换".to_string());
+    }
+    None
+}
+
+/// 递归查找 `file_id` 字段（图片引用，需 host 预解析成 URL / Base64）。
+fn contains_file_id(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => map.iter().any(|(key, value)| {
+            (key == "file_id" && value.is_string()) || contains_file_id(value)
+        }),
+        Value::Array(items) => items.iter().any(contains_file_id),
+        _ => false,
+    }
 }
 
 /// 一次请求的转换器，封装 `llmwire::Converter` 与两端协议，隔离 SDK 公开接口。
@@ -98,9 +135,35 @@ impl Conversion {
         Ok((out, termination))
     }
 
-    /// 取走本次转换累积的质量报告。
-    pub fn take_report(&mut self) -> Report {
-        self.converter.take_report()
+    /// 取走本次转换累积的质量报告并落到 tracing，返回是否存在 `Fatal` 条目。
+    ///
+    /// 报告不是记账真源，但降级 / 无法映射必须留痕，不能静默吞掉。
+    pub fn log_report(&mut self, context: &str) -> bool {
+        let report = self.converter.take_report();
+        if report.is_empty() {
+            return false;
+        }
+        for entry in &report.unmapped {
+            tracing::warn!(
+                inbound = self.inbound(),
+                upstream = self.upstream(),
+                field = %entry.field,
+                reason = ?entry.reason,
+                severity = ?entry.severity,
+                "{context}：字段无法映射"
+            );
+        }
+        for warning in &report.warnings {
+            tracing::warn!(
+                inbound = self.inbound(),
+                upstream = self.upstream(),
+                field = %warning.field,
+                severity = ?warning.severity,
+                "{context}：{}",
+                warning.message
+            );
+        }
+        report.has_fatal()
     }
 }
 
@@ -185,6 +248,23 @@ mod tests {
                 .to_string(),
             other => panic!("unhandled protocol {other}"),
         }
+    }
+
+    #[test]
+    fn flags_unsupported_requests_only_when_relevant() {
+        let responses = |body: Value| unsupported_request(&body, false, PROTOCOL_RESPONSES);
+        assert!(responses(json!({ "store": true })).is_some());
+        assert!(responses(json!({ "previous_response_id": "resp_1" })).is_some());
+        assert!(unsupported_request(&json!({ "n": 2 }), true, PROTOCOL_OPENAI).is_some());
+        assert!(unsupported_request(&json!({ "n": 1 }), true, PROTOCOL_OPENAI).is_none());
+        // 非流式下 `n>1` 可转换，不拒绝。
+        assert!(unsupported_request(&json!({ "n": 2 }), false, PROTOCOL_OPENAI).is_none());
+        assert!(responses(json!({
+            "input": [{ "type": "input_image", "file_id": "file-1" }]
+        }))
+        .is_some());
+        // 与入站协议无关的字段不误报。
+        assert!(unsupported_request(&json!({ "store": true }), false, PROTOCOL_OPENAI).is_none());
     }
 
     const PROTOCOLS: [&str; 3] = [PROTOCOL_OPENAI, PROTOCOL_ANTHROPIC, PROTOCOL_RESPONSES];

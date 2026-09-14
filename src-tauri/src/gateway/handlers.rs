@@ -317,6 +317,36 @@ async fn forward(
         return error_response(StatusCode::BAD_GATEWAY, message);
     }
 
+    // 全部候选都需要跨协议转换、且请求用到了转换核无法表达的语义时，显式拒绝，
+    // 而不是静默把错误形状的请求发上游（混合路由下由 `build_attempt` 逐个跳过）。
+    if candidates
+        .iter()
+        .all(|candidate| convert::needs_conversion(required_protocol, &candidate.upstream_protocol))
+    {
+        if let Some(reason) = convert::unsupported_request(&body, is_stream, required_protocol) {
+            record_log(
+                &state,
+                LogContext {
+                    endpoint: endpoint.to_string(),
+                    alias: alias.clone(),
+                    is_stream,
+                    route: candidates.first().cloned(),
+                    latency_ms: 0,
+                    status: "error".to_string(),
+                    http_status: Some(StatusCode::BAD_REQUEST.as_u16() as i64),
+                    error_message: Some(reason.clone()),
+                    request_id: None,
+                    virtual_key_id: Some(key_id.clone()),
+                    usage: UsageTotals::missing(),
+                    attempt_index: 0,
+                    session_id: session.clone(),
+                },
+            )
+            .await;
+            return error_response(StatusCode::BAD_REQUEST, &reason);
+        }
+    }
+
     let mut attempt_index: i64 = 0;
     let mut last_error: Option<(StatusCode, String, Option<HeaderValue>)> = None;
 
@@ -507,11 +537,23 @@ async fn forward(
                         extract_usage_estimated(&value, &candidate.upstream_protocol, estimates);
 
                     // 跨协议时把上游响应体转回客户端协议；同协议保持字节透传。
-                    let client_body = match conversion.as_mut() {
-                        Some(conversion) => convert_response(conversion, &text),
-                        None => Ok(text),
+                    // 转换报告照记；出现 `Fatal` 视为该次失败，转下一候选。
+                    let (converted, fatal) = match conversion.as_mut() {
+                        Some(conversion) => {
+                            let converted = convert_response(conversion, &text);
+                            let fatal = conversion.log_report("非流式响应转换");
+                            (converted, fatal)
+                        }
+                        None => (Ok(text), false),
                     };
-                    let text = match client_body {
+                    let converted = converted.and_then(|text| {
+                        if fatal {
+                            Err(AppError::message("协议转换出现不可恢复的降级"))
+                        } else {
+                            Ok(text)
+                        }
+                    });
+                    let text = match converted {
                         Ok(text) => text,
                         Err(error) => {
                             record_log(
@@ -652,16 +694,22 @@ fn build_attempt(
     inbound_protocol: &str,
     is_stream: bool,
 ) -> Result<(Value, Option<convert::Conversion>), AppError> {
-    let mut conversion =
-        if convert::needs_conversion(inbound_protocol, &candidate.upstream_protocol) {
-            Some(convert::Conversion::new(
-                inbound_protocol,
-                &candidate.upstream_protocol,
-                &candidate.model_id,
-            )?)
-        } else {
-            None
-        };
+    let needs_conversion = convert::needs_conversion(inbound_protocol, &candidate.upstream_protocol);
+    if needs_conversion {
+        if let Some(reason) = convert::unsupported_request(body, is_stream, inbound_protocol) {
+            return Err(AppError::message(reason));
+        }
+    }
+
+    let mut conversion = if needs_conversion {
+        Some(convert::Conversion::new(
+            inbound_protocol,
+            &candidate.upstream_protocol,
+            &candidate.model_id,
+        )?)
+    } else {
+        None
+    };
 
     let mut attempt_body = match conversion.as_mut() {
         Some(conversion) => {
@@ -1394,10 +1442,62 @@ mod tests {
         assert!(body.contains("[DONE]"), "body was {body}");
 
         // 用量仍按上游 Anthropic 字节扫描：input 25 + output 5。
+        // 日志在收流任务里异步落库，稍等片刻再读。
+        tokio::time::sleep(Duration::from_millis(100)).await;
         let logs = logs_by_attempt(&db);
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].status, "success");
         assert_eq!(logs[0].total_tokens, 30);
+    }
+
+    #[tokio::test]
+    async fn stateful_responses_is_rejected_when_converting() {
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, "http://127.0.0.1:1", "openai", "lumen/stateful");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        // 每条候选都要转成 openai，store=true 无法保真 → 显式 400，而不是静默改语义。
+        let response = router
+            .oneshot(post(
+                "/v1/responses",
+                json!({ "model": "lumen/stateful", "input": "hi", "store": true }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(value["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("store"));
+    }
+
+    #[tokio::test]
+    async fn chat_streaming_multiple_choices_is_rejected_when_converting() {
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, "http://127.0.0.1:1", "anthropic", "lumen/claude");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({
+                    "model": "lumen/claude",
+                    "stream": true,
+                    "n": 2,
+                    "messages": [{ "role": "user", "content": "hi" }]
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
