@@ -1389,6 +1389,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn conversion_accounts_usage_with_upstream_cache_boundary() {
+        let app = axum::Router::new().route(
+            "/messages",
+            axum::routing::post(|| async {
+                Json(json!({
+                    "id": "msg_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "claude-up",
+                    "content": [{ "type": "text", "text": "hi" }],
+                    "stop_reason": "end_turn",
+                    "usage": { "input_tokens": 20, "output_tokens": 10, "cache_read_input_tokens": 30 }
+                }))
+            }),
+        );
+        let base_url = serve(app).await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "anthropic", "lumen/claude");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        // Chat 入站、Anthropic 上游：账目按**上游协议**的缓存边界结算——
+        // Anthropic 的 `input_tokens` 不含缓存命中，故 total = input + cache_read + output。
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/claude", "messages": [{ "role": "user", "content": "hi" }] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].input_tokens, 20);
+        assert_eq!(logs[0].output_tokens, 10);
+        assert_eq!(logs[0].cache_read_tokens, 30);
+        assert_eq!(logs[0].total_tokens, 60);
+    }
+
+    #[tokio::test]
     async fn messages_endpoint_converts_through_openai_only_route() {
         let base_url = start_mock_upstream().await;
         let db = open_in_memory().unwrap();

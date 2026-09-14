@@ -107,8 +107,10 @@
 - Modify（如需要）: `src-tauri/src/gateway/usage.rs`
 - Modify（如需要）: `src-tauri/src/gateway/forward.rs`
 
-- [ ] 核对 `usage.rs` 的 cache 边界判定与 `finalize` 口径，确认与 IR-INV-USAGE-2 一致（`input` 含 `cached`、`cache_creation` 独立），必要时补测试与注释；边界按 `upstream_protocol` 判定（现状已如此，确认无需改）。
-- [ ] 跑全量现有集成测试，确认同协议路径**字节级不变**、账目数字不变。
+- [x] 核对 `usage.rs` 的 cache 边界判定与 `finalize` 口径，确认与 IR-INV-USAGE-2 一致（`input` 含 `cached`、`cache_creation` 独立），必要时补测试与注释；边界按 `upstream_protocol` 判定（现状已如此，确认无需改）。
+- [x] 跑全量现有集成测试，确认同协议路径**字节级不变**、账目数字不变。
+- [x] 新增 handler 测试：Chat 入站 + Anthropic 上游（含 `cache_read_input_tokens`），断言账目按**上游协议**的缓存边界结算。
+- [x] 同步 `docs/后端接口文档.md`：端点回退与转换、显式拒绝项、Gemini 旁路、记账边界。
 - Verify: `cargo test`、`cargo clippy -- -D warnings`。
 
 ### Task 7: 验收
