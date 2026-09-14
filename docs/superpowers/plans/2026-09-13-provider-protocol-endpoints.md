@@ -14,7 +14,7 @@
 
 ## 与 M3 的关系（重要）
 
-本计划是**同协议透传**：上游**原生**就能说 openai / anthropic / responses，网关只是把「一个上游的多个原生端点」登记在一起，零协议转换、零 IR。它与 M3 跨协议转换（`route.protocol` = 下游、`provider.protocol` = 上游、接入 `llm-protocol` SDK 做转换，见 `docs/后续功能计划备忘.md` §5.3）**正交**，不依赖 SDK，不放开「下游 ≠ 上游」的不一致。
+本计划是**同协议透传**：上游**原生**就能说 openai / anthropic / responses，网关只是把「一个上游的多个原生端点」登记在一起，零协议转换、零 IR。它与 M3 跨协议转换（`route.protocol` = 下游、`provider.protocol` = 上游、接入 `llmwire` SDK 做转换，见 `docs/后续功能计划备忘.md` §5.3）**正交**，不依赖 SDK，不放开「下游 ≠ 上游」的不一致。
 
 ## 设计决议（已拍板）
 
