@@ -6,6 +6,7 @@ use crate::db::models::{
 };
 use crate::db::with_db;
 use crate::error::AppError;
+use crate::gateway::convert;
 use crate::state::AppState;
 
 #[derive(Debug, Clone)]
@@ -24,8 +25,8 @@ pub struct ResolvedRoute {
     pub api_key: String,
     /// 命中协议端点的鉴权方式。
     pub auth_scheme: String,
-    /// 实际发给上游的协议。当前同协议透传，等于本次请求的入站协议；
-    /// 接入协议转换 SDK 后可能与入站协议不同。
+    /// 实际发给上游的协议。优先与入站协议一致（字节透传）；无同协议端点时回退到
+    /// 可转换端点，此时与入站协议不同，由 `gateway::convert` 负责转换。
     pub upstream_protocol: String,
     pub extra_headers: BTreeMap<String, String>,
     /// 上游 provider 的请求头映射（透传 / 替换 / 移除）；与 `extra_headers` 同为 provider 级。
@@ -54,9 +55,9 @@ pub fn endpoint_route(provider: &Provider, endpoint: &ProviderEndpoint) -> Resol
     }
 }
 
-/// 为入站协议挑选一个上游端点。当前只做「同协议透传」；接入协议转换 SDK
-/// 后，在此补「无同协议端点则回退到可转换端点」的分支即可，调用方与 SQL
-/// 结构无需改动。
+/// 为入站协议挑选一个上游端点：同协议端点优先（字节透传）；没有则回退到该 provider
+/// 第一个**可转换**端点（openai / anthropic / responses 之间）。Gemini 不在转换核内，
+/// 既不能作为回退目标，其入站请求也不会回退到别的协议。
 fn select_endpoint<'a>(
     endpoints: &'a [ProviderEndpoint],
     inbound_protocol: &str,
@@ -64,6 +65,11 @@ fn select_endpoint<'a>(
     endpoints
         .iter()
         .find(|endpoint| endpoint.protocol == inbound_protocol)
+        .or_else(|| {
+            endpoints
+                .iter()
+                .find(|endpoint| convert::needs_conversion(inbound_protocol, &endpoint.protocol))
+        })
 }
 
 struct CandidateBase {
@@ -460,16 +466,59 @@ mod tests {
     }
 
     #[test]
-    fn missing_endpoint_yields_no_candidate() {
+    fn missing_same_protocol_endpoint_falls_back_to_convertible() {
         let db = open_in_memory().unwrap();
         let conn = db.lock().unwrap();
         let provider = multi_provider(&conn);
         let model = seed_model(&conn, &provider, "gpt");
         route_for_protocol(&conn, "shared", "openai", &model);
-        // 删掉 openai 端点：该入站协议下无候选，其它协议不受影响。
+        // 删掉 openai 端点：openai 入站回退到可转换的 anthropic 端点。
         conn.execute("DELETE FROM provider_endpoints WHERE protocol = 'openai'", [])
             .unwrap();
-        assert!(resolve_candidates(&conn, "shared", "openai").unwrap().is_empty());
+        let fallback = resolve_candidates(&conn, "shared", "openai").unwrap();
+        assert_eq!(fallback.len(), 1);
+        assert_eq!(fallback[0].upstream_protocol, "anthropic");
+        assert_eq!(fallback[0].base_url, "https://a/anthropic/v1");
+        // anthropic 入站仍命中自身的 anthropic 端点。
         assert_eq!(resolve_candidates(&conn, "shared", "anthropic").unwrap().len(), 1);
+    }
+
+    fn gemini_provider(conn: &Connection) -> String {
+        providers::save_provider(
+            conn,
+            &ProviderInput {
+                id: None,
+                name: "gemini".into(),
+                api_key: "secret".into(),
+                endpoints: vec![ProviderEndpointInput {
+                    id: None,
+                    protocol: "gemini".into(),
+                    base_url: "https://g/v1beta".into(),
+                    auth_scheme: "x-goog-api-key".into(),
+                }],
+                extra_headers: BTreeMap::new(),
+                header_rules: Default::default(),
+                icon: None,
+                icon_tint: "ink".into(),
+                enabled: true,
+            },
+        )
+        .unwrap()
+        .provider
+        .id
+    }
+
+    #[test]
+    fn gemini_endpoint_never_serves_other_inbound() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = gemini_provider(&conn);
+        let model = seed_model(&conn, &provider, "gemini-pro");
+        route_for_protocol(&conn, "g", "gemini", &model);
+
+        assert_eq!(resolve_candidates(&conn, "g", "gemini").unwrap().len(), 1);
+        // Gemini 不在转换核内，其它入站协议既不回退到它，也不从它回退出去。
+        assert!(resolve_candidates(&conn, "g", "openai").unwrap().is_empty());
+        assert!(resolve_candidates(&conn, "g", "anthropic").unwrap().is_empty());
     }
 }

@@ -16,6 +16,7 @@ use crate::db::routes::list_enabled_aliases;
 use crate::db::with_db;
 use crate::error::AppError;
 use crate::gateway::auth::authenticate;
+use crate::gateway::convert;
 use crate::gateway::estimate::{self, Estimates};
 use crate::gateway::failover::{classify, parse_retry_after, AttemptAction};
 use crate::gateway::forward::{
@@ -322,13 +323,35 @@ async fn forward(
     for candidate in candidates {
         let mut retry_remaining = 1u8;
         loop {
-            let mut attempt_body = body.clone();
+            let (attempt_body, mut conversion) =
+                match build_attempt(&body, &candidate, required_protocol, is_stream) {
+                    Ok(attempt) => attempt,
+                    Err(error) => {
+                        record_log(
+                            &state,
+                            LogContext {
+                                endpoint: endpoint.to_string(),
+                                alias: alias.clone(),
+                                is_stream,
+                                route: Some(candidate.clone()),
+                                latency_ms: 0,
+                                status: "error".to_string(),
+                                http_status: None,
+                                error_message: Some(error.to_string()),
+                                request_id: None,
+                                virtual_key_id: Some(key_id.clone()),
+                                usage: UsageTotals::missing(),
+                                attempt_index,
+                                session_id: session.clone(),
+                            },
+                        )
+                        .await;
+                        attempt_index += 1;
+                        break;
+                    }
+                };
             let path = upstream_path(&candidate.upstream_protocol, &candidate.model_id, is_stream);
-            // Gemini 的模型名在 URL path，不能（也不应）注入 body。
-            if candidate.upstream_protocol != PROTOCOL_GEMINI {
-                attempt_body["model"] = Value::String(candidate.model_id.clone());
-            }
-            ensure_include_usage(&mut attempt_body, &candidate.upstream_protocol, is_stream);
+
 
             let started = Instant::now();
             let timeout = if is_stream { None } else { Some(UPSTREAM_TIMEOUT) };
@@ -481,6 +504,38 @@ async fn forward(
                     };
                     let usage =
                         extract_usage_estimated(&value, &candidate.upstream_protocol, estimates);
+
+                    // 跨协议时把上游响应体转回客户端协议；同协议保持字节透传。
+                    let client_body = match conversion.as_mut() {
+                        Some(conversion) => convert_response(conversion, &text),
+                        None => Ok(text),
+                    };
+                    let text = match client_body {
+                        Ok(text) => text,
+                        Err(error) => {
+                            record_log(
+                                &state,
+                                LogContext {
+                                    endpoint: endpoint.to_string(),
+                                    alias: alias.clone(),
+                                    is_stream: false,
+                                    route: Some(candidate.clone()),
+                                    latency_ms,
+                                    status: "error".to_string(),
+                                    http_status: Some(status.as_u16() as i64),
+                                    error_message: Some(error.to_string()),
+                                    request_id: upstream_request_id,
+                                    virtual_key_id: Some(key_id.clone()),
+                                    usage: UsageTotals::missing(),
+                                    attempt_index,
+                                    session_id: session.clone(),
+                                },
+                            )
+                            .await;
+                            attempt_index += 1;
+                            break;
+                        }
+                    };
                     record_log(
                         &state,
                         LogContext {
@@ -584,6 +639,54 @@ async fn forward(
         Some((status, text, content_type)) => passthrough(status, text, content_type),
         None => error_response(StatusCode::BAD_GATEWAY, "所有上游候选均不可用"),
     }
+}
+
+/// 构造本次尝试的上游请求体。
+///
+/// 入站协议与上游端点协议不一致时，先经 `llmwire` 转换，再按**上游协议**改写模型名并补齐
+/// `include_usage`。返回的转换器供非流式响应回程复用；同协议时返回 `None`，保持字节透传。
+fn build_attempt(
+    body: &Value,
+    candidate: &ResolvedRoute,
+    inbound_protocol: &str,
+    is_stream: bool,
+) -> Result<(Value, Option<convert::Conversion>), AppError> {
+    let mut conversion =
+        if convert::needs_conversion(inbound_protocol, &candidate.upstream_protocol) {
+            Some(convert::Conversion::new(
+                inbound_protocol,
+                &candidate.upstream_protocol,
+                &candidate.model_id,
+            )?)
+        } else {
+            None
+        };
+
+    let mut attempt_body = match conversion.as_mut() {
+        Some(conversion) => {
+            let client = serde_json::to_vec(body)?;
+            let converted = conversion.request(&client)?;
+            serde_json::from_slice(&converted)?
+        }
+        None => body.clone(),
+    };
+
+    // Gemini 的模型名在 URL path，不能（也不应）注入 body。
+    if candidate.upstream_protocol != PROTOCOL_GEMINI {
+        attempt_body["model"] = Value::String(candidate.model_id.clone());
+    }
+    ensure_include_usage(&mut attempt_body, &candidate.upstream_protocol, is_stream);
+
+    Ok((attempt_body, conversion))
+}
+
+/// 把上游非流式响应体转回客户端协议。
+fn convert_response(
+    conversion: &mut convert::Conversion,
+    text: &str,
+) -> Result<String, AppError> {
+    let converted = conversion.response(text.as_bytes())?;
+    String::from_utf8(converted).map_err(|_| AppError::message("协议转换输出不是合法 UTF-8"))
 }
 
 /// 记录一次尝试：构造日志并落库 + 推送事件。
@@ -706,7 +809,9 @@ mod tests {
             axum::routing::post(|| async {
                 Json(json!({
                     "id": "cmpl-1",
-                    "choices": [{ "message": { "role": "assistant", "content": "hi" } }],
+                    "object": "chat.completion",
+                    "model": "mock-model",
+                    "choices": [{ "index": 0, "message": { "role": "assistant", "content": "hi" } }],
                     "usage": { "prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150 }
                 }))
             }),
@@ -1185,60 +1290,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chat_endpoint_misses_anthropic_only_route() {
+    async fn chat_endpoint_converts_through_anthropic_only_route() {
+        let app = axum::Router::new().route("/messages", axum::routing::post(anthropic_messages));
+        let base_url = serve(app).await;
         let db = open_in_memory().unwrap();
-        seed_upstream(&db, "http://127.0.0.1:1", "anthropic", "lumen/claude");
+        seed_upstream(&db, &base_url, "anthropic", "lumen/claude");
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
         let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         let router = crate::gateway::build_router(state);
 
-        // 只有 anthropic 端点的别名，经 openai 端点调用时无候选 → 404。
+        // 只有 anthropic 端点的别名，经 openai 端点调用时自动做协议转换。
         let response = router
             .oneshot(post(
                 "/v1/chat/completions",
-                json!({ "model": "lumen/claude", "messages": [] }),
+                json!({ "model": "lumen/claude", "messages": [{ "role": "user", "content": "hi" }] }),
             ))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.status(), StatusCode::OK);
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let value: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(value["error"]["code"], "model_not_found");
+        assert_eq!(value["object"], "chat.completion");
+        assert_eq!(value["choices"][0]["message"]["content"], "hi");
 
-        let logs = {
-            let conn = db.lock().unwrap();
-            list_logs(&conn, &LogFilter::default()).unwrap()
-        };
+        let logs = logs_by_attempt(&db);
         assert_eq!(logs.len(), 1);
-        assert_eq!(logs[0].status, "error");
-        assert_eq!(logs[0].http_status, Some(404));
+        assert_eq!(logs[0].status, "success");
+        assert_eq!(logs[0].total_tokens, 30);
     }
 
     #[tokio::test]
-    async fn messages_endpoint_misses_openai_only_route() {
+    async fn messages_endpoint_converts_through_openai_only_route() {
+        let base_url = start_mock_upstream().await;
         let db = open_in_memory().unwrap();
-        seed_upstream(&db, "http://127.0.0.1:1", "openai", "lumen/gpt");
+        seed_upstream(&db, &base_url, "openai", "lumen/gpt");
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
         let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         let router = crate::gateway::build_router(state);
 
+        // 只有 openai 端点的别名，经 messages 端点调用时自动做协议转换。
         let response = router
             .oneshot(post(
                 "/v1/messages",
-                json!({ "model": "lumen/gpt", "max_tokens": 8, "messages": [] }),
+                json!({ "model": "lumen/gpt", "max_tokens": 8, "messages": [{ "role": "user", "content": "hi" }] }),
             ))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["type"], "message");
+        assert_eq!(value["content"][0]["text"], "hi");
 
-        let logs = {
-            let conn = db.lock().unwrap();
-            list_logs(&conn, &LogFilter::default()).unwrap()
-        };
+        let logs = logs_by_attempt(&db);
         assert_eq!(logs.len(), 1);
-        assert_eq!(logs[0].http_status, Some(404));
+        assert_eq!(logs[0].status, "success");
+        assert_eq!(logs[0].total_tokens, 150);
     }
 
     #[tokio::test]
@@ -1679,8 +1788,8 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
-        // `/responses` 已注册：openai 路由没有 responses 端点，解析无候选 → 404
-        // 且回 `model_not_found`；兜底 404 则会回「未知端点」。
+        // `/responses` 已注册：openai 端点没有 responses 协议，但二者可转换，
+        // 因此照常经转换转发（若路由未注册则会落兜底 404「未知端点」）。
         let response = router
             .clone()
             .oneshot(post(
@@ -1689,10 +1798,10 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.status(), StatusCode::OK);
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let value: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(value["error"]["code"], "model_not_found");
+        assert_eq!(value["object"], "response");
 
         // 真正未知的路径才落兜底 404，并回可读的 JSON 提示。
         let response = router

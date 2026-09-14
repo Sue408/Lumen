@@ -60,12 +60,12 @@
 - Modify: `src-tauri/src/gateway/resolve.rs`
 - Modify: `src-tauri/src/gateway/handlers.rs`
 
-- [ ] `select_endpoint` 改为：同协议端点优先；否则取该 provider 第一个**可转换**端点（`convert::is_convertible`，按端点 rowid）；无则 `None`。
-- [ ] `resolve.rs` 测试：同协议优先命中；仅异协议可转换端点时回退且 `upstream_protocol != inbound`；provider 仅有 `gemini` 端点而入站为 `openai` 时落选。
-- [ ] `handlers::forward` 候选循环：`convert::needs_conversion(required_protocol, &candidate.upstream_protocol)` 为真时构造 `Conversion`；请求体先经 `conversion.request(...)`，再对**转换后**的 body 做 `model` 覆写与 `ensure_include_usage`；同协议分支保持现状。
-- [ ] 非流式 `AttemptAction::Served`：上游 2xx body 经 `conversion.response(...)` 后再 `passthrough`；用量继续从**上游 body** 以 `candidate.upstream_protocol` 提取（不改）。
-- [ ] 转换失败（`request`/`response` 返回 `Err`）按现有失败路径处理：落 error 日志 + 冷却/降级，不静默透传坏形状。
-- [ ] handlers mock 测试：`chat` 请求路由到 anthropic-only provider → 断言上游收到 Anthropic 形状请求；响应转回 Chat 形状。
+- [x] `select_endpoint` 改为：同协议端点优先；否则取该 provider 第一个**可转换**端点（`convert::is_convertible`，按端点 rowid）；无则 `None`。
+- [x] `resolve.rs` 测试：同协议优先命中；仅异协议可转换端点时回退且 `upstream_protocol != inbound`；provider 仅有 `gemini` 端点而入站为 `openai` 时落选。
+- [x] `handlers::forward` 候选循环：`convert::needs_conversion(required_protocol, &candidate.upstream_protocol)` 为真时构造 `Conversion`；请求体先经 `conversion.request(...)`，再对**转换后**的 body 做 `model` 覆写与 `ensure_include_usage`；同协议分支保持现状。
+- [x] 非流式 `AttemptAction::Served`：上游 2xx body 经 `conversion.response(...)` 后再 `passthrough`；用量继续从**上游 body** 以 `candidate.upstream_protocol` 提取（不改）。
+- [x] 转换失败（`request`/`response` 返回 `Err`）落 error 日志并转下一候选；**不冷却上游**——失败源于本地转换而非上游。
+- [x] handlers mock 测试：`chat` 请求路由到 anthropic-only provider → 断言上游收到 Anthropic 形状请求；响应转回 Chat 形状。
 - Verify: `cargo test`、`cargo clippy -- -D warnings`。
 
 ### Task 3: 流式转换接线
