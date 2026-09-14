@@ -47,11 +47,11 @@
 - Create: `src-tauri/src/gateway/convert.rs`
 - Modify: `src-tauri/src/gateway/mod.rs`
 
-- [ ] `Cargo.toml` 增加本地路径依赖：`llmwire = { path = "../../llmwire" }`；`cargo build` 确认可编译。
-- [ ] `convert.rs` 暴露协议映射：`protocol_id(&str) -> Option<ProtocolId>`（`openai`/`anthropic`/`responses` → 对应，`gemini`/其它 → `None`）、`is_convertible(&str) -> bool`、`needs_conversion(inbound, upstream) -> bool`（两端都可转换且不相等）。
-- [ ] `convert.rs` 定义 `Conversion`：`new(inbound, upstream, model)` 内部 `llmwire::converter(src, dst, llmwire::resolve(src, dst, model))`；方法 `request(&[u8]) -> Result<Vec<u8>, AppError>`、`response(&[u8]) -> Result<Vec<u8>, AppError>`、`feed(&[u8]) -> Vec<u8>`、`finish() -> (Vec<u8>, Termination)`、`take_report() -> Report`。`llmwire::Error` → `AppError::message`。
-- [ ] `mod.rs` 注册 `pub mod convert;`。
-- [ ] 单测：`protocol_id` 覆盖 4 协议；`needs_conversion` 真值矩阵；Chat↔Messages 各一条请求/响应 golden（字面量 body 断言）。
+- [x] `Cargo.toml` 增加本地路径依赖：`llmwire = { path = "../../llmwire" }`；`cargo build` 确认可编译。
+- [x] `convert.rs` 暴露协议映射：`protocol_id(&str) -> Option<ProtocolId>`（`openai`/`anthropic`/`responses` → 对应，`gemini`/其它 → `None`）、`is_convertible(&str) -> bool`、`needs_conversion(inbound, upstream) -> bool`（两端都可转换且不相等）。
+- [x] `convert.rs` 定义 `Conversion`：`new(inbound, upstream, model)` 内部 `llmwire::converter(src, dst, llmwire::resolve(src, dst, model))`；方法 `request(&[u8]) -> Result<Vec<u8>, AppError>`、`response(&[u8]) -> Result<Vec<u8>, AppError>`、`feed(&[u8]) -> Vec<u8>`、`finish() -> (Vec<u8>, Termination)`、`take_report() -> Report`。`llmwire::Error` → `AppError::message`。
+- [x] `mod.rs` 注册 `pub mod convert;`。
+- [x] 单测：`protocol_id` 覆盖 4 协议；`needs_conversion` 真值矩阵；Chat↔Messages 各一条请求/响应 golden（字面量 body 断言）。
 - Verify: `cargo test`、`cargo clippy -- -D warnings`。
 
 ### Task 2: `resolve` 回退 + 非流式转换接线（Chat↔Messages 端到端）

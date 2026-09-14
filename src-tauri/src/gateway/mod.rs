@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod convert;
 pub mod estimate;
 pub mod failover;
 pub mod forward;

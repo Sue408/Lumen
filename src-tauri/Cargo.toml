@@ -37,6 +37,8 @@ futures-util = "0.3"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 tiktoken = "4"
+# 跨协议转换核；开发期走本地路径，正式复现应固定到 commit（见 docs/llmwire移交报告.md）。
+llmwire = { path = "../../llmwire" }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
