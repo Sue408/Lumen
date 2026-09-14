@@ -45,6 +45,7 @@ import {
 import { ModelPicker } from "./ModelPicker";
 import { ProtocolHelp } from "./ProtocolHelp";
 import { RouteBasicsModal, type RouteBasicsDraft } from "./RouteBasicsModal";
+import { AliasCopy } from "./AliasCopy";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
 
 function groupedModels(providers: Provider[], models: UpstreamModel[], protocol: Protocol) {
@@ -343,7 +344,13 @@ export function RoutingPage() {
                     />
                     <div className="sheet-title-block">
                       <h2 className="sheet-title">{selected.displayName || selected.alias}</h2>
-                      <span className="protocol-tag">{protocolLabel[selected.protocol]}</span>
+                      <span className="sheet-title-meta">
+                        <span className="protocol-tag">{protocolLabel[selected.protocol]}</span>
+                        <code className="sheet-alias" title={selected.alias}>
+                          {selected.alias}
+                        </code>
+                        <AliasCopy alias={selected.alias} disabled={busy} />
+                      </span>
                     </div>
                     <TogglePill
                       checked={selected.enabled}
