@@ -10,3 +10,6 @@ export function moveTarget<T>(list: T[], index: number, delta: number): T[] {
 export function hasUsableBackup(targets: Array<{ enabled: boolean }>): boolean {
   return targets.filter((target) => target.enabled).length >= 2;
 }
+
+/// 隐式多协议后，路由对入站协议无约束，列表 / 详情统一展示此说明。
+export const ROUTE_PROTOCOL_LABEL = "全协议";

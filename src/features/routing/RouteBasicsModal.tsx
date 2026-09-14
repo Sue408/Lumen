@@ -1,19 +1,14 @@
 import { useState } from "react";
 import { Modal } from "../../components/Modal";
 import { FormActions, InlineError } from "../../components/ConfigControls";
-import { Select } from "../../components/Select";
-import { protocolLabel, type Protocol } from "../../services/config";
-
-const protocolChoices: Protocol[] = ["openai", "anthropic", "responses", "gemini"];
 
 export type RouteBasicsDraft = {
   id: string | null;
   alias: string;
   displayName: string;
-  protocol: Protocol;
 };
 
-/** 路由基础信息（别名 / 展示名 / 协议）走弹窗；协议创建后锁定，编辑态只读。 */
+/** 路由基础信息（别名 / 展示名）走弹窗；协议隐式，对所有入站协议开放。 */
 export function RouteBasicsModal({
   initial,
   busy,
@@ -58,22 +53,6 @@ export function RouteBasicsModal({
               onChange={(event) => set({ displayName: event.target.value })}
               placeholder="留空则同别名"
             />
-          </label>
-          <label className="field">
-            <span>协议</span>
-            {isNew ? (
-              <Select
-                label="协议"
-                value={draft.protocol}
-                options={protocolChoices.map((protocol) => ({
-                  value: protocol,
-                  label: protocolLabel[protocol],
-                }))}
-                onChange={(protocol) => set({ protocol })}
-              />
-            ) : (
-              <span className="field-static">{protocolLabel[draft.protocol]}</span>
-            )}
           </label>
         </div>
         {error ? <InlineError message={error} /> : null}

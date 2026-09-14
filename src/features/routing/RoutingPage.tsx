@@ -26,16 +26,14 @@ import {
   listProviders,
   listRoutes,
   listUpstreamModels,
-  protocolLabel,
   saveRoute,
   type IconTint,
-  type Protocol,
   type Provider,
   type RouteTargetInput,
   type RouteWithTargets,
   type UpstreamModel,
 } from "../../services/config";
-import { hasUsableBackup, moveTarget } from "./routingModel";
+import { hasUsableBackup, moveTarget, ROUTE_PROTOCOL_LABEL } from "./routingModel";
 import {
   buildBrandLookup,
   markTint,
@@ -48,11 +46,8 @@ import { RouteBasicsModal, type RouteBasicsDraft } from "./RouteBasicsModal";
 import { AliasCopy } from "./AliasCopy";
 import { useAsyncAction } from "../../hooks/useAsyncAction";
 
-function groupedModels(providers: Provider[], models: UpstreamModel[], protocol: Protocol) {
+function groupedModels(providers: Provider[], models: UpstreamModel[]) {
   return providers
-    .filter((provider) =>
-      provider.endpoints.some((endpoint) => endpoint.protocol === protocol),
-    )
     .map((provider) => ({
       id: provider.id,
       name: provider.name,
@@ -106,7 +101,7 @@ export function RoutingPage() {
   const appearance = selected
     ? routeAppearance(selected, primaryModelMark(selected.targets, brands))
     : null;
-  const groups = selected ? groupedModels(providers, models, selected.protocol) : [];
+  const groups = selected ? groupedModels(providers, models) : [];
   const taken = new Set(targets.map((target) => target.upstreamModelId));
   const hasEnabledTarget = targets.some((target) => target.enabled);
   const enabledCount = targets.filter((target) => target.enabled).length;
@@ -165,7 +160,7 @@ export function RoutingPage() {
 
   const openBasicsNew = () => {
     setBasicsError(null);
-    setBasicsDraft({ id: null, alias: "", displayName: "", protocol: "openai" });
+    setBasicsDraft({ id: null, alias: "", displayName: "" });
   };
 
   const openBasicsEdit = (route: RouteWithTargets) => {
@@ -174,7 +169,6 @@ export function RoutingPage() {
       id: route.id,
       alias: route.alias,
       displayName: route.displayName,
-      protocol: route.protocol,
     });
   };
 
@@ -195,7 +189,6 @@ export function RoutingPage() {
           id: null,
           alias,
           displayName,
-          protocol: draft.protocol,
           icon: null,
           iconTint: null,
           enabled: false,
@@ -312,7 +305,7 @@ export function RoutingPage() {
                         <span className="register-body">
                           <span className="register-name" title={route.alias}>{route.alias}</span>
                           <span className="register-meta">
-                            <span className="protocol-tag">{protocolLabel[route.protocol]}</span>
+                            <span className="protocol-tag">{ROUTE_PROTOCOL_LABEL}</span>
                             {route.enabled
                               ? `${route.targets.length} 条目标`
                               : `已停用 · ${route.targets.length} 条目标`}
@@ -345,7 +338,7 @@ export function RoutingPage() {
                     <div className="sheet-title-block">
                       <h2 className="sheet-title">{selected.displayName || selected.alias}</h2>
                       <span className="sheet-title-meta">
-                        <span className="protocol-tag">{protocolLabel[selected.protocol]}</span>
+                        <span className="protocol-tag">{ROUTE_PROTOCOL_LABEL}</span>
                         <code className="sheet-alias" title={selected.alias}>
                           {selected.alias}
                         </code>
@@ -400,9 +393,7 @@ export function RoutingPage() {
                       <EmptyNote>
                         {models.length === 0
                           ? "还没有可用的上游模型，请先到上游提供商页登记。"
-                          : groups.length === 0
-                            ? `还没有 ${protocolLabel[selected.protocol]} 协议的上游模型，请先到上游提供商页登记。`
-                            : "还没有添加目标。添加至少一个目标后才能启用。"}
+                          : "还没有添加目标。添加至少一个目标后才能启用。"}
                       </EmptyNote>
                     ) : (
                       <ol className="target-list">
