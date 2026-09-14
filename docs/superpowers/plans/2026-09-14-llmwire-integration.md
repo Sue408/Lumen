@@ -117,8 +117,8 @@
 
 **Files:** —
 
-- [ ] 逐项跑 `docs/llmwire对接文档.md` §4 验收清单，并对齐 `docs/llmwire移交报告.md` §13 清单，逐项勾选。
-- [ ] 复核 P0 已落地：转换后响应 `model` / `id` 透传上游上报值；`created` / `created_at` 为 `0` 属已知限制。
+- [x] 逐项跑 `docs/llmwire对接文档.md` §4 验收清单，并对齐 `docs/llmwire移交报告.md` §13 清单，逐项勾选。
+- [x] 复核 P0 已落地：转换后响应 `model` / `id` 透传上游上报值；`created` / `created_at` 为 `0` 属已知限制。
 - Verify: `cargo test`、`cargo clippy -- -D warnings`。
 
 ## 风险与注意

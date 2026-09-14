@@ -134,14 +134,18 @@ request → resolve_candidates(alias, inbound_protocol)
 
 ## 4. 验收标准（接入完成 = 这些全过）
 
-- [ ] Chat / Messages / Responses 的 6 个有向组合，非流式文本转换正确。
-- [ ] 6 个有向组合的流式转换，`Termination` 语义正确。
-- [ ] tool call / tool result 跨协议往返，`tool_use.id` 字节保真。
-- [ ] thinking / signature / encrypted reasoning 按策略透传或显式降级（不伪造）。
-- [ ] OpenAI / Anthropic 缓存用量在转换后仍可被 Lumen 记账，且 cache 边界与 IR 约定一致。
-- [ ] 同协议路径字节级未变（回归）。
-- [ ] model 改写 + `include_usage` 注入后，上游请求正确。
-- [ ] 错误映射：上游 4xx / 5xx、流中错误、`Report` 的 `Fatal` 条目。
+> 状态更新：2026-09-14，Lumen 侧接线已完成（commit `9225cce` 及之前），下列各项均已通过；括号内为证据。
+
+- [x] Chat / Messages / Responses 的 6 个有向组合，非流式文本转换正确。（`gateway/convert.rs::converts_all_six_directed_pairs`）
+- [x] 6 个有向组合的流式转换，`Termination` 语义正确。（`streams_all_six_directed_pairs`；`Explicit`/`CleanClose` 视为成功，其余记为失败）
+- [x] tool call / tool result 跨协议往返，`tool_use.id` 字节保真。（llmwire `tests/golden_tool_id.rs`；Lumen 不改写工具字段）
+- [x] thinking / signature / encrypted reasoning 按策略透传或显式降级（不伪造）。（`llmwire::resolve` 策略：目标 Chat 剥离、目标 Messages/Responses 透传；`Report` 记录降级）
+- [x] OpenAI / Anthropic 缓存用量在转换后仍可被 Lumen 记账，且 cache 边界与 IR 约定一致。（`handlers.rs::conversion_accounts_usage_with_upstream_cache_boundary`；边界按**上游协议**判定）
+- [x] 同协议路径字节级未变（回归）。（现有集成测试全绿；同协议不构造 `Conversion`）
+- [x] model 改写 + `include_usage` 注入后，上游请求正确。（`build_attempt`：先转换再按**上游协议**改写 `model` 与注入 `include_usage`）
+- [x] 错误映射：上游 4xx / 5xx、流中错误、`Report` 的 `Fatal` 条目。（沿用既有失败分类；`Conversion::log_report` 把 `Fatal` 升级为该次失败）
+
+> 已知限制（非验收项）：转换后的 `created` / `created_at` 目前为 `0`，不保证透传（见 `docs/llmwire移交报告.md` §6.4）。
 
 ---
 
@@ -156,6 +160,8 @@ request → resolve_candidates(alias, inbound_protocol)
 ## 6. SDK 侧待办（建议先提给 llmwire）
 
 > 只列**通用**问题：任何 host 都会遇到，不是 Lumen 的特有需求。
+>
+> **状态（2026-09-14）**：P0 已由 llmwire `8340d27` 修复（交付基线 `153d74a`），响应 `model` 与 `id` 均透传上游上报值；下表保留作为问题记录与验证依据。`created` / `created_at` 仍为 `0`，见 `docs/llmwire移交报告.md` §6.4。
 
 ### 6.1 P0：输出的响应 `model` 未透传（已定：应等于 target 上报的 model）
 
