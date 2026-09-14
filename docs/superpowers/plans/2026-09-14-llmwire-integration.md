@@ -74,10 +74,10 @@
 - Modify: `src-tauri/src/gateway/forward.rs`
 - Modify: `src-tauri/src/gateway/handlers.rs`
 
-- [ ] `stream_response` 增参 `conversion: Option<Conversion>`；spawn 任务内：无转换时原样 `tx.send(bytes)`；有转换时 `scanner.push(&bytes)`（用量仍扫上游）后 `let out = conversion.feed(&bytes)`，非空才发送。
-- [ ] 流结束：有转换则 `let (tail, term) = conversion.finish()` 发送 `tail`；`Termination` 非 `Explicit`/`CleanClose` 时记 `failure`（日志 `status=error`）。
-- [ ] handlers 流式分支把 `conversion` 移交 `stream_response`。
-- [ ] 测试：mock 上游 Anthropic SSE → 下游 Chat SSE（含 `[DONE]` 收尾）；同协议流式**字节不变**（回归断言）。
+- [x] `stream_response` 增参 `conversion: Option<Conversion>`；spawn 任务内：无转换时原样 `tx.send(bytes)`；有转换时 `scanner.push(&bytes)`（用量仍扫上游）后 `let out = conversion.feed(&bytes)`，非空才发送。
+- [x] 流结束：有转换则 `let (tail, term) = conversion.finish()` 发送 `tail`；`Termination` 非 `Explicit`/`CleanClose` 时记 `failure`（日志 `status=error`）。
+- [x] handlers 流式分支把 `conversion` 移交 `stream_response`。
+- [x] 测试：mock 上游 Anthropic SSE → 下游 Chat SSE（含 `[DONE]` 收尾）；同协议流式**字节不变**（回归断言）。
 - Verify: `cargo test`、`cargo clippy -- -D warnings`。
 
 ### Task 4: 扩展组合与能力策略

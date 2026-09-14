@@ -5,6 +5,7 @@ use axum::body::{Body, Bytes};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
+use llmwire::Termination;
 use serde_json::Value;
 use tokio::time::timeout;
 
@@ -12,6 +13,7 @@ use crate::db::models::{
     contains_cache_read, PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
 };
 use crate::error::AppError;
+use crate::gateway::convert::Conversion;
 use crate::gateway::estimate::{collect_stream_delta, count_tokens, Estimates};
 use crate::gateway::headers::build_upstream_headers;
 use crate::gateway::resolve::ResolvedRoute;
@@ -300,11 +302,15 @@ pub struct StreamMeta {
 }
 
 /// 透传上游 SSE 流，同时在后台扫描末块 usage 并落库。
+///
+/// 跨协议转换时 `conversion` 为 `Some`：上游字节仍按**上游协议**喂给用量扫描器，
+/// 且逐块转换后转发给客户端；流末调用 `finish` 冲刷尾部并据终止原因判定成败。
 pub fn stream_response(
     state: Arc<AppState>,
     route: ResolvedRoute,
     meta: StreamMeta,
     response: reqwest::Response,
+    mut conversion: Option<Conversion>,
 ) -> Response {
     let status = response.status();
     let content_type = response.headers().get(header::CONTENT_TYPE).cloned();
@@ -345,8 +351,20 @@ pub fn stream_response(
                     if ttfb.is_none() && !bytes.is_empty() {
                         ttfb = Some(started.elapsed());
                     }
+                    // 用量始终按上游协议扫描，与是否跨协议转换无关。
                     scanner.push(&bytes);
-                    if tx.send(Ok(bytes)).await.is_err() {
+                    let payload = match conversion.as_mut() {
+                        Some(conversion) => match conversion.feed(&bytes) {
+                            Ok(output) if output.is_empty() => continue,
+                            Ok(output) => Bytes::from(output),
+                            Err(error) => {
+                                failure = Some(error.to_string());
+                                break;
+                            }
+                        },
+                        None => bytes,
+                    };
+                    if tx.send(Ok(payload)).await.is_err() {
                         // 下游（客户端）提前断开：既不能记为成功，也没必要继续读上游。
                         failure = Some("客户端中断连接，响应未完整送达".to_string());
                         break;
@@ -356,6 +374,23 @@ pub fn stream_response(
                     failure = Some(error.to_string());
                     let _ = tx.send(Err(std::io::Error::other(error.to_string()))).await;
                     break;
+                }
+            }
+        }
+
+        // 正常收流时冲刷分帧尾部，并把终止原因映射为成败。
+        if failure.is_none() {
+            if let Some(conversion) = conversion.as_mut() {
+                match conversion.finish() {
+                    Ok((tail, ended)) => {
+                        if !tail.is_empty() {
+                            let _ = tx.send(Ok(Bytes::from(tail))).await;
+                        }
+                        if !matches!(ended, Termination::Explicit | Termination::CleanClose) {
+                            failure = Some(format!("上游流式响应未正常结束：{ended:?}"));
+                        }
+                    }
+                    Err(error) => failure = Some(error.to_string()),
                 }
             }
         }

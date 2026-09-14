@@ -443,6 +443,7 @@ async fn forward(
                             input_estimate,
                         },
                         response,
+                        conversion,
                     );
                 }
                 // 首字节之前拿到非 2xx：读错误 body、记账，再决定重试或降级。
@@ -1033,6 +1034,25 @@ mod tests {
         serve(app).await
     }
 
+    /// 返回一段标准 Anthropic Messages SSE 的上游，用于跨协议流式转换测试。
+    async fn start_anthropic_sse_upstream() -> String {
+        let app = axum::Router::new().route(
+            "/messages",
+            axum::routing::post(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/event-stream")],
+                    "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-up\",\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}\n\n\
+                     event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+                     event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n\
+                     event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+                     event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n\
+                     event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+                )
+            }),
+        );
+        serve(app).await
+    }
+
     const TEST_KEY: &str = "sk-lumen-test";
 
     /// 读取日志并按 `attempt_index` 升序排列（occurred_at 可能同刻）。
@@ -1348,6 +1368,36 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].status, "success");
         assert_eq!(logs[0].total_tokens, 150);
+    }
+
+    #[tokio::test]
+    async fn chat_stream_converts_from_anthropic_upstream() {
+        let base_url = start_anthropic_sse_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "anthropic", "lumen/claude");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/claude", "stream": true, "messages": [{ "role": "user", "content": "hi" }] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8_lossy(&bytes);
+        assert!(body.contains("\"content\":\"hi\""), "body was {body}");
+        assert!(body.contains("[DONE]"), "body was {body}");
+
+        // 用量仍按上游 Anthropic 字节扫描：input 25 + output 5。
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].status, "success");
+        assert_eq!(logs[0].total_tokens, 30);
     }
 
     #[tokio::test]
