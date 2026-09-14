@@ -405,14 +405,21 @@
   min-width: 0;
 }
 
-/* 拉取面板头部：多端点时给一排协议切换，再接搜索框（复用模型选择器外观）。 */
+/* 拉取面板头部：多端点时给一个协议下拉，再接搜索框，单行不换行。 */
 .remote-picker-head {
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 0.4rem;
 }
 
-.remote-picker-protocols {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
+.remote-picker-head .remote-picker-protocol {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 11rem;
+}
+
+.remote-picker-head .model-picker-search {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
 }

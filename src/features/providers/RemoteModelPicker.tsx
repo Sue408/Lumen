@@ -4,7 +4,8 @@ import { Download } from "lucide-react";
 import { useAnchoredPanel } from "../../hooks/useAnchoredPanel";
 import { listRemoteModels, type RemoteModel } from "../../services/telemetry";
 import type { ProviderEndpoint } from "../../services/config";
-import { protocolLabel } from "./providerModel";
+import { Select } from "../../components/Select";
+import { protocolLabel, protocolOrder } from "./providerModel";
 
 /**
  * 从上游 `/models` 拉取可用模型并回填。触发按钮挂在「上游模型名」输入旁，
@@ -30,7 +31,15 @@ export function RemoteModelPicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const activeProtocol = protocol || endpoints[0]?.protocol || "";
+  const sortedEndpoints = useMemo(
+    () =>
+      [...endpoints].sort(
+        (a, b) => protocolOrder.indexOf(a.protocol) - protocolOrder.indexOf(b.protocol),
+      ),
+    [endpoints],
+  );
+
+  const activeProtocol = protocol || sortedEndpoints[0]?.protocol || "";
   const position = useAnchoredPanel({ open, triggerRef, panelRef, width: "content" });
 
   useEffect(() => {
@@ -115,23 +124,17 @@ export function RemoteModelPicker({
               }}
             >
               <div className="remote-picker-head">
-                {endpoints.length > 1 ? (
-                  <div className="remote-picker-protocols" role="group" aria-label="拉取所用端点">
-                    {endpoints.map((endpoint) => (
-                      <button
-                        key={endpoint.protocol}
-                        type="button"
-                        className={
-                          endpoint.protocol === activeProtocol
-                            ? "quiet-button is-primary"
-                            : "quiet-button"
-                        }
-                        onClick={() => setProtocol(endpoint.protocol)}
-                      >
-                        {protocolLabel[endpoint.protocol] ?? endpoint.protocol}
-                      </button>
-                    ))}
-                  </div>
+                {sortedEndpoints.length > 1 ? (
+                  <Select
+                    label="拉取所用端点"
+                    className="remote-picker-protocol"
+                    value={activeProtocol}
+                    options={sortedEndpoints.map((endpoint) => ({
+                      value: endpoint.protocol,
+                      label: protocolLabel[endpoint.protocol] ?? endpoint.protocol,
+                    }))}
+                    onChange={(value) => setProtocol(value)}
+                  />
                 ) : null}
                 <input
                   className="model-picker-search"
