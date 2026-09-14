@@ -90,6 +90,8 @@ request → resolve_candidates(alias, inbound_protocol)
 
 建议统一在 `gateway/forward.rs` 转发前对已转换 body 做一次 JSON patch（改 model + 注 stream_options），避免在多处散落。
 
+> **响应 model** 不归 Lumen：由 llmwire 透传 target 上报值（见 §6.1）；与同协议透传路径一致，客户端看到的是上游模型名。
+
 ### 2.4 流式接缝与终止
 
 - `llmwire` 是同步库，Lumen 决定 chunk 转发与 flush 策略、是否 `spawn_blocking`。
@@ -107,6 +109,17 @@ request → resolve_candidates(alias, inbound_protocol)
 
 - `Report` → `gateway` 日志 / 事件（Lumen 手抄映射）。
 - 会话捕获、请求日志、DB 写入在 `gateway/session.rs` 与 `db/`。
+
+### 2.7 落地清单（Lumen 侧模块）
+
+1. **`gateway/convert.rs`（新增）**：方向分流（旁路 / 转换）、`Capabilities` 装配、请求改写（`model` / `stream_options`）、`Report` 收集、`Termination` 映射。响应 `model` 由 llmwire 透传（见 §6.1），Lumen 不改写。
+2. **`gateway/forward.rs` / `gateway/handlers.rs`**：接入转换分支；非流式走 `response`，流式走 `feed` / `finish`；同协议路径保持现有透传不动。
+3. **`gateway/resolve.rs`**：候选解析放开「同协议」限制——优先同协议端点（透传），无则回退到可转换端点（Chat / Messages / Responses）并标记需转换。
+4. **`gateway/failover.rs`**：首字节前按候选降级；首字节后不再降级。
+5. **`gateway/usage.rs`**：继续扫**上游字节**取用量；口径对齐 IR-INV-USAGE-2。
+6. **`db/` / `gateway/session.rs`**：请求日志与 `Report` 落库 / 落事件。
+7. **限制处理**：stateful Responses、Chat 流式 `n > 1`、Gemini、图片 `file_id` → 显式拒绝或降级，不静默。
+8. **测试**：见 §4；同协议路径必须有字节级回归。
 
 ---
 
@@ -140,9 +153,46 @@ request → resolve_candidates(alias, inbound_protocol)
 
 ---
 
-## 附录：通用能力愿望单（非接入阻塞项）
+## 6. SDK 侧待办（建议先提给 llmwire）
 
-> 以下都是「任何 host 都可能受益」的**通用**能力，不是 Lumen 的特有需求；接入不依赖它们。
+> 只列**通用**问题：任何 host 都会遇到，不是 Lumen 的特有需求。
+
+### 6.1 P0：输出的响应 `model` 未透传（已定：应等于 target 上报的 model）
+
+**期望行为**：转换后输出中的 `model` 应等于 **target（上游端点）协议响应里上报的 `model`**，即透明透传；llmwire 不发明模型名，也不回填入站 `model`。
+
+**根因**：响应 IR（`AssistantOutput`）没有 `model` 字段，非流式从解码到编码无处携带；且三个 `*ResponseOut` 的 `model` 字段类型是 `&'static str`，结构上只允许字面量常量。
+
+**非流式：解码丢弃 → 编码写死 `"llmwire"`**
+
+| 协议 | 解码 In（无 `model`） | 编码 Out | 写死点 |
+|---|---|---|---|
+| Chat | `ChatResponseIn`（`codec/chat/wire.rs:97`，无字段） | `ChatResponseOut.model: &'static str`（`chat/wire.rs:256`） | `chat/mod.rs:194` |
+| Messages | `MessagesResponseIn`（`messages/wire.rs:256`，无字段） | `MessagesResponseOut.model: &'static str`（`messages/wire.rs:279`） | `messages/mod.rs:171` |
+| Responses | `ResponsesResponseIn`（`responses/wire.rs:41`，无字段） | `ResponsesResponseOut.model: &'static str`（`responses/wire.rs:188`） | `responses/mod.rs:194` |
+
+**流式：已基本正确**，`Event::MessageStart { model }` 已携带 target model：
+
+- 解码填充：`chat/stream.rs:36`、`messages/stream.rs:29`、`responses/stream.rs:45 / 54`。
+- 编码输出：`chat/stream.rs:171`（首个 chunk）、Messages 的 `message_start`、`responses/stream.rs:217` 与 `:773-775`（终帧取自 `state.message()`）。
+- **残留**：Chat 作为 source 时，首个 chunk 之后的 chunk 仍写死 `"llmwire"`（`chat/stream.rs:190 / 215 / 230 / 255 / 277`）。
+- **fallback 不一致**：target 未上报 model 时，chat 用 `""`（`unwrap_or_default`）、responses 用 `"llmwire"`。
+
+**不是 bug 的地方（勿改）**：请求侧 `MessagesRequestOut.model`（`messages/mod.rs:101`）与 `ResponsesRequestOut.model`（`responses/mod.rs:110`）虽为 `"llmwire"`，但 `converter.rs:684` 的 `set_request_metadata` 会用入站 body 的 `model` 覆盖；请求侧由 host 负责。
+
+**建议改动清单**
+
+1. `AssistantOutput` 增加 `model`（如 `pub model: Option<Box<str>>`）；`chat` / `messages` / `responses` 的 `decode_response` 填充。
+2. 三个 `*ResponseOut.model` 由 `&'static str` 改为 `String`；`encode_response` 写入该值。
+3. Chat 流式后续 chunk 复用已捕获的 model，不再写死。
+4. 定义 target 未上报时的 fallback（建议省略或空串，勿发明名字），并统一三协议。
+5. 测试：三协议 ×（非流式 / 流式），断言 **target model ≠ 入站 model** 时输出 `model` 恒等于 target 上报值。
+
+**同类观察（可选一并处理）**：非流式响应的 `id` 同样是「解码丢弃 → 编码编造」（`chatcmpl-llmwire` / `msg_llmwire` / `resp_llmwire`），而流式 `id` 已透传。若要真正透明，`id` 与 `model` 同源同修。
+
+### 6.2 P1：通用增强（非接入阻塞项）
+
+> 都是「任何 host 都可能受益」的能力，接入不依赖它们。
 
 | 能力 | 说明 |
 |---|---|
