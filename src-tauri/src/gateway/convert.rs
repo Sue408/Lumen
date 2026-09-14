@@ -39,6 +39,11 @@ pub struct Conversion {
 
 impl Conversion {
     /// 以入站协议为源、上游端点协议为目标构造转换器。
+    ///
+    /// 能力策略 MVP 走 `llmwire::resolve`（协议默认：目标 Chat 时剥离 thinking，目标
+    /// Messages / Responses 时透传；缓存控制与 beta 仅透传给 Messages）。需要按模型覆盖
+    /// （thinking / max_output_tokens / supported 参数）时，在此改用 `StaticHost` /
+    /// `ModelProfile`，把 Lumen 的模型表映射成 `Capabilities`——这是唯一的装配点。
     pub fn new(inbound: &str, upstream: &str, model: &str) -> Result<Self, AppError> {
         let source = protocol_id(inbound).ok_or_else(|| unconvertible(inbound))?;
         let target = protocol_id(upstream).ok_or_else(|| unconvertible(upstream))?;
@@ -110,7 +115,131 @@ fn unconvertible(protocol: &str) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+    use serde_json::{json, Value};
+
+    /// 一个最小但结构完整的客户端请求（`model` 用 `m`，便于断言转换是否原样保留）。
+    fn request_body(protocol: &str) -> Value {
+        match protocol {
+            PROTOCOL_OPENAI => json!({
+                "model": "m",
+                "max_completion_tokens": 16,
+                "messages": [{ "role": "user", "content": "hi" }]
+            }),
+            PROTOCOL_ANTHROPIC => json!({
+                "model": "m",
+                "max_tokens": 16,
+                "messages": [{ "role": "user", "content": "hi" }]
+            }),
+            PROTOCOL_RESPONSES => json!({ "model": "m", "input": "hi" }),
+            other => panic!("unhandled protocol {other}"),
+        }
+    }
+
+    /// 上游在 `protocol` 协议下返回的文本响应（取自 llmwire 的协议矩阵夹具）。
+    fn response_body(protocol: &str) -> &'static str {
+        match protocol {
+            PROTOCOL_OPENAI => r#"{"id":"chatcmpl-matrix","choices":[{"index":0,"message":{"role":"assistant","content":"world"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}"#,
+            PROTOCOL_ANTHROPIC => r#"{"id":"msg_matrix","type":"message","role":"assistant","content":[{"type":"text","text":"world"}],"model":"up","stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}"#,
+            PROTOCOL_RESPONSES => r#"{"id":"resp_matrix","object":"response","status":"completed","model":"up","output":[{"type":"message","id":"msg_matrix","role":"assistant","content":[{"type":"output_text","text":"world"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}"#,
+            other => panic!("unhandled protocol {other}"),
+        }
+    }
+
+    /// 上游在 `protocol` 协议下返回的文本 SSE 流。
+    fn stream_body(protocol: &str) -> &'static str {
+        match protocol {
+            PROTOCOL_OPENAI => concat!(
+                "data: {\"id\":\"chatcmpl-stream\",\"model\":\"up\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"world\"},\"finish_reason\":null}]}\n\n",
+                "data: [DONE]\n\n",
+            ),
+            PROTOCOL_ANTHROPIC => concat!(
+                "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_stream\",\"model\":\"up\"}}\n\n",
+                "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+                "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"world\"}}\n\n",
+                "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+                "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+                "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+            ),
+            PROTOCOL_RESPONSES => concat!(
+                "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_stream\",\"model\":\"up\"}}\n\n",
+                "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_stream\"}}\n\n",
+                "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"world\"}\n\n",
+                "event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"output_index\":0,\"content_index\":0,\"text\":\"world\"}\n\n",
+                "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stream\",\"status\":\"completed\",\"model\":\"up\",\"output\":[]}}\n\n",
+            ),
+            other => panic!("unhandled protocol {other}"),
+        }
+    }
+
+    /// 从 `protocol` 协议的文本响应里取出助手文本。
+    fn assistant_text(protocol: &str, value: &Value) -> String {
+        match protocol {
+            PROTOCOL_OPENAI => value["choices"][0]["message"]["content"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+            PROTOCOL_ANTHROPIC => value["content"][0]["text"].as_str().unwrap().to_string(),
+            PROTOCOL_RESPONSES => value["output"][0]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+            other => panic!("unhandled protocol {other}"),
+        }
+    }
+
+    const PROTOCOLS: [&str; 3] = [PROTOCOL_OPENAI, PROTOCOL_ANTHROPIC, PROTOCOL_RESPONSES];
+
+    #[test]
+    fn converts_all_six_directed_pairs() {
+        for src in PROTOCOLS {
+            for dst in PROTOCOLS {
+                if src == dst {
+                    continue;
+                }
+                let mut conversion = Conversion::new(src, dst, "up").unwrap();
+
+                let request = serde_json::to_vec(&request_body(src)).unwrap();
+                let encoded = conversion.request(&request).unwrap();
+                let upstream: Value = serde_json::from_slice(&encoded)
+                    .unwrap_or_else(|error| panic!("{src}->{dst} request: {error}"));
+                assert_eq!(upstream["model"], "m", "{src}->{dst} keeps client model");
+
+                let decoded = conversion.response(response_body(dst).as_bytes()).unwrap();
+                let client: Value = serde_json::from_slice(&decoded)
+                    .unwrap_or_else(|error| panic!("{src}->{dst} response: {error}"));
+                assert_eq!(assistant_text(src, &client), "world", "{src}->{dst} text");
+            }
+        }
+    }
+
+    #[test]
+    fn streams_all_six_directed_pairs() {
+        for src in PROTOCOLS {
+            for dst in PROTOCOLS {
+                if src == dst {
+                    continue;
+                }
+                let mut conversion = Conversion::new(src, dst, "up").unwrap();
+                let mut request = request_body(src);
+                request["stream"] = json!(true);
+                conversion
+                    .request(&serde_json::to_vec(&request).unwrap())
+                    .unwrap();
+
+                let mut body =
+                    String::from_utf8_lossy(&conversion.feed(stream_body(dst).as_bytes()).unwrap())
+                        .into_owned();
+                let (tail, ended) = conversion.finish().unwrap();
+                body.push_str(&String::from_utf8_lossy(&tail));
+
+                assert!(body.contains("world"), "{src}->{dst} stream: {body}");
+                assert!(
+                    matches!(ended, Termination::Explicit | Termination::CleanClose),
+                    "{src}->{dst} termination: {ended:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn maps_lumen_protocols_to_llmwire() {

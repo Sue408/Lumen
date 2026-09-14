@@ -86,8 +86,8 @@
 - Modify: `src-tauri/src/gateway/convert.rs`
 - Modify: `src-tauri/src/gateway/handlers.rs`
 
-- [ ] 覆盖 Responses 参与的 6 个有向组合（请求 + 响应 + 流式）的等价性测试。
-- [ ] 复核 caps：确认 `resolve(src, dst, upstream_model)` 的策略（thinking：目标 Chat 时 Strip，目标 Messages/Responses Passthrough；`passthrough_cache_control` 仅目标 Messages）符合预期；在 `convert.rs` 注释中标注后续 `StaticHost`/`ModelProfile` 装配点。
+- [x] 覆盖 Responses 参与的 6 个有向组合（请求 + 响应 + 流式）的等价性测试。
+- [x] 复核 caps：确认 `resolve(src, dst, upstream_model)` 的策略（thinking：目标 Chat 时 Strip，目标 Messages/Responses Passthrough；`passthrough_cache_control` 仅目标 Messages）符合预期；在 `convert.rs` 注释中标注后续 `StaticHost`/`ModelProfile` 装配点。
 - Verify: `cargo test`、`cargo clippy -- -D warnings`。
 
 ### Task 5: 限制与可观测
