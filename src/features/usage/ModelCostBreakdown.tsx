@@ -59,7 +59,7 @@ export function ModelCostBreakdown({ period }: ModelCostBreakdownProps) {
             <div className="donut-center">
               <AnimatedMetricValue
                 className="donut-total"
-                target={`$ ${period.totalCost.toFixed(2)}`}
+                target={formatCurrency(period.totalCost)}
               />
               <span className="donut-label">总花费</span>
             </div>

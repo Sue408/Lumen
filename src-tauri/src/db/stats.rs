@@ -489,11 +489,61 @@ fn format_thousands(value: i64) -> String {
     output
 }
 
-fn format_tokens_wan(value: i64) -> String {
-    if value == 0 {
+/// 数量分级：1 万以下精确到个位，之后按万 / 亿 / 万亿每级一位小数。
+/// 每级先四舍五入，若已顶到下一级的整数值就提级——保证 `99_999_999`
+/// 显示为 `1.0 亿`，而不是 `10000.0 万`。
+fn format_compact_count(value: i64) -> String {
+    const WAN: i64 = 10_000;
+    const YI: i64 = 100_000_000;
+    const WAN_YI: i64 = 1_000_000_000_000;
+    if value <= 0 {
         return "0".to_string();
     }
-    format!("{:.1} 万", value as f64 / 10_000.0)
+    let scaled = |unit: i64| (value as f64 / unit as f64 * 10.0).round() / 10.0;
+    if value >= WAN_YI {
+        return format!("{:.1} 万亿", scaled(WAN_YI));
+    }
+    if value >= YI {
+        let yi = scaled(YI);
+        return if yi >= 10_000.0 {
+            format!("{:.1} 万亿", scaled(WAN_YI))
+        } else {
+            format!("{:.1} 亿", yi)
+        };
+    }
+    if value >= WAN {
+        let wan = scaled(WAN);
+        return if wan >= 10_000.0 {
+            format!("{:.1} 亿", scaled(YI))
+        } else {
+            format!("{:.1} 万", wan)
+        };
+    }
+    format_thousands(value)
+}
+
+/// 金额：始终两位小数，整数部分加千分位；USD 不做万 / 亿分级。
+fn format_usd(value: f64) -> String {
+    let cents = (value * 100.0).round() as i64;
+    let negative = cents < 0;
+    let cents = cents.abs();
+    format!(
+        "{}{}.{:02}",
+        if negative { "-" } else { "" },
+        format_thousands(cents / 100),
+        cents % 100
+    )
+}
+
+/// 调用次数：空格只加在中西文交界。`万` / `亿` 是中文单位，直接接 `次`；
+/// 精确到个位时才需要 `86 次` 里的那个空格。
+fn format_calls(value: i64) -> String {
+    let compact = format_compact_count(value);
+    if compact.ends_with('万') || compact.ends_with('亿') {
+        format!("{compact}次")
+    } else {
+        format!("{compact} 次")
+    }
 }
 
 fn comparison(unit: &str, current: f64, previous: f64) -> String {
@@ -642,22 +692,22 @@ pub fn build_overview(
     let metrics = vec![
         MetricDto {
             label: "调用次数".to_string(),
-            value: format!("{} 次", format_thousands(current.calls)),
+            value: format_calls(current.calls),
             comparison: comparison(unit, current.calls as f64, previous.calls as f64),
         },
         MetricDto {
             label: "输入 Tokens".to_string(),
-            value: format_tokens_wan(current.input),
+            value: format_compact_count(current.input),
             comparison: comparison(unit, current.input as f64, previous.input as f64),
         },
         MetricDto {
             label: "输出 Tokens".to_string(),
-            value: format_tokens_wan(current.output),
+            value: format_compact_count(current.output),
             comparison: comparison(unit, current.output as f64, previous.output as f64),
         },
         MetricDto {
             label: "总花费".to_string(),
-            value: format!("$ {:.2}", current.cost),
+            value: format!("${}", format_usd(current.cost)),
             comparison: comparison(unit, current.cost, previous.cost),
         },
     ];
@@ -761,10 +811,41 @@ mod tests {
     }
 
     #[test]
-    fn zero_tokens_render_without_a_spurious_unit() {
-        assert_eq!(format_tokens_wan(0), "0");
-        assert_eq!(format_tokens_wan(5_000), "0.5 万");
-        assert_eq!(format_tokens_wan(482_000), "48.2 万");
+    fn compact_counts_step_at_each_magnitude_without_overflowing_the_unit() {
+        let cases = [
+            (0_i64, "0"),
+            (999, "999"),
+            (8_600, "8,600"),
+            (9_999, "9,999"),
+            (10_000, "1.0 万"),
+            (48_200, "4.8 万"),
+            (99_950_000, "9995.0 万"),
+            // 顶到下一级的整数就提级，不出现 10000.0 万。
+            (99_999_999, "1.0 亿"),
+            (100_000_000, "1.0 亿"),
+            (120_000_000, "1.2 亿"),
+            (1_200_000_000, "12.0 亿"),
+            (999_999_999_999, "1.0 万亿"),
+            (1_000_000_000_000, "1.0 万亿"),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(format_compact_count(value), expected, "value = {value}");
+        }
+    }
+
+    #[test]
+    fn usd_keeps_two_decimals_and_groups_thousands() {
+        assert_eq!(format_usd(0.0), "0.00");
+        assert_eq!(format_usd(4.82), "4.82");
+        assert_eq!(format_usd(12_345.67), "12,345.67");
+    }
+
+    #[test]
+    fn calls_only_space_before_a_latin_number() {
+        assert_eq!(format_calls(86), "86 次");
+        assert_eq!(format_calls(9_999), "9,999 次");
+        assert_eq!(format_calls(12_000), "1.2 万次");
+        assert_eq!(format_calls(120_000_000), "1.2 亿次");
     }
 
     #[test]
@@ -785,13 +866,30 @@ mod tests {
 
         assert_eq!(overview.total_cost, 2.25);
         assert_eq!(overview.metrics[0].value, "3 次");
-        assert_eq!(overview.metrics[3].value, "$ 2.25");
+        assert_eq!(overview.metrics[3].value, "$2.25");
         assert_eq!(overview.model_costs.len(), 2);
         assert_eq!(overview.model_costs[0].name, "beta");
         assert_eq!(overview.model_costs[1].name, "alpha");
         assert_eq!(overview.model_costs[0].cost, 1.5);
-        // 输入 tokens: 5000 → 0.5 万
-        assert_eq!(overview.metrics[1].value, "0.5 万");
+        // 输入 tokens: 5000 → 5,000（1 万以下精确到个位）
+        assert_eq!(overview.metrics[1].value, "5,000");
+    }
+
+    #[test]
+    fn overview_scales_tokens_by_magnitude() {
+        let db = open_in_memory().unwrap();
+        let now = Local::now();
+        let today = period_start(Period::Day, now);
+        {
+            let conn = db.lock().unwrap();
+            insert_log(&conn, &sample_log(today + Duration::hours(1), 120_000_000, 8_600, 3.5, "alpha")).unwrap();
+        }
+        let conn = db.lock().unwrap();
+        let overview = build_overview(&conn, Period::Day, now, &KeyScope::All).unwrap();
+
+        assert_eq!(overview.metrics[1].value, "1.2 亿");
+        assert_eq!(overview.metrics[2].value, "8,600");
+        assert_eq!(overview.metrics[3].value, "$3.50");
     }
 
     #[test]

@@ -29,10 +29,11 @@ function formatTime(totalMinutes: number): string {
   return `${pad(Math.floor(totalMinutes / 60))}:${pad(totalMinutes % 60)}`;
 }
 
-function getDayLabels(now: Date, count: number): string[] {
+function getDayLabels(now: Date, count: number, startMinutes = 0): string[] {
   const endMinutes = now.getHours() * 60 + now.getMinutes();
+  const start = Math.min(Math.max(startMinutes, 0), endMinutes);
   return Array.from({ length: count }, (_, index) => {
-    const minutes = Math.round((endMinutes * index) / (count - 1));
+    const minutes = Math.round(start + ((endMinutes - start) * index) / Math.max(count - 1, 1));
     return formatTime(minutes);
   });
 }
@@ -80,9 +81,26 @@ export function getElapsedBucketCount(period: TrendPeriodKey, now: Date): number
   return Math.max(1, now.getDate());
 }
 
-export function buildPeriodAxisLabels(period: TrendPeriodKey, now: Date): string[] {
+/**
+ * 左端死区裁剪：对各层（已差分）同下标求和，返回首个非零桶下标。
+ * 日视图曲线从「当天真正开始花钱的整点」起画，而不是从 00:00 起拖一段
+ * 贴底平线；全天无调用时返回 0，交由调用方保留既有零线表现。
+ */
+export function firstActiveBucket(series: number[][]): number {
+  const length = series.reduce((max, values) => Math.max(max, values.length), 0);
+  for (let index = 0; index < length; index += 1) {
+    if (series.some((values) => (values[index] ?? 0) > 0)) return index;
+  }
+  return 0;
+}
+
+export function buildPeriodAxisLabels(
+  period: TrendPeriodKey,
+  now: Date,
+  startBucket = 0,
+): string[] {
   const count = getVisiblePointCount(period, now);
-  if (period === "day") return getDayLabels(now, count);
+  if (period === "day") return getDayLabels(now, count, startBucket * 60);
   if (period === "week") return getWeekLabels(now, count);
   return getMonthLabels(now, count);
 }
@@ -91,12 +109,18 @@ export function buildPeriodSampleLabels(
   period: TrendPeriodKey,
   now: Date,
   count: number,
+  startBucket = 0,
 ): string[] {
   if (count <= 0) return [];
   if (period === "day") {
     const endMinutes = now.getHours() * 60 + now.getMinutes();
+    const startMinutes = Math.min(startBucket * 60, endMinutes);
     return Array.from({ length: count }, (_, index) =>
-      formatTime(Math.round((endMinutes * index) / Math.max(count - 1, 1))),
+      formatTime(
+        Math.round(
+          startMinutes + ((endMinutes - startMinutes) * index) / Math.max(count - 1, 1),
+        ),
+      ),
     );
   }
 

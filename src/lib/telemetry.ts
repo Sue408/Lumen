@@ -8,11 +8,30 @@ export function formatRate(value: number): string {
   return `${value.toFixed(1)} tok/s`;
 }
 
-/** token 总量：万 / 亿 分级，零值不带单位。 */
-export function formatCompactTokens(value: number): string {
+const YI = 100_000_000;
+const WAN = 10_000;
+const WAN_YI = 1_000_000_000_000;
+
+const round1 = (value: number) => Math.round(value * 10) / 10;
+
+/**
+ * 数量分级：1 万以下精确到个位，之后按万 / 亿 / 万亿每级一位小数。
+ * 每级先四舍五入，若已顶到下一级的整数值就提级——保证 `99_999_999`
+ * 显示为 `1.0 亿`，而不是 `10000.0 万`。与后端 `format_compact_count` 同规则。
+ */
+export function formatCompactCount(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0";
-  if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)} 亿`;
-  if (value >= 10_000) return `${(value / 10_000).toFixed(1)} 万`;
+  if (value >= WAN_YI) return `${round1(value / WAN_YI).toFixed(1)} 万亿`;
+  if (value >= YI) {
+    const yi = round1(value / YI);
+    return yi >= 10_000
+      ? `${round1(value / WAN_YI).toFixed(1)} 万亿`
+      : `${yi.toFixed(1)} 亿`;
+  }
+  if (value >= WAN) {
+    const wan = round1(value / WAN);
+    return wan >= 10_000 ? `${round1(value / YI).toFixed(1)} 亿` : `${wan.toFixed(1)} 万`;
+  }
   return integer.format(value);
 }
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildPeriodAxisLabels,
   buildPeriodSampleLabels,
+  firstActiveBucket,
   getElapsedBucketCount,
   getNearestPointIndex,
   getVisiblePointCount,
@@ -54,4 +55,31 @@ test("elapsed buckets clip a series to the part of the period that happened", ()
   assert.equal(getElapsedBucketCount("day", late), 24);
   assert.equal(getElapsedBucketCount("week", now), 4);
   assert.equal(getElapsedBucketCount("month", now), 10);
+});
+
+test("first active bucket skips the leading dead hours", () => {
+  assert.equal(firstActiveBucket([[0, 0, 1.2, 2, 3], [0, 0, 0.4, 1, 1.2]]), 2);
+  assert.equal(firstActiveBucket([[1, 2], [0, 0]]), 0);
+  assert.equal(firstActiveBucket([[0, 0, 0], [0, 0, 0]]), 0);
+  assert.equal(firstActiveBucket([]), 0);
+});
+
+test("cropped day axis and samples start at the first active hour", () => {
+  const now = new Date(2026, 8, 10, 14, 37);
+  assert.deepEqual(buildPeriodAxisLabels("day", now, 10), [
+    "10:00",
+    "11:09",
+    "12:19",
+    "13:28",
+    "14:37",
+  ]);
+  assert.deepEqual(buildPeriodSampleLabels("day", now, 3, 10), ["10:00", "12:19", "14:37"]);
+  // 未裁剪时与既有行为一致。
+  assert.deepEqual(buildPeriodAxisLabels("day", now, 0), [
+    "00:00",
+    "03:39",
+    "07:19",
+    "10:58",
+    "14:37",
+  ]);
 });

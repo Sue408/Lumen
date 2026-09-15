@@ -14,11 +14,12 @@ import { growCeiling, initialCeiling } from "./trendScale";
 import {
   buildPeriodAxisLabels,
   buildPeriodSampleLabels,
+  firstActiveBucket,
   getElapsedBucketCount,
   getNearestPointIndex,
   resampleSeries,
 } from "./trendInteraction";
-import { formatMoney } from "../../lib/format";
+import { formatDecimal, formatMoney } from "../../lib/format";
 import { cumulativeToDistribution } from "./usageVisualData";
 import type { UsagePeriod } from "./usageData";
 import { isCurrentPeriod } from "./period";
@@ -34,7 +35,7 @@ const fallbackChartSize: ChartSize = { width: 600, height: 210 };
 const LEADING_FADE = 0.07;
 
 function formatAxis(value: number): string {
-  return String(Number(value.toFixed(4)));
+  return formatDecimal(value);
 }
 
 function useCurrentMinute() {
@@ -84,25 +85,31 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
   // One point per elapsed hour. The backend reports cumulative cost per bucket,
   // so差分成每小时用量后再画——这条曲线要的是涨落，不是一直往上爬的累计。
   const elapsedBuckets = getElapsedBucketCount(period.periodKey, now);
-  const pointCount = Math.max(elapsedBuckets, 2);
+  const distributed = useMemo(
+    () =>
+      period.layers.map((layer) =>
+        cumulativeToDistribution(layer.values.slice(0, elapsedBuckets)),
+      ),
+    [period.layers, elapsedBuckets],
+  );
+  // 裁掉左端「还没开始花钱」的整点，别让夜间空档拖成一大段贴底平线。
+  const startBucket = useMemo(() => firstActiveBucket(distributed), [distributed]);
+  const pointCount = Math.max(elapsedBuckets - startBucket, 2);
   const layers = useMemo(
     () =>
-      period.layers.map((layer) => ({
+      period.layers.map((layer, index) => ({
         ...layer,
-        values: resampleSeries(
-          cumulativeToDistribution(layer.values.slice(0, elapsedBuckets)),
-          pointCount,
-        ),
+        values: resampleSeries(distributed[index].slice(startBucket), pointCount),
       })),
-    [period.layers, elapsedBuckets, pointCount],
+    [period.layers, distributed, startBucket, pointCount],
   );
   const axisLabels = useMemo(
-    () => buildPeriodAxisLabels(period.periodKey, now),
-    [period.periodKey, now],
+    () => buildPeriodAxisLabels(period.periodKey, now, startBucket),
+    [period.periodKey, now, startBucket],
   );
   const sampleLabels = useMemo(
-    () => buildPeriodSampleLabels(period.periodKey, now, pointCount),
-    [period.periodKey, now, pointCount],
+    () => buildPeriodSampleLabels(period.periodKey, now, pointCount, startBucket),
+    [period.periodKey, now, pointCount, startBucket],
   );
 
   // 日视图画的是四条独立曲线，纵轴上界该贴合「可见包络」——最高的那条线，
@@ -176,7 +183,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
       <header className="chart-heading">
         <h2>
           花费趋势
-          <span className="chart-unit">元 · 每小时</span>
+          <span className="chart-unit">$ · 每小时</span>
         </h2>
         <span className="chart-meta">
           {layers.length > 0 ? `${layers.length} 条曲线` : "暂无调用"}

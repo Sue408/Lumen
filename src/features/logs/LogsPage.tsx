@@ -13,6 +13,7 @@ import {
   type SessionSummary,
 } from "../../services/usage";
 import { formatCurrency, formatInteger } from "../../lib/format";
+import { formatCompactCount } from "../../lib/telemetry";
 import {
   ALL_ALIASES,
   ALL_SESSIONS,
@@ -33,7 +34,7 @@ import {
 import { formatSessionLabel } from "./sessionLabel";
 
 const PAGE_SIZE = 100;
-const formatTokens = (value: number) => `${formatInteger(value)} Tokens`;
+const formatTokens = (value: number) => `${formatCompactCount(value)} Tokens`;
 
 export function LogsPage() {
   const [scope, setScope] = useState<LogScope>("attention");

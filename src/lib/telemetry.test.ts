@@ -5,7 +5,7 @@ import {
   connectivityLabel,
   connectivityState,
   connectivitySummary,
-  formatCompactTokens,
+  formatCompactCount,
   formatLatency,
   formatPercent,
   formatRate,
@@ -18,11 +18,25 @@ test("rate keeps precision by magnitude", () => {
   assert.equal(formatRate(1500), "1.5k tok/s");
 });
 
-test("compact tokens switch to 万 and 亿", () => {
-  assert.equal(formatCompactTokens(0), "0");
-  assert.equal(formatCompactTokens(999), "999");
-  assert.equal(formatCompactTokens(48_200), "4.8 万");
-  assert.equal(formatCompactTokens(1_200_000_000), "12.0 亿");
+test("compact counts step at each magnitude without overflowing the unit", () => {
+  const cases: [number, string][] = [
+    [0, "0"],
+    [999, "999"],
+    [8_600, "8,600"],
+    [9_999, "9,999"],
+    [10_000, "1.0 万"],
+    [48_200, "4.8 万"],
+    [99_950_000, "9995.0 万"],
+    [99_999_999, "1.0 亿"],
+    [100_000_000, "1.0 亿"],
+    [120_000_000, "1.2 亿"],
+    [1_200_000_000, "12.0 亿"],
+    [999_999_999_999, "1.0 万亿"],
+    [1_000_000_000_000, "1.0 万亿"],
+  ];
+  for (const [value, expected] of cases) {
+    assert.equal(formatCompactCount(value), expected, `value = ${value}`);
+  }
 });
 
 test("latency formats ms then s and hides missing", () => {

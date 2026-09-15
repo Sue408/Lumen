@@ -2,6 +2,7 @@ import { useState, type CSSProperties, type PointerEvent } from "react";
 import { cumulativeToDistribution, buildMonthHeatmap } from "./usageVisualData";
 import { toneFor } from "./chartTone";
 import { formatMoney } from "../../lib/format";
+import { formatCompactCount } from "../../lib/telemetry";
 import { getNearestPointIndex } from "./trendInteraction";
 import { isCurrentPeriod } from "./period";
 import type { UsagePeriod } from "./usageData";
@@ -50,7 +51,7 @@ export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
       <header className="chart-heading">
         <h2>
           每日花费构成
-          <span className="chart-unit">元</span>
+          <span className="chart-unit">$</span>
         </h2>
         <span className="chart-meta">按分层堆叠</span>
       </header>
@@ -157,7 +158,7 @@ export function MonthlyUsageHeatmap({ period, anchor }: { period: UsagePeriod; a
             >
               {cell.day}
               <span className="sr-only">
-                {cell.day ? `${cell.day}日 ${cell.value}万 Tokens` : ""}
+                {cell.day ? `${cell.day}日 ${formatCompactCount(cell.value * 10_000)} Tokens` : ""}
               </span>
               {hovered === index && cell.day ? (
                 <div className="heat-tooltip">
@@ -165,7 +166,7 @@ export function MonthlyUsageHeatmap({ period, anchor }: { period: UsagePeriod; a
                     {monthLabel}
                     {cell.day}日
                   </strong>
-                  <span>{cell.isFuture ? "未来日期" : `${cell.value} 万 Tokens`}</span>
+                  <span>{cell.isFuture ? "未来日期" : `${formatCompactCount(cell.value * 10_000)} Tokens`}</span>
                 </div>
               ) : null}
             </div>
