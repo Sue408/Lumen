@@ -2200,6 +2200,7 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 [[package]]
 name = "llmwire"
 version = "0.1.0"
+source = "git+https://github.com/Sue408/llmwire.git?rev=660edbf8c84e13ccd3f644509980fe76591262fb#660edbf8c84e13ccd3f644509980fe76591262fb"
 dependencies = [
  "bitflags 2.13.1",
  "serde",
