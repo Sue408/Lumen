@@ -365,6 +365,15 @@
   color: var(--ink-muted);
 }
 
+/* 客户端取消：中性事件，用弱分隔线而非朱砂，避免与真正的失败混淆。 */
+.logs-row.is-cancelled .logs-row-main {
+  box-shadow: inset 2px 0 0 var(--line);
+}
+
+.logs-mark.is-cancelled {
+  color: var(--ink-muted);
+}
+
 .logs-number {
   color: var(--ink-soft);
   text-align: right;

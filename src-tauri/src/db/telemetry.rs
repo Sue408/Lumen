@@ -387,10 +387,13 @@ mod tests {
             latency_ms: Some(latency_ms),
             ttfb_ms,
             error_message: None,
+            error_domain: None,
+            error_kind: None,
             request_id: None,
             is_stream,
             attempt_index: 0,
             session_id: None,
+            trace_id: None,
         }
     }
 

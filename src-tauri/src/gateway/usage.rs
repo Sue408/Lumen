@@ -3,7 +3,7 @@ use serde_json::Value;
 use crate::db::logs::insert_log;
 use crate::db::models::{contains_cache_read, RequestLog, PROTOCOL_GEMINI};
 use crate::db::with_db;
-use crate::error::AppError;
+use crate::error::{AppError, LogError};
 use crate::gateway::estimate::Estimates;
 use crate::gateway::resolve::ResolvedRoute;
 use crate::state::AppState;
@@ -120,7 +120,11 @@ pub fn extract_fields(usage: &Value) -> UsageFields {
                 .or_else(|| usage.get("output_tokens"))
                 .or_else(|| usage.get("candidatesTokenCount")),
         ),
-        total: token(usage.get("total_tokens").or_else(|| usage.get("totalTokenCount"))),
+        total: token(
+            usage
+                .get("total_tokens")
+                .or_else(|| usage.get("totalTokenCount")),
+        ),
         cache_read: token(
             usage
                 .get("cache_read_input_tokens")
@@ -224,11 +228,7 @@ pub fn extract_usage(value: &Value, protocol: &str) -> Option<UsageTotals> {
 
 /// 非流式：提取上游用量，缺失的边用估算补齐。上游完全未返回时，只要估算可用，
 /// 仍产出一条 `estimated` 记录——网关不做「上游不给就放弃」。
-pub fn extract_usage_estimated(
-    value: &Value,
-    protocol: &str,
-    estimates: Estimates,
-) -> UsageTotals {
+pub fn extract_usage_estimated(value: &Value, protocol: &str, estimates: Estimates) -> UsageTotals {
     let mut fields = usage_container(value, protocol)
         .map(extract_fields)
         .unwrap_or_default();
@@ -280,7 +280,8 @@ pub struct LogContext {
     pub latency_ms: i64,
     pub status: String,
     pub http_status: Option<i64>,
-    pub error_message: Option<String>,
+    /// 失败归因（含人话与类目）；成功时为 `None`。
+    pub error: Option<LogError>,
     pub request_id: Option<String>,
     pub virtual_key_id: Option<String>,
     pub usage: UsageTotals,
@@ -288,6 +289,8 @@ pub struct LogContext {
     pub attempt_index: i64,
     /// 会话标识：由候选会话头名解析而来，每次尝试都带（成功与失败均记，便于按会话追踪）。
     pub session_id: Option<String>,
+    /// 一次客户端请求的关联标识：降级链中多次尝试共享，用于把它们串成一条链。
+    pub trace_id: Option<String>,
 }
 
 pub fn build_log(context: LogContext) -> RequestLog {
@@ -299,13 +302,23 @@ pub fn build_log(context: LogContext) -> RequestLog {
         latency_ms,
         status,
         http_status,
-        error_message,
+        error,
         request_id,
         virtual_key_id,
         usage,
         attempt_index,
         session_id,
+        trace_id,
     } = context;
+    // 归因：主体与类目供机读，message 仍作为人话。成功（`None`）时三列皆空。
+    let (error_message, error_domain, error_kind) = match &error {
+        Some(error) => (
+            Some(error.message.clone()),
+            Some(error.domain().as_str().to_string()),
+            Some(error.kind.as_str().to_string()),
+        ),
+        None => (None, None, None),
+    };
     // 只有拿到 input/output 或缓存计数时才能按 token 计价。仅有 total_tokens 的
     // 响应无法拆分计价，保守记 0，并保留 usage_source = partial 供账本筛出。
     let billable = usage.input_tokens > 0
@@ -332,7 +345,8 @@ pub fn build_log(context: LogContext) -> RequestLog {
         occurred_at: chrono::Utc::now().to_rfc3339(),
         endpoint,
         method: "POST".to_string(),
-        route_alias: Some(alias),
+        // 空别名表示「请求在解析出别名之前就失败」（如提取失败 / 缺 model），落 NULL。
+        route_alias: (!alias.is_empty()).then_some(alias),
         route_id: route.as_ref().map(|route| route.route_id.clone()),
         upstream_model_id: route.as_ref().map(|route| route.upstream_model_id.clone()),
         upstream_model_name: route.as_ref().map(|route| route.display_name.clone()),
@@ -354,10 +368,13 @@ pub fn build_log(context: LogContext) -> RequestLog {
         latency_ms: Some(latency_ms),
         ttfb_ms: None,
         error_message,
+        error_domain,
+        error_kind,
         request_id,
         is_stream,
         attempt_index,
         session_id,
+        trace_id,
     }
 }
 
@@ -447,7 +464,8 @@ mod tests {
 
     #[test]
     fn extract_usage_accepts_openai_naming() {
-        let value = json!({ "usage": { "prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20 } });
+        let value =
+            json!({ "usage": { "prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20 } });
         let usage = extract_usage(&value, PROTOCOL_OPENAI).unwrap();
         assert_eq!(usage.input_tokens, 12);
         assert_eq!(usage.output_tokens, 8);
@@ -491,7 +509,10 @@ mod tests {
 
     #[test]
     fn extract_usage_treats_negative_and_null_as_missing() {
-        assert_eq!(extract_usage(&json!({ "usage": null }), PROTOCOL_OPENAI), None);
+        assert_eq!(
+            extract_usage(&json!({ "usage": null }), PROTOCOL_OPENAI),
+            None
+        );
         let value = json!({ "usage": { "prompt_tokens": -1, "completion_tokens": -1 } });
         assert_eq!(extract_usage(&value, PROTOCOL_OPENAI), None);
         let partial = json!({ "usage": { "prompt_tokens": -1, "completion_tokens": 7 } });
@@ -511,7 +532,10 @@ mod tests {
 
     #[test]
     fn extract_usage_returns_none_without_usage() {
-        assert_eq!(extract_usage(&json!({ "choices": [] }), PROTOCOL_OPENAI), None);
+        assert_eq!(
+            extract_usage(&json!({ "choices": [] }), PROTOCOL_OPENAI),
+            None
+        );
     }
 
     #[test]
@@ -597,8 +621,11 @@ mod tests {
 
     #[test]
     fn total_only_usage_is_partial_and_unbilled() {
-        let usage =
-            extract_usage(&json!({ "usage": { "total_tokens": 150 } }), PROTOCOL_OPENAI).unwrap();
+        let usage = extract_usage(
+            &json!({ "usage": { "total_tokens": 150 } }),
+            PROTOCOL_OPENAI,
+        )
+        .unwrap();
         assert_eq!(usage.total_tokens, 150);
         assert_eq!(usage.input_tokens, 0);
         assert_eq!(usage.output_tokens, 0);
@@ -612,12 +639,13 @@ mod tests {
             latency_ms: 1,
             status: "success".into(),
             http_status: Some(200),
-            error_message: None,
+            error: None,
             request_id: None,
             virtual_key_id: None,
             usage,
             attempt_index: 0,
             session_id: None,
+            trace_id: None,
         });
         // 拆分未知 → 保守不结算，但保留 total 与 partial 标记。
         assert_eq!(log.cost, 0.0);
@@ -678,12 +706,13 @@ mod tests {
             latency_ms: 1,
             status: "success".into(),
             http_status: Some(200),
-            error_message: None,
+            error: None,
             request_id: None,
             virtual_key_id: None,
             usage,
             attempt_index: 0,
             session_id: None,
+            trace_id: None,
         });
         // 估算值计入花费：账本不因上游漏报而归零。
         assert!(log.cost > 0.0);

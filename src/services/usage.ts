@@ -13,6 +13,8 @@ export type LogFilter = {
   to?: string | null;
   usageSource?: UsageSource | "unreliable" | null;
   sessionId?: string | null;
+  errorDomain?: string | null;
+  errorKind?: string | null;
   attentionOnly?: boolean | null;
   limit?: number | null;
   offset?: number | null;
@@ -79,10 +81,13 @@ function buildMockLogs(): RequestLog[] {
         latencyMs: 200 + ((index * 137 + dayOffset * 41) % 1800),
         ttfbMs: index % 3 === 0 ? 150 + ((index * 37) % 400) : null,
         errorMessage: failed ? "上游超时" : null,
+        errorDomain: failed ? "upstream" : null,
+        errorKind: failed ? "link_timeout" : null,
         requestId: `req-${dayOffset}-${index}`,
         isStream: index % 3 === 0,
         attemptIndex: 0,
         sessionId: null,
+        traceId: `trace-${dayOffset}-${index}`,
       });
     }
   }

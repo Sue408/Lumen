@@ -8,6 +8,7 @@ import {
   dailyRangeBounds,
   describeLog,
   formatRangeLabel,
+  groupByTrace,
   groupLogsByDay,
   routeChain,
   tokenBreakdown,
@@ -40,9 +41,12 @@ function log(overrides: Partial<RequestLog> = {}): RequestLog {
     httpStatus: 200,
     latencyMs: 120,
     errorMessage: null,
+    errorDomain: null,
+    errorKind: null,
     requestId: "req-1",
     isStream: false,
     sessionId: null,
+    traceId: null,
     ...overrides,
   };
 }
@@ -76,10 +80,41 @@ test("session filter is pushed only when a specific session is chosen", () => {
   assert.equal(buildLogFilter({ scope: "all", session: "ses_a" }).sessionId, "ses_a");
 });
 
+test("error domain filter is pushed only when set", () => {
+  assert.equal(buildLogFilter({ scope: "all" }).errorDomain, undefined);
+  assert.equal(buildLogFilter({ scope: "all", errorDomain: "upstream" }).errorDomain, "upstream");
+});
+
 test("range label reads as an inclusive date span", () => {
   assert.equal(formatRangeLabel(dailyRangeBounds("2026-09-01", "2026-09-10")), "9月1日 – 9月10日");
   assert.equal(formatRangeLabel({ from: new Date(2026, 8, 1).toISOString() }), "9月1日起");
   assert.equal(formatRangeLabel({}), "全部记录");
+});
+
+test("groupByTrace merges attempts of one request and keeps loners separate", () => {
+  const groups = groupByTrace([
+    log({ id: "a0", traceId: "t1", attemptIndex: 1 }),
+    log({ id: "loner", traceId: null }),
+    log({ id: "a1", traceId: "t1", attemptIndex: 0 }),
+    log({ id: "b0", traceId: "t2", attemptIndex: 0 }),
+  ]);
+  assert.equal(groups.length, 3);
+  assert.deepEqual(
+    groups[0].logs.map((item) => item.id),
+    ["a1", "a0"],
+    "同 trace 内按 attemptIndex 升序",
+  );
+  assert.equal(groups[1].traceId, null);
+  assert.equal(groups[2].traceId, "t2");
+});
+
+test("cancelled is a neutral mark and its own scope, not a failure", () => {
+  assert.deepEqual(describeLog(log({ status: "cancelled" })), {
+    tone: "cancelled",
+    label: "已取消",
+  });
+  assert.equal(buildLogFilter({ scope: "cancelled" }).status, "cancelled");
+  assert.notEqual(buildLogFilter({ scope: "failed" }).status, "cancelled");
 });
 
 test("describeLog ranks failure above usage trust", () => {

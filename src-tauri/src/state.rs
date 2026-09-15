@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use crate::db::models::RequestLog;
 use crate::db::settings::default_session_headers;
 use crate::db::Db;
-use crate::error::AppError;
+use crate::error::{AppError, ErrorKind};
 
 pub const DEFAULT_PORT: u16 = 8787;
 
@@ -18,26 +18,62 @@ pub const COOLDOWN_TRANSIENT: Duration = Duration::from_secs(60);
 /// 疑似额度耗尽（长 `Retry-After` / 额度类错误）后的目标冷却时长。
 pub const COOLDOWN_EXHAUSTED: Duration = Duration::from_secs(300);
 
+/// 一条冷却记录：哪个上游模型、被哪一类失败触发、冷却到何时。
+#[derive(Debug, Clone)]
+struct Cooling {
+    provider_id: String,
+    kind: ErrorKind,
+    until: Instant,
+}
+
+/// 冷却快照：把 `Instant` 折算成可序列化的剩余秒数，供日志与连通性展示。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoolingView {
+    pub upstream_model_id: String,
+    pub provider_id: String,
+    /// 触发冷却的失败类目（`ErrorKind` 的 snake_case）。
+    pub error_kind: String,
+    pub remaining_secs: u64,
+}
+
 /// 降级链中目标的临时冷却表：内存态、带过期，重启即清空。
 #[derive(Default)]
 struct Cooldowns {
-    until: HashMap<String, Instant>,
+    until: HashMap<String, Cooling>,
 }
 
 impl Cooldowns {
-    fn is_cooling(&mut self, key: &str, now: Instant) -> bool {
-        match self.until.get(key) {
-            Some(&deadline) if deadline > now => true,
-            Some(_) => {
-                self.until.remove(key);
-                false
-            }
-            None => false,
-        }
+    fn mark(
+        &mut self,
+        key: &str,
+        provider_id: &str,
+        kind: ErrorKind,
+        duration: Duration,
+        now: Instant,
+    ) {
+        // 同目标重复失败以「最近一次」覆盖：原因与剩余都取最新。
+        self.until.insert(
+            key.to_string(),
+            Cooling {
+                provider_id: provider_id.to_string(),
+                kind,
+                until: now + duration,
+            },
+        );
     }
 
-    fn mark(&mut self, key: &str, duration: Duration, now: Instant) {
-        self.until.insert(key.to_string(), now + duration);
+    fn snapshot(&mut self, now: Instant) -> Vec<CoolingView> {
+        self.until.retain(|_, cooling| cooling.until > now);
+        self.until
+            .iter()
+            .map(|(id, cooling)| CoolingView {
+                upstream_model_id: id.clone(),
+                provider_id: cooling.provider_id.clone(),
+                error_kind: cooling.kind.as_str().to_string(),
+                remaining_secs: cooling.until.saturating_duration_since(now).as_secs(),
+            })
+            .collect()
     }
 }
 
@@ -120,12 +156,7 @@ pub fn build_http_client(proxy_url: Option<&str>) -> Result<reqwest::Client, App
 }
 
 impl AppState {
-    pub fn new(
-        db: Db,
-        http: reqwest::Client,
-        events: Arc<dyn EventSink>,
-        port: u16,
-    ) -> Self {
+    pub fn new(db: Db, http: reqwest::Client, events: Arc<dyn EventSink>, port: u16) -> Self {
         Self {
             db,
             http: RwLock::new(http),
@@ -191,30 +222,31 @@ impl AppState {
         }
     }
 
-    /// 该上游模型是否处于降级冷却中（过期即自动清理）。
-    pub fn is_cooling(&self, upstream_model_id: &str) -> bool {
-        self.cooldowns
-            .lock()
-            .map(|mut guard| guard.is_cooling(upstream_model_id, Instant::now()))
-            .unwrap_or(false)
-    }
-
-    /// 当前所有处于冷却中的上游模型 id（顺带清理过期项）。供连通性展示叠加。
-    pub fn cooling_snapshot(&self) -> Vec<String> {
+    /// 当前冷却快照（顺带清理过期项）：带原因与剩余时长。供日志与连通性展示。
+    pub fn cooling_snapshot(&self) -> Vec<CoolingView> {
         let now = Instant::now();
         self.cooldowns
             .lock()
-            .map(|mut guard| {
-                guard.until.retain(|_, deadline| *deadline > now);
-                guard.until.keys().cloned().collect()
-            })
+            .map(|mut guard| guard.snapshot(now))
             .unwrap_or_default()
     }
 
-    /// 将某上游模型标记为冷却一段时间。
-    pub fn mark_cooling(&self, upstream_model_id: &str, duration: Duration) {
+    /// 将某上游模型标记为冷却一段时间，并记下原因与所属 provider。
+    pub fn mark_cooling(
+        &self,
+        upstream_model_id: &str,
+        provider_id: &str,
+        kind: ErrorKind,
+        duration: Duration,
+    ) {
         if let Ok(mut guard) = self.cooldowns.lock() {
-            guard.mark(upstream_model_id, duration, Instant::now());
+            guard.mark(
+                upstream_model_id,
+                provider_id,
+                kind,
+                duration,
+                Instant::now(),
+            );
         }
     }
 
@@ -242,21 +274,52 @@ mod tests {
     fn marks_and_reads_cooling() {
         let mut cooldowns = Cooldowns::default();
         let now = Instant::now();
-        cooldowns.mark("m1", Duration::from_secs(60), now);
+        cooldowns.mark(
+            "m1",
+            "p1",
+            ErrorKind::UpstreamUnavailable,
+            Duration::from_secs(60),
+            now,
+        );
 
-        assert!(cooldowns.is_cooling("m1", now));
-        assert!(cooldowns.is_cooling("m1", now + Duration::from_secs(59)));
-        assert!(!cooldowns.is_cooling("m1", now + Duration::from_secs(60)));
-        assert!(!cooldowns.is_cooling("m2", now));
+        assert_eq!(cooldowns.snapshot(now).len(), 1);
+        assert_eq!(cooldowns.snapshot(now + Duration::from_secs(59)).len(), 1);
+        assert!(cooldowns.snapshot(now + Duration::from_secs(60)).is_empty());
     }
 
     #[test]
     fn expired_cooldown_is_pruned() {
         let mut cooldowns = Cooldowns::default();
         let now = Instant::now();
-        cooldowns.mark("m1", Duration::from_secs(1), now);
-        assert!(!cooldowns.is_cooling("m1", now + Duration::from_secs(2)));
+        cooldowns.mark(
+            "m1",
+            "p1",
+            ErrorKind::UpstreamUnavailable,
+            Duration::from_secs(1),
+            now,
+        );
+        assert!(cooldowns.snapshot(now + Duration::from_secs(2)).is_empty());
         assert!(cooldowns.until.is_empty(), "过期项应被清理");
+    }
+
+    #[test]
+    fn snapshot_carries_reason_and_remaining() {
+        let mut cooldowns = Cooldowns::default();
+        let now = Instant::now();
+        cooldowns.mark(
+            "m1",
+            "p1",
+            ErrorKind::LinkConnect,
+            Duration::from_secs(60),
+            now,
+        );
+        let view = cooldowns.snapshot(now + Duration::from_secs(10));
+        assert_eq!(view.len(), 1);
+        assert_eq!(view[0].upstream_model_id, "m1");
+        assert_eq!(view[0].provider_id, "p1");
+        assert_eq!(view[0].error_kind, "link_connect");
+        assert_eq!(view[0].remaining_secs, 50);
+        assert!(cooldowns.snapshot(now + Duration::from_secs(61)).is_empty());
     }
 
     #[test]

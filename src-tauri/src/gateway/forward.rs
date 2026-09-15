@@ -12,7 +12,7 @@ use tokio::time::timeout;
 use crate::db::models::{
     contains_cache_read, PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
 };
-use crate::error::AppError;
+use crate::error::{classify_reqwest, AppError, ErrorKind, LogError};
 use crate::gateway::convert::Conversion;
 use crate::gateway::estimate::{collect_stream_delta, count_tokens, Estimates};
 use crate::gateway::headers::build_upstream_headers;
@@ -228,7 +228,9 @@ impl UsageScanner {
         }
         // Gemini SSE 没有显式终止符：以「带 usageMetadata 且候选给出 finishReason」为收尾。
         if self.protocol == PROTOCOL_GEMINI
-            && value.get("usageMetadata").is_some_and(|usage| !usage.is_null())
+            && value
+                .get("usageMetadata")
+                .is_some_and(|usage| !usage.is_null())
             && value
                 .pointer("/candidates/0/finishReason")
                 .and_then(Value::as_str)
@@ -260,6 +262,11 @@ impl UsageScanner {
                 self.usage_seen = true;
             }
         }
+    }
+
+    /// 是否见到正常终止符（`[DONE]` / `message_stop` / `response.completed` 等）。
+    fn finalized(&self) -> bool {
+        self.finalized
     }
 
     fn totals(&self) -> UsageTotals {
@@ -297,6 +304,8 @@ pub struct StreamMeta {
     pub virtual_key_id: Option<String>,
     pub attempt_index: i64,
     pub session_id: Option<String>,
+    /// 一次客户端请求的关联标识，与同请求的其它尝试共享。
+    pub trace_id: String,
     /// 请求侧估算的输入 token，供上游漏报时补齐。
     pub input_estimate: Option<i64>,
 }
@@ -330,12 +339,17 @@ pub fn stream_response(
         let mut ttfb: Option<Duration> = None;
         // 上游长时间不吐字节即视为挂起：主动中止并把该次调用记为失败，
         // 避免连接与扫描任务被永久占住。
-        let mut failure: Option<String> = None;
+        let mut failure: Option<LogError> = None;
+        // 已成功推送给客户端的字节数：客户端中途断开时记进错误文案，便于判断断点。
+        let mut sent_bytes: u64 = 0;
         loop {
             let item = match timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
                 Ok(item) => item,
                 Err(_) => {
-                    failure = Some("上游流式响应超时（长时间无数据）".to_string());
+                    failure = Some(LogError::new(
+                        ErrorKind::LinkStreamStalled,
+                        "上游流式响应超时（长时间无数据）",
+                    ));
                     let _ = tx
                         .send(Err(std::io::Error::new(
                             std::io::ErrorKind::TimedOut,
@@ -358,20 +372,30 @@ pub fn stream_response(
                             Ok(output) if output.is_empty() => continue,
                             Ok(output) => Bytes::from(output),
                             Err(error) => {
-                                failure = Some(error.to_string());
+                                failure = Some(LogError::new(
+                                    ErrorKind::ConversionFailed,
+                                    error.to_string(),
+                                ));
                                 break;
                             }
                         },
                         None => bytes,
                     };
+                    let payload_len = payload.len() as u64;
                     if tx.send(Ok(payload)).await.is_err() {
                         // 下游（客户端）提前断开：既不能记为成功，也没必要继续读上游。
-                        failure = Some("客户端中断连接，响应未完整送达".to_string());
+                        // 这是客户端行为，不是失败——状态记 `cancelled`，不计入失败率。
+                        failure = Some(LogError::new(
+                            ErrorKind::ClientClosed,
+                            format!("客户端中断连接，响应未完整送达（已发送 {sent_bytes} 字节）"),
+                        ));
                         break;
                     }
+                    sent_bytes += payload_len;
                 }
                 Err(error) => {
-                    failure = Some(error.to_string());
+                    let (kind, hint) = classify_reqwest(&error);
+                    failure = Some(LogError::new(kind, format!("{hint}：{error}")));
                     let _ = tx.send(Err(std::io::Error::other(error.to_string()))).await;
                     break;
                 }
@@ -387,15 +411,34 @@ pub fn stream_response(
                             let _ = tx.send(Ok(Bytes::from(tail))).await;
                         }
                         if !matches!(ended, Termination::Explicit | Termination::CleanClose) {
-                            failure = Some(format!("上游流式响应未正常结束：{ended:?}"));
+                            failure = Some(LogError::new(
+                                ErrorKind::UpstreamTruncated,
+                                format!("上游流式响应未正常结束：{ended:?}"),
+                            ));
                         }
                     }
-                    Err(error) => failure = Some(error.to_string()),
+                    Err(error) => {
+                        failure = Some(LogError::new(
+                            ErrorKind::ConversionFailed,
+                            error.to_string(),
+                        ))
+                    }
                 }
                 if failure.is_none() && conversion.log_report("流式响应转换") {
-                    failure = Some("协议转换出现不可恢复的降级".to_string());
+                    failure = Some(LogError::new(
+                        ErrorKind::ConversionFailed,
+                        "协议转换出现不可恢复的降级",
+                    ));
                 }
             }
+        }
+        // 非转换路径没有 `Termination` 可依，只能靠扫描器是否见到终止事件判断截断。
+        // **已知局限**：收尾方式非标准的上游可能被误判，必要时按 provider 豁免。
+        if failure.is_none() && conversion.is_none() && !scanner.finalized() {
+            failure = Some(LogError::new(
+                ErrorKind::UpstreamTruncated,
+                "上游流未正常收尾（未见终止事件）",
+            ));
         }
         drop(tx);
 
@@ -405,18 +448,25 @@ pub fn stream_response(
             is_stream: true,
             route: Some(route),
             latency_ms: started.elapsed().as_millis() as i64,
-            status: if failure.is_none() && status.is_success() {
+            // 客户端取消单列为 `cancelled`：语义上既非成功，也不该污染失败率。
+            status: if failure
+                .as_ref()
+                .is_some_and(|error| error.kind == ErrorKind::ClientClosed)
+            {
+                "cancelled".to_string()
+            } else if failure.is_none() && status.is_success() {
                 "success".to_string()
             } else {
                 "error".to_string()
             },
             http_status: Some(status.as_u16() as i64),
-            error_message: failure,
+            error: failure,
             request_id,
             virtual_key_id: meta.virtual_key_id,
             usage: scanner.totals(),
             attempt_index: meta.attempt_index,
             session_id: meta.session_id,
+            trace_id: Some(meta.trace_id),
         });
         log.ttfb_ms = ttfb.map(|elapsed| elapsed.as_millis() as i64);
         let _ = record(&state, log).await;
@@ -429,7 +479,9 @@ pub fn stream_response(
     let mut response = Response::new(Body::from_stream(stream));
     *response.status_mut() = status;
     if let Some(content_type) = content_type {
-        response.headers_mut().insert(header::CONTENT_TYPE, content_type);
+        response
+            .headers_mut()
+            .insert(header::CONTENT_TYPE, content_type);
     }
     response
 }
@@ -480,8 +532,14 @@ mod tests {
 
     #[test]
     fn upstream_path_covers_new_protocols() {
-        assert_eq!(upstream_path(PROTOCOL_OPENAI, "gpt", false), "chat/completions");
-        assert_eq!(upstream_path(PROTOCOL_ANTHROPIC, "claude", false), "messages");
+        assert_eq!(
+            upstream_path(PROTOCOL_OPENAI, "gpt", false),
+            "chat/completions"
+        );
+        assert_eq!(
+            upstream_path(PROTOCOL_ANTHROPIC, "claude", false),
+            "messages"
+        );
         assert_eq!(upstream_path(PROTOCOL_RESPONSES, "gpt", false), "responses");
         assert_eq!(
             upstream_path(PROTOCOL_GEMINI, "gemini-2.5-pro", false),
@@ -539,9 +597,7 @@ mod tests {
 
         // 缺少 message_stop：视为未收尾。
         let mut aborted = make_scanner(PROTOCOL_ANTHROPIC);
-        aborted.push(
-            b"data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":15}}\n\n",
-        );
+        aborted.push(b"data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":15}}\n\n");
         assert_eq!(aborted.totals().source, UsageSource::Partial);
     }
 
@@ -600,4 +656,3 @@ mod tests {
         assert_eq!(scanner.totals().source, UsageSource::Partial);
     }
 }
-

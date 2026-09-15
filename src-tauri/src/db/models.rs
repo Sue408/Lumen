@@ -423,6 +423,10 @@ pub struct RequestLog {
     /// 首字节耗时：流式场景下从上游响应头到达至首个数据块；非流式为 `None`。
     pub ttfb_ms: Option<i64>,
     pub error_message: Option<String>,
+    /// 失败归因主体（`upstream` / `gateway` / `client`）。历史行为 `None`。
+    pub error_domain: Option<String>,
+    /// 失败归因类目（详见 `crate::error::ErrorKind`，`link_*` 归 `upstream`）。
+    pub error_kind: Option<String>,
     pub request_id: Option<String>,
     pub is_stream: bool,
     /// 本次客户端请求内的上游尝试序号，从 0 起。降级链中失败与成功的尝试各占一条。
@@ -430,6 +434,8 @@ pub struct RequestLog {
     /// 会话标识：由候选会话头名解析而来，客户端未带时为 `None`。仅作日志维度，
     /// 不实体化、不做生命周期；按 `(virtual_key_id, session_id)` 聚合。
     pub session_id: Option<String>,
+    /// 一次客户端请求的关联标识：降级链中的多次尝试共享同一 `trace_id`。
+    pub trace_id: Option<String>,
 }
 
 impl RequestLog {
@@ -461,10 +467,13 @@ impl RequestLog {
             latency_ms: row.get("latency_ms")?,
             ttfb_ms: row.get("ttfb_ms")?,
             error_message: row.get("error_message")?,
+            error_domain: row.get("error_domain")?,
+            error_kind: row.get("error_kind")?,
             request_id: row.get("request_id")?,
             is_stream: row.get::<_, i64>("is_stream")? != 0,
             attempt_index: row.get("attempt_index")?,
             session_id: row.get("session_id")?,
+            trace_id: row.get("trace_id")?,
         })
     }
 }

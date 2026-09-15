@@ -39,10 +39,13 @@ export type RequestLog = {
   /** 首字节耗时（流式）；非流式为 null。生成速度据此扣除首字等待。 */
   ttfbMs: number | null;
   errorMessage: string | null;
+  errorDomain: string | null;
+  errorKind: string | null;
   requestId: string | null;
   isStream: boolean;
   attemptIndex: number;
   sessionId: string | null;
+  traceId: string | null;
 };
 
 const DEFAULT_PORT = 8787;

@@ -108,10 +108,16 @@ CREATE TABLE IF NOT EXISTS request_logs (
     -- 整段 latency 中扣除首字等待，非流式为 NULL。
     ttfb_ms             INTEGER,
     error_message       TEXT,
+    -- 失败归因：主体（upstream / gateway / client）与类目（`link_*` 归 upstream）。
+    -- `error_message` 仍是人话；这两列供机读、筛选与统计。历史行为 NULL。
+    error_domain        TEXT,
+    error_kind          TEXT,
     request_id          TEXT,
     is_stream           INTEGER NOT NULL DEFAULT 0,
     attempt_index       INTEGER NOT NULL DEFAULT 0,
-    session_id          TEXT
+    session_id          TEXT,
+    -- 一次客户端请求的关联标识：降级链中的多次尝试共享同一 trace_id。
+    trace_id            TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_request_logs_occurred ON request_logs(occurred_at);
@@ -130,6 +136,8 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_usage_source ON request_logs(usage_s
 -- 会话筛选与 `list_sessions` 的 `(virtual_key_id, session_id)` 分组都按 session_id
 -- 取行。会话值由候选头名解析而来，客户端未带时为 NULL。
 CREATE INDEX IF NOT EXISTS idx_request_logs_session ON request_logs(session_id);
+-- 按一次客户端请求聚合降级链：同 trace_id 的多行尝试需要一起取出。
+CREATE INDEX IF NOT EXISTS idx_request_logs_trace ON request_logs(trace_id);
 
 -- 路由目标的自然键：同一路由内同一上游模型只能出现一次。save_route 据此 upsert，
 -- 使 target id 稳定（未来日志可引用实际履约 target）。
@@ -139,7 +147,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_route_targets_route_model
 
 /// 最新 schema 版本。每次修改 `SCHEMA` 的**结构**（新建表 / 加列 / 改约束）就 +1，
 /// 并在 `MIGRATIONS` 补一条对应目标的增量语句；纯加索引不算（`SCHEMA` 幂等补建即可）。
-pub const SCHEMA_VERSION: i64 = 16;
+pub const SCHEMA_VERSION: i64 = 17;
 
 /// 把 `user_version` 从「目标版本 - 1」提升到「目标版本」的增量语句，按目标版本升序。
 /// 只允许增量（`ALTER TABLE ADD COLUMN` / `CREATE TABLE` / `CREATE [UNIQUE] INDEX`），
@@ -163,10 +171,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
         "ALTER TABLE routes ADD COLUMN icon TEXT;
          ALTER TABLE routes ADD COLUMN icon_tint TEXT;",
     ),
-    (
-        11,
-        "ALTER TABLE request_logs ADD COLUMN session_id TEXT;",
-    ),
+    (11, "ALTER TABLE request_logs ADD COLUMN session_id TEXT;"),
     (
         12,
         "ALTER TABLE route_targets ADD COLUMN header_rules TEXT NOT NULL DEFAULT '{}';",
@@ -175,10 +180,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
         13,
         "ALTER TABLE providers ADD COLUMN header_rules TEXT NOT NULL DEFAULT '{}';",
     ),
-    (
-        14,
-        "ALTER TABLE request_logs ADD COLUMN ttfb_ms INTEGER;",
-    ),
+    (14, "ALTER TABLE request_logs ADD COLUMN ttfb_ms INTEGER;"),
     // v15：协议从提供商单值下沉为「协议端点」。建端点表 → 用旧 provider 的
     // `protocol / base_url / auth_scheme` 回填一条端点 → 重建 providers 去掉这三列。
     // 重建被 upstream_models / provider_endpoints 外键引用，故 configure 在迁移期间关闭外键。
@@ -228,7 +230,14 @@ const MIGRATIONS: &[(i64, &str)] = &[
          INSERT INTO provider_endpoints_new (id, provider_id, protocol, base_url, auth_scheme)
          SELECT id, provider_id, protocol, base_url, auth_scheme FROM provider_endpoints;
          DROP TABLE provider_endpoints;
-         ALTER TABLE provider_endpoints_new RENAME TO provider_endpoints;",
+          ALTER TABLE provider_endpoints_new RENAME TO provider_endpoints;",
+    ),
+    // v17：失败归因（domain / kind）与一次客户端请求的关联 id（trace_id）。
+    (
+        17,
+        "ALTER TABLE request_logs ADD COLUMN error_domain TEXT;
+         ALTER TABLE request_logs ADD COLUMN error_kind TEXT;
+         ALTER TABLE request_logs ADD COLUMN trace_id TEXT;",
     ),
 ];
 
@@ -334,6 +343,18 @@ mod tests {
         .unwrap();
     }
 
+    /// 把最新库降到 v17 之前：撤 trace 索引并删掉归因三列，模拟旧流水结构。
+    fn downgrade_logs_to_pre_v17(conn: &Connection) {
+        conn.execute("DROP INDEX idx_request_logs_trace", [])
+            .unwrap();
+        conn.execute("ALTER TABLE request_logs DROP COLUMN trace_id", [])
+            .unwrap();
+        conn.execute("ALTER TABLE request_logs DROP COLUMN error_domain", [])
+            .unwrap();
+        conn.execute("ALTER TABLE request_logs DROP COLUMN error_kind", [])
+            .unwrap();
+    }
+
     fn open_fresh() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         configure(&conn).unwrap();
@@ -363,10 +384,13 @@ mod tests {
         )
         .unwrap();
         // 模拟 v9 旧库：去掉 v10 / v11 才新增的列，数据与更低的版本号都保留。
-        conn.execute("ALTER TABLE routes DROP COLUMN icon", []).unwrap();
-        conn.execute("ALTER TABLE routes DROP COLUMN icon_tint", []).unwrap();
+        conn.execute("ALTER TABLE routes DROP COLUMN icon", [])
+            .unwrap();
+        conn.execute("ALTER TABLE routes DROP COLUMN icon_tint", [])
+            .unwrap();
         // v11 的 session_id 带索引，先撤索引再删列。
-        conn.execute("DROP INDEX idx_request_logs_session", []).unwrap();
+        conn.execute("DROP INDEX idx_request_logs_session", [])
+            .unwrap();
         conn.execute("ALTER TABLE request_logs DROP COLUMN session_id", [])
             .unwrap();
         conn.execute("ALTER TABLE request_logs DROP COLUMN ttfb_ms", [])
@@ -376,6 +400,8 @@ mod tests {
         // v13 的 provider header_rules 同样先撤，模拟 v9 库。
         conn.execute("ALTER TABLE providers DROP COLUMN header_rules", [])
             .unwrap();
+        // v17 的归因列同样先撤。
+        downgrade_logs_to_pre_v17(&conn);
         // v15 之前 provider 自带协议列；回补成旧结构并填入待迁移的端点信息。
         downgrade_providers_to_pre_v15(&conn);
         conn.execute(
@@ -421,6 +447,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(session_null, 1, "旧流水的 session_id 应为 NULL");
+        // v17 归因列与 trace_id 按 NULL 补齐。
+        let attribution_null: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM request_logs
+                  WHERE error_domain IS NULL AND error_kind IS NULL AND trace_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(attribution_null, 1, "旧流水的归因列应为 NULL");
         // v13 列按默认空规则补齐。
         let provider_rules: String = conn
             .query_row("SELECT header_rules FROM providers LIMIT 1", [], |row| {
@@ -491,7 +527,8 @@ mod tests {
         conn.execute("ALTER TABLE request_logs DROP COLUMN attempt_index", [])
             .unwrap();
         // v11 的 session_id 带索引，SQLite 不允许直接删除已索引的列，先撤索引再删列。
-        conn.execute("DROP INDEX idx_request_logs_session", []).unwrap();
+        conn.execute("DROP INDEX idx_request_logs_session", [])
+            .unwrap();
         conn.execute("ALTER TABLE request_logs DROP COLUMN session_id", [])
             .unwrap();
         conn.execute("ALTER TABLE request_logs DROP COLUMN ttfb_ms", [])
@@ -505,6 +542,8 @@ mod tests {
             .unwrap();
         conn.execute("ALTER TABLE routes DROP COLUMN icon_tint", [])
             .unwrap();
+        // v17 的归因列同样先撤。
+        downgrade_logs_to_pre_v17(&conn);
         // v15 之前 provider 自带协议列；回补成旧结构并填入待迁移的端点信息。
         downgrade_providers_to_pre_v15(&conn);
         conn.execute(
@@ -537,9 +576,11 @@ mod tests {
         assert_eq!(table_count("route_targets"), 1);
         // v12 新列按默认空规则补齐。
         let rules: String = conn
-            .query_row("SELECT header_rules FROM route_targets LIMIT 1", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT header_rules FROM route_targets LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(rules, "{}", "旧目标应补空规则");
 

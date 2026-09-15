@@ -151,10 +151,13 @@ mod tests {
             latency_ms: Some(10),
             ttfb_ms: None,
             error_message: None,
+            error_domain: None,
+            error_kind: None,
             request_id: None,
             is_stream: false,
             attempt_index: 0,
             session_id: None,
+            trace_id: None,
         }
     }
 

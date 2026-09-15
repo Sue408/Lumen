@@ -351,6 +351,8 @@ function LogDetail({ log }: { log: RequestLog }) {
       <DetailRow term="请求 ID">
         <RequestId value={log.requestId} />
       </DetailRow>
+      <DetailRow term="追踪">{log.traceId ?? "—"}</DetailRow>
+      <DetailRow term="尝试">{`第 ${log.attemptIndex + 1} 次`}</DetailRow>
       <DetailRow term="路由">{chain.length > 0 ? chain.join("  →  ") : "未匹配到路由"}</DetailRow>
       {log.sessionId ? <DetailRow term="会话">{log.sessionId}</DetailRow> : null}
       <DetailRow term="用量来源">{usageSourceLabels[log.usageSource] ?? log.usageSource}</DetailRow>

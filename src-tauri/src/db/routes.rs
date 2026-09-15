@@ -194,6 +194,17 @@ pub fn list_enabled_aliases(conn: &Connection) -> Result<Vec<(String, String)>, 
     Ok(aliases)
 }
 
+/// 别名是否存在且路由已启用。网关用它区分两种同为 404 的空候选：
+/// 「别名根本不存在」与「别名在、但目标 / 模型 / 端点全不可用」。
+pub fn enabled_alias_exists(conn: &Connection, alias: &str) -> Result<bool, AppError> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM routes WHERE alias = ?1 AND enabled = 1",
+        [alias],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

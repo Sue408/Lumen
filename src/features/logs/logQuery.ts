@@ -1,12 +1,13 @@
 import type { RequestLog, UsageSource } from "../../services/gateway";
 import type { LogFilter } from "../../services/usage";
 
-export type LogScope = "attention" | "all" | "failed" | "unreliable";
+export type LogScope = "attention" | "all" | "failed" | "cancelled" | "unreliable";
 
 export const logScopes: { key: LogScope; label: string }[] = [
   { key: "attention", label: "待处理" },
   { key: "all", label: "全部" },
   { key: "failed", label: "失败" },
+  { key: "cancelled", label: "已取消" },
   { key: "unreliable", label: "用量存疑" },
 ];
 
@@ -22,6 +23,8 @@ export type LogFilterOptions = {
   query?: string;
   range?: LogRange;
   session?: string;
+  /** 按归因主体过滤（`upstream` / `gateway` / `client`）。 */
+  errorDomain?: string;
 };
 
 /** 把页面的口径 / 区间 / 别名 / 搜索折算成后端 LogFilter，过滤一律下推数据库。 */
@@ -31,9 +34,11 @@ export function buildLogFilter(options: LogFilterOptions): LogFilter {
   if (options.range?.to) filter.to = options.range.to;
   if (options.scope === "attention") filter.attentionOnly = true;
   if (options.scope === "failed") filter.status = "error";
+  if (options.scope === "cancelled") filter.status = "cancelled";
   if (options.scope === "unreliable") filter.usageSource = "unreliable";
   if (options.alias && options.alias !== ALL_ALIASES) filter.routeAlias = options.alias;
   if (options.session && options.session !== ALL_SESSIONS) filter.sessionId = options.session;
+  if (options.errorDomain) filter.errorDomain = options.errorDomain;
   const query = options.query?.trim();
   if (query) filter.query = query;
   return filter;
@@ -72,10 +77,14 @@ export function formatRangeLabel(range: LogRange): string {
   return "全部记录";
 }
 
-export type LogMark = { tone: "error" | "unreliable"; label: string };
+export type LogMark = { tone: "error" | "unreliable" | "cancelled"; label: string };
 
-/** 记录在流水里的异常标记：失败优先，其次是用量可信度。 */
+/**
+ * 记录在流水里的标记：客户端取消是中性事件，先于失败与用量可信度——它既不该被
+ * 当成失败（朱砂），也不该被用量存疑掩盖。
+ */
 export function describeLog(log: RequestLog): LogMark | null {
+  if (log.status === "cancelled") return { tone: "cancelled", label: "已取消" };
   if (log.status === "error") return { tone: "error", label: "失败" };
   if (log.usageSource === "missing") return { tone: "unreliable", label: "用量未上报" };
   if (log.usageSource === "partial") return { tone: "unreliable", label: "用量不完整" };
@@ -118,6 +127,34 @@ export function tokenBreakdown(log: RequestLog): TokenPart[] {
   if (log.cacheCreationTokens > 0) parts.push({ label: "缓存写", value: log.cacheCreationTokens });
   if (log.reasoningTokens > 0) parts.push({ label: "推理", value: log.reasoningTokens });
   return parts;
+}
+
+export type LogTraceGroup = { traceId: string | null; logs: RequestLog[] };
+
+/**
+ * 把一次客户端请求的多次尝试归到一起：带 `traceId` 的按它合并（组内按 `attemptIndex`
+ * 升序），没有的各自独立成组并保持输入顺序。只读分组，不改后端查询。
+ */
+export function groupByTrace(logs: RequestLog[]): LogTraceGroup[] {
+  const groups: LogTraceGroup[] = [];
+  const indexByTrace = new Map<string, number>();
+  for (const log of logs) {
+    if (!log.traceId) {
+      groups.push({ traceId: null, logs: [log] });
+      continue;
+    }
+    let index = indexByTrace.get(log.traceId);
+    if (index === undefined) {
+      index = groups.length;
+      indexByTrace.set(log.traceId, index);
+      groups.push({ traceId: log.traceId, logs: [] });
+    }
+    groups[index].logs.push(log);
+  }
+  for (const group of groups) {
+    group.logs.sort((a, b) => a.attemptIndex - b.attemptIndex);
+  }
+  return groups;
 }
 
 export type LogDayGroup = { key: string; label: string; logs: RequestLog[] };

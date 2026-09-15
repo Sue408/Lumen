@@ -27,6 +27,12 @@ pub struct LogFilter {
     /// 会话等值过滤；与列表页的会话筛选对应。
     #[serde(default)]
     pub session_id: Option<String>,
+    /// 归因主体过滤（`upstream` / `gateway` / `client`）；供「待处理」按来源分类。
+    #[serde(default)]
+    pub error_domain: Option<String>,
+    /// 归因类目过滤（`ErrorKind` 的 snake_case 取值）。
+    #[serde(default)]
+    pub error_kind: Option<String>,
     /// 只保留需要关注的记录：status = 'error' 或 usage_source 为 missing / partial。
     #[serde(default)]
     pub attention_only: Option<bool>,
@@ -109,6 +115,14 @@ fn build_where(filter: &LogFilter) -> Result<(String, Vec<Box<dyn rusqlite::ToSq
         clauses.push("session_id = ?");
         params.push(Box::new(session));
     }
+    if let Some(domain) = non_empty(&filter.error_domain) {
+        clauses.push("error_domain = ?");
+        params.push(Box::new(domain));
+    }
+    if let Some(kind) = non_empty(&filter.error_kind) {
+        clauses.push("error_kind = ?");
+        params.push(Box::new(kind));
+    }
     if filter.attention_only == Some(true) {
         clauses.push("(status = 'error' OR usage_source IN ('missing', 'partial'))");
     }
@@ -128,11 +142,13 @@ pub fn insert_log(conn: &Connection, log: &RequestLog) -> Result<(), AppError> {
             upstream_model_id, upstream_model_name, model_real, provider_id, virtual_key_id,
             kind, input_tokens, output_tokens, total_tokens,
             cache_read_tokens, cache_creation_tokens, cache_read_in_input, reasoning_tokens,
-            cost, usage_source, status, http_status, latency_ms, ttfb_ms, error_message, request_id, is_stream,
-            attempt_index, session_id
+            cost, usage_source, status, http_status, latency_ms, ttfb_ms, error_message,
+            error_domain, error_kind, request_id, is_stream,
+            attempt_index, session_id, trace_id
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-            ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30
+            ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
+            ?31, ?32, ?33
          )",
         params![
             log.id,
@@ -161,10 +177,13 @@ pub fn insert_log(conn: &Connection, log: &RequestLog) -> Result<(), AppError> {
             log.latency_ms,
             log.ttfb_ms,
             log.error_message,
+            log.error_domain,
+            log.error_kind,
             log.request_id,
             log.is_stream as i64,
             log.attempt_index,
             log.session_id,
+            log.trace_id,
         ],
     )?;
     Ok(())
@@ -362,10 +381,13 @@ mod tests {
             latency_ms: Some(120),
             ttfb_ms: None,
             error_message: if status == "error" { Some("上游超时".into()) } else { None },
+            error_domain: None,
+            error_kind: None,
             request_id: Some(format!("req-{n}")),
             is_stream: false,
             attempt_index: 0,
             session_id: None,
+            trace_id: None,
         }
     }
 

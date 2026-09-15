@@ -904,6 +904,18 @@ fn generate_logs(set: &DemoSet, profile: &Profile, now: DateTime<Local>) -> Vec<
             } else {
                 None
             };
+            // 失败样例一并给出归因，供日志页的分类筛选与详情展示。
+            let (error_domain, error_kind) = if status == "error" {
+                let kind = match http_status {
+                    Some(401) => "upstream_auth_failed",
+                    Some(429) => "upstream_rate_limited",
+                    Some(504) => "link_timeout",
+                    _ => "upstream_unavailable",
+                };
+                (Some("upstream".to_string()), Some(kind.to_string()))
+            } else {
+                (None, None)
+            };
             let latency_ms = rng.range(200, 2_600) + if is_stream { 300 } else { 0 };
             // 流式记录给一个约三分之一的首字等待，供生成速度演示；非流式为 NULL。
             let ttfb_ms = is_stream.then_some(latency_ms / 3);
@@ -939,10 +951,13 @@ fn generate_logs(set: &DemoSet, profile: &Profile, now: DateTime<Local>) -> Vec<
                 latency_ms: Some(latency_ms),
                 ttfb_ms,
                 error_message,
+                error_domain,
+                error_kind,
                 request_id: Some(format!("req_demo_{sequence}")),
                 is_stream,
                 attempt_index: 0,
                 session_id: None,
+                trace_id: Some(format!("trace_demo_{sequence}")),
             });
             sequence += 1;
         }

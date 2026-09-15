@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod body;
 pub mod convert;
 pub mod estimate;
 pub mod failover;
@@ -17,6 +18,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::extract::DefaultBodyLimit;
 use axum::middleware;
 use axum::routing::{get, post};
 use axum::Router;
@@ -50,6 +52,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/messages", post(handlers::messages))
         .route("/responses", post(handlers::responses))
         .fallback(handlers::not_found)
+        // 放宽 body 上限：axum 对 `Json` 的默认 2 MiB 会让正常的大请求在进 handler 前
+        // 就被 413 挡下（见 `body::MAX_REQUEST_BODY`）。必须在提取器之前生效。
+        .layer(DefaultBodyLimit::max(body::MAX_REQUEST_BODY))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             handlers::log_request,
@@ -112,7 +117,10 @@ pub async fn start(state: Arc<AppState>) -> Result<(), AppError> {
         let loaded = tokio::task::spawn_blocking(move || estimate::prewarm(&models))
             .await
             .unwrap_or(0);
-        tracing::info!("tokenizer 预热完成：{loaded} 种编码，用时 {:?}", started.elapsed());
+        tracing::info!(
+            "tokenizer 预热完成：{loaded} 种编码，用时 {:?}",
+            started.elapsed()
+        );
     });
 
     Ok(())

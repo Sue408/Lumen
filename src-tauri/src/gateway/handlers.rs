@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -9,13 +10,12 @@ use chrono::Local;
 use serde_json::{json, Value};
 
 use crate::db::keys::virtual_key_spend;
-use crate::db::models::{
-    PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
-};
-use crate::db::routes::list_enabled_aliases;
+use crate::db::models::{PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES};
+use crate::db::routes::{enabled_alias_exists, list_enabled_aliases};
 use crate::db::with_db;
-use crate::error::AppError;
+use crate::error::{classify_upstream_status, AppError, ErrorKind, LogError};
 use crate::gateway::auth::authenticate;
+use crate::gateway::body::JsonBody;
 use crate::gateway::convert;
 use crate::gateway::estimate::{self, Estimates};
 use crate::gateway::failover::{classify, parse_retry_after, AttemptAction};
@@ -24,7 +24,7 @@ use crate::gateway::forward::{
     StreamMeta,
 };
 use crate::gateway::quota::{exceeded_limit, period_label, period_start, QuotaPeriod};
-use crate::gateway::reject::reject;
+use crate::gateway::reject::{reject, reject_with};
 use crate::gateway::resolve::{resolve_all, ResolvedRoute};
 use crate::gateway::session;
 use crate::gateway::usage::{build_log, extract_usage_estimated, record, LogContext, UsageTotals};
@@ -67,11 +67,36 @@ pub async fn log_request(
 
 /// 兜底：未匹配任何路由的请求。记录完整的「方法 + 路径」——这是排查客户端 `base_url`
 /// 或端点路径写错的第一手线索——并返回标准的 JSON 404。
-pub async fn not_found(request: axum::extract::Request) -> Response {
+pub async fn not_found(
+    State(state): State<Arc<AppState>>,
+    request: axum::extract::Request,
+) -> Response {
     let method = request.method().clone();
     let path = request.uri().path().to_string();
     tracing::warn!("网关收到未知端点：{method} {path}（请检查客户端的 base_url 与路径）");
-    error_response(StatusCode::NOT_FOUND, &format!("未知端点：{method} {path}"))
+    let message = format!("未知端点：{method} {path}");
+    // 运行日志之外也补一条流水：客户端 base_url 写错时，账本里应看得见这次打偏的请求。
+    record_log(
+        &state,
+        LogContext {
+            endpoint: path,
+            alias: String::new(),
+            is_stream: false,
+            route: None,
+            latency_ms: 0,
+            status: "error".to_string(),
+            http_status: Some(StatusCode::NOT_FOUND.as_u16() as i64),
+            error: Some(LogError::new(ErrorKind::UnknownEndpoint, message.clone())),
+            request_id: None,
+            virtual_key_id: None,
+            usage: UsageTotals::missing(),
+            attempt_index: 0,
+            session_id: None,
+            trace_id: None,
+        },
+    )
+    .await;
+    error_response(StatusCode::NOT_FOUND, &message)
 }
 
 pub async fn list_models(State(state): State<Arc<AppState>>) -> Response {
@@ -98,7 +123,7 @@ pub async fn list_models(State(state): State<Arc<AppState>>) -> Response {
 pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    JsonBody(body): JsonBody,
 ) -> Response {
     forward(
         state,
@@ -116,7 +141,7 @@ pub async fn chat_completions(
 pub async fn messages(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    JsonBody(body): JsonBody,
 ) -> Response {
     forward(
         state,
@@ -134,7 +159,7 @@ pub async fn messages(
 pub async fn responses(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    JsonBody(body): JsonBody,
 ) -> Response {
     forward(
         state,
@@ -153,7 +178,7 @@ pub async fn gemini_generate(
     State(state): State<Arc<AppState>>,
     Path(model_action): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    JsonBody(body): JsonBody,
 ) -> Response {
     let Some((alias, action)) = model_action.split_once(':') else {
         return error_response(
@@ -204,21 +229,57 @@ async fn forward(
     path_alias: Option<String>,
     path_stream: Option<bool>,
 ) -> Response {
+    // 一次客户端请求一个 trace：降级链里的所有尝试共用，便于把它们串成一条链。
+    let trace_id = uuid::Uuid::new_v4().to_string();
+    let is_stream =
+        path_stream.unwrap_or_else(|| body.get("stream").and_then(Value::as_bool).unwrap_or(false));
     let alias = match path_alias {
         Some(alias) => alias,
         None => match body.get("model").and_then(Value::as_str) {
             Some(alias) if !alias.is_empty() => alias.to_string(),
-            _ => return error_response(StatusCode::BAD_REQUEST, "请求缺少 model 字段"),
+            _ => {
+                // 客户端请求形状错误，但也要留痕：否则账本里完全看不到这次调用。
+                let message = "请求缺少 model 字段";
+                record_log(
+                    &state,
+                    LogContext {
+                        endpoint: endpoint.to_string(),
+                        alias: String::new(),
+                        is_stream,
+                        route: None,
+                        latency_ms: 0,
+                        status: "error".to_string(),
+                        http_status: Some(StatusCode::BAD_REQUEST.as_u16() as i64),
+                        error: Some(LogError::new(ErrorKind::InvalidRequest, message)),
+                        request_id: None,
+                        virtual_key_id: None,
+                        usage: UsageTotals::missing(),
+                        attempt_index: 0,
+                        session_id: None,
+                        trace_id: Some(trace_id.clone()),
+                    },
+                )
+                .await;
+                return error_response(StatusCode::BAD_REQUEST, message);
+            }
         },
     };
-    let is_stream = path_stream
-        .unwrap_or_else(|| body.get("stream").and_then(Value::as_bool).unwrap_or(false));
 
     // 强制鉴权：无有效 key 直接拒绝，并落一条无归属的 error 日志。
     let virtual_key = match authenticate(&state, &headers).await {
         Ok(key) => key,
         Err(error) => {
-            reject(&state, endpoint, &alias, is_stream, None, None, &error).await;
+            reject(
+                &state,
+                endpoint,
+                &alias,
+                is_stream,
+                None,
+                None,
+                &error,
+                Some(trace_id.clone()),
+            )
+            .await;
             return error.into_response();
         }
     };
@@ -231,24 +292,27 @@ async fn forward(
     let period = QuotaPeriod::parse(&virtual_key.quota_period);
     let spend_start = period_start(period, Local::now());
     let spend_key = key_id.clone();
-    let spent =
-        match with_db(&state.db, move |conn| virtual_key_spend(conn, &spend_key, spend_start)).await
-        {
-            Ok(spent) => spent,
-            Err(error) => {
-                reject(
-                    &state,
-                    endpoint,
-                    &alias,
-                    is_stream,
-                    None,
-                    Some(key_id.clone()),
-                    &error,
-                )
-                .await;
-                return error.into_response();
-            }
-        };
+    let spent = match with_db(&state.db, move |conn| {
+        virtual_key_spend(conn, &spend_key, spend_start)
+    })
+    .await
+    {
+        Ok(spent) => spent,
+        Err(error) => {
+            reject(
+                &state,
+                endpoint,
+                &alias,
+                is_stream,
+                None,
+                Some(key_id.clone()),
+                &error,
+                Some(trace_id.clone()),
+            )
+            .await;
+            return error.into_response();
+        }
+    };
     if let Some(limit) = exceeded_limit(spent, virtual_key.quota_limit) {
         let error = AppError::QuotaExceeded {
             name: virtual_key.name.clone(),
@@ -264,6 +328,7 @@ async fn forward(
             None,
             Some(key_id.clone()),
             &error,
+            Some(trace_id.clone()),
         )
         .await;
         return error.into_response();
@@ -271,50 +336,112 @@ async fn forward(
 
     let candidates = match resolve_all(&state, &alias, required_protocol).await {
         Ok(candidates) => candidates,
-        Err(error) => return error.into_response(),
+        // 路由解析本身失败（DB / 锁）也要留痕，否则是一次无声的 500。
+        Err(error) => {
+            reject(
+                &state,
+                endpoint,
+                &alias,
+                is_stream,
+                None,
+                Some(key_id.clone()),
+                &error,
+                Some(trace_id.clone()),
+            )
+            .await;
+            return error.into_response();
+        }
     };
     if candidates.is_empty() {
+        // 同为 404，但要分开归因：别名根本不存在（`route_not_found`）与别名在、只是
+        // 目标 / 模型 / 协议端点全不可用（`route_no_candidate`）。后者多半是配置问题。
         let error = AppError::ModelNotFound(alias.clone());
-        reject(
+        let alias_key = alias.clone();
+        let alias_exists = with_db(&state.db, move |conn| {
+            enabled_alias_exists(conn, &alias_key)
+        })
+        .await
+        .unwrap_or(false);
+        let kind = if alias_exists {
+            ErrorKind::RouteNoCandidate
+        } else {
+            ErrorKind::RouteNotFound
+        };
+        reject_with(
             &state,
             endpoint,
             &alias,
             is_stream,
             None,
             Some(key_id.clone()),
-            &error,
+            error.status_code(),
+            LogError::new(kind, error.to_string()),
+            Some(trace_id.clone()),
         )
         .await;
         return error.into_response();
     }
 
-    // 过滤冷却中的目标；若因此无候选可用，直接回 502（并记一条 error）。
+    // 过滤冷却中的目标（快照顺带清理过期项）。若因此无候选可用，直接回 502，并把
+    // 每个候选的冷却原因与剩余时长写进日志——只留一句「全部冷却」等于没有线索。
+    let cooling = state.cooling_snapshot();
+    let cooling_ids: HashSet<String> = cooling
+        .iter()
+        .map(|entry| entry.upstream_model_id.clone())
+        .collect();
+    let resolved_ids: Vec<String> = candidates
+        .iter()
+        .map(|candidate| candidate.upstream_model_id.clone())
+        .collect();
+    let fallback_route = candidates.first().cloned();
     let candidates: Vec<ResolvedRoute> = candidates
         .into_iter()
-        .filter(|candidate| !state.is_cooling(&candidate.upstream_model_id))
+        .filter(|candidate| !cooling_ids.contains(&candidate.upstream_model_id))
         .collect();
     if candidates.is_empty() {
-        let message = "全部候选目标处于冷却中，暂无可用上游";
+        let detail: Vec<String> = cooling
+            .iter()
+            .filter(|entry| resolved_ids.contains(&entry.upstream_model_id))
+            .map(|entry| {
+                format!(
+                    "{}（{}，剩余 {}s）",
+                    entry.upstream_model_id, entry.error_kind, entry.remaining_secs
+                )
+            })
+            .collect();
+        let message = if detail.is_empty() {
+            "全部候选目标处于冷却中，暂无可用上游".to_string()
+        } else {
+            format!(
+                "全部候选目标处于冷却中，暂无可用上游：{}",
+                detail.join("；")
+            )
+        };
         record_log(
             &state,
             LogContext {
                 endpoint: endpoint.to_string(),
                 alias: alias.clone(),
                 is_stream,
-                route: None,
+                // 填首个被冷却的候选：详情里能看到实际命中的目标，而不是「未匹配到路由」。
+                route: fallback_route,
                 latency_ms: 0,
                 status: "error".to_string(),
                 http_status: Some(StatusCode::BAD_GATEWAY.as_u16() as i64),
-                error_message: Some(message.to_string()),
+                error: Some(LogError::new(
+                    ErrorKind::AllCandidatesCooling,
+                    message.clone(),
+                )),
                 request_id: None,
                 virtual_key_id: Some(key_id.clone()),
                 usage: UsageTotals::missing(),
                 attempt_index: 0,
                 session_id: session.clone(),
+                trace_id: Some(trace_id.clone()),
             },
         )
         .await;
-        return error_response(StatusCode::BAD_GATEWAY, message);
+        return error_response(StatusCode::BAD_GATEWAY, &message);
     }
 
     // 全部候选都需要跨协议转换、且请求用到了转换核无法表达的语义时，显式拒绝，
@@ -334,12 +461,16 @@ async fn forward(
                     latency_ms: 0,
                     status: "error".to_string(),
                     http_status: Some(StatusCode::BAD_REQUEST.as_u16() as i64),
-                    error_message: Some(reason.clone()),
+                    error: Some(LogError::new(
+                        ErrorKind::UnsupportedConversion,
+                        reason.clone(),
+                    )),
                     request_id: None,
                     virtual_key_id: Some(key_id.clone()),
                     usage: UsageTotals::missing(),
                     attempt_index: 0,
                     session_id: session.clone(),
+                    trace_id: Some(trace_id.clone()),
                 },
             )
             .await;
@@ -349,6 +480,8 @@ async fn forward(
 
     let mut attempt_index: i64 = 0;
     let mut last_error: Option<(StatusCode, String, Option<HeaderValue>)> = None;
+    // 待结算的冷却：失败当刻不落盘，等候选全部耗尽后统一决定（见「全局性抑制」）。
+    let mut pending: Vec<PendingCooldown> = Vec::new();
 
     for candidate in candidates {
         let mut retry_remaining = 1u8;
@@ -367,12 +500,17 @@ async fn forward(
                                 latency_ms: 0,
                                 status: "error".to_string(),
                                 http_status: None,
-                                error_message: Some(error.to_string()),
+                                // 构造上游请求失败：转换核报错或语义无法表达。
+                                error: Some(LogError::new(
+                                    ErrorKind::ConversionFailed,
+                                    error.to_string(),
+                                )),
                                 request_id: None,
                                 virtual_key_id: Some(key_id.clone()),
                                 usage: UsageTotals::missing(),
                                 attempt_index,
                                 session_id: session.clone(),
+                                trace_id: Some(trace_id.clone()),
                             },
                         )
                         .await;
@@ -382,38 +520,44 @@ async fn forward(
                 };
             let path = upstream_path(&candidate.upstream_protocol, &candidate.model_id, is_stream);
 
-
             let started = Instant::now();
-            let timeout = if is_stream { None } else { Some(UPSTREAM_TIMEOUT) };
-            let response =
-                match send(&state, &candidate, &attempt_body, &path, timeout, &headers).await
-                {
-                Ok(response) => response,
-                Err(error) => {
-                    record_log(
-                        &state,
-                        LogContext {
-                            endpoint: endpoint.to_string(),
-                            alias: alias.clone(),
-                            is_stream,
-                            route: Some(candidate.clone()),
-                            latency_ms: started.elapsed().as_millis() as i64,
-                            status: "error".to_string(),
-                            http_status: None,
-                            error_message: Some(error.to_string()),
-                            request_id: None,
-                            virtual_key_id: Some(key_id.clone()),
-                            usage: UsageTotals::missing(),
-                            attempt_index,
-                            session_id: session.clone(),
-                        },
-                    )
-                    .await;
-                    state.mark_cooling(&candidate.upstream_model_id, COOLDOWN_TRANSIENT);
-                    attempt_index += 1;
-                    break;
-                }
+            let timeout = if is_stream {
+                None
+            } else {
+                Some(UPSTREAM_TIMEOUT)
             };
+            let response =
+                match send(&state, &candidate, &attempt_body, &path, timeout, &headers).await {
+                    Ok(response) => response,
+                    Err(error) => {
+                        // 发送失败：`AppError::Http` 走链路的 is_timeout / is_connect 细分。
+                        let log_error = error.log_error();
+                        let kind = log_error.kind;
+                        record_log(
+                            &state,
+                            LogContext {
+                                endpoint: endpoint.to_string(),
+                                alias: alias.clone(),
+                                is_stream,
+                                route: Some(candidate.clone()),
+                                latency_ms: started.elapsed().as_millis() as i64,
+                                status: "error".to_string(),
+                                http_status: None,
+                                error: Some(log_error),
+                                request_id: None,
+                                virtual_key_id: Some(key_id.clone()),
+                                usage: UsageTotals::missing(),
+                                attempt_index,
+                                session_id: session.clone(),
+                                trace_id: Some(trace_id.clone()),
+                            },
+                        )
+                        .await;
+                        pending.push(PendingCooldown::new(&candidate, kind, COOLDOWN_TRANSIENT));
+                        attempt_index += 1;
+                        break;
+                    }
+                };
 
             let status = response.status();
             let retry_after = parse_retry_after(response.headers());
@@ -440,12 +584,16 @@ async fn forward(
                                 latency_ms,
                                 status: "error".to_string(),
                                 http_status: Some(status.as_u16() as i64),
-                                error_message: Some(message.clone()),
+                                error: Some(LogError::new(
+                                    ErrorKind::UpstreamStreamMismatch,
+                                    message.clone(),
+                                )),
                                 request_id: upstream_request_id,
                                 virtual_key_id: Some(key_id.clone()),
                                 usage: UsageTotals::missing(),
                                 attempt_index,
                                 session_id: session.clone(),
+                                trace_id: Some(trace_id.clone()),
                             },
                         )
                         .await;
@@ -454,7 +602,7 @@ async fn forward(
                             error_body(&message),
                             Some(HeaderValue::from_static("application/json")),
                         ));
-                        mark_cooling_for(&state, &candidate, status);
+                        pending.push(PendingCooldown::from_status(&candidate, status));
                         attempt_index += 1;
                         break;
                     }
@@ -470,6 +618,7 @@ async fn forward(
                             virtual_key_id: Some(key_id),
                             attempt_index,
                             session_id: session,
+                            trace_id: trace_id.clone(),
                             input_estimate,
                         },
                         response,
@@ -490,12 +639,13 @@ async fn forward(
                         latency_ms,
                         status: "error".to_string(),
                         http_status: Some(status.as_u16() as i64),
-                        error_message: Some(message),
+                        error: Some(LogError::new(classify_upstream_status(status), message)),
                         request_id: upstream_request_id,
                         virtual_key_id: Some(key_id.clone()),
                         usage: UsageTotals::missing(),
                         attempt_index,
                         session_id: session.clone(),
+                        trace_id: Some(trace_id.clone()),
                     },
                 )
                 .await;
@@ -511,23 +661,86 @@ async fn forward(
                 if matches!(action, AttemptAction::GiveUp) {
                     return passthrough(status, text, content_type);
                 }
-                mark_cooling_for(&state, &candidate, status);
+                pending.push(PendingCooldown::from_status(&candidate, status));
                 attempt_index += 1;
                 break;
             }
 
             let text = match response.text().await {
                 Ok(text) => text,
-                Err(error) => return AppError::from(error).into_response(),
+                // 读上游响应体失败（多半是连接中途断）：也要留一条，别让它无声消失。
+                Err(error) => {
+                    let error = AppError::from(error);
+                    record_log(
+                        &state,
+                        LogContext {
+                            endpoint: endpoint.to_string(),
+                            alias: alias.clone(),
+                            is_stream: false,
+                            route: Some(candidate.clone()),
+                            latency_ms,
+                            status: "error".to_string(),
+                            http_status: None,
+                            error: Some(error.log_error()),
+                            request_id: upstream_request_id,
+                            virtual_key_id: Some(key_id.clone()),
+                            usage: UsageTotals::missing(),
+                            attempt_index,
+                            session_id: session.clone(),
+                            trace_id: Some(trace_id.clone()),
+                        },
+                    )
+                    .await;
+                    return error.into_response();
+                }
             };
             let value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
             let message = error_message(&value, &text);
 
             match action {
                 AttemptAction::Served => {
+                    // 2xx 却带着顶层 `error`：中转站常见的「假成功」。绝不能当成功记账
+                    // （会记出无 token 的假流水），按可恢复失败降级；已是最后候选时由
+                    // 末尾的 `last_error` 透传成 502。
+                    if let Some(message) = upstream_error_body(&value) {
+                        record_log(
+                            &state,
+                            LogContext {
+                                endpoint: endpoint.to_string(),
+                                alias: alias.clone(),
+                                is_stream: false,
+                                route: Some(candidate.clone()),
+                                latency_ms,
+                                status: "error".to_string(),
+                                http_status: Some(status.as_u16() as i64),
+                                error: Some(LogError::new(
+                                    ErrorKind::UpstreamBadResponse,
+                                    message.clone(),
+                                )),
+                                request_id: upstream_request_id,
+                                virtual_key_id: Some(key_id.clone()),
+                                usage: UsageTotals::missing(),
+                                attempt_index,
+                                session_id: session.clone(),
+                                trace_id: Some(trace_id.clone()),
+                            },
+                        )
+                        .await;
+                        last_error = Some((
+                            StatusCode::BAD_GATEWAY,
+                            error_body(&message),
+                            Some(HeaderValue::from_static("application/json")),
+                        ));
+                        pending.push(PendingCooldown::new(
+                            &candidate,
+                            ErrorKind::UpstreamBadResponse,
+                            COOLDOWN_TRANSIENT,
+                        ));
+                        attempt_index += 1;
+                        break;
+                    }
                     // 上游漏报或只报部分用量时，用请求体与响应文本补齐。
-                    let output_text =
-                        estimate::response_text(&candidate.upstream_protocol, &value);
+                    let output_text = estimate::response_text(&candidate.upstream_protocol, &value);
                     let estimates = Estimates {
                         input: Some(estimate::estimate_input(&candidate.model_id, &attempt_body)),
                         output: (!output_text.is_empty())
@@ -566,12 +779,16 @@ async fn forward(
                                     latency_ms,
                                     status: "error".to_string(),
                                     http_status: Some(status.as_u16() as i64),
-                                    error_message: Some(error.to_string()),
+                                    error: Some(LogError::new(
+                                        ErrorKind::ConversionFailed,
+                                        error.to_string(),
+                                    )),
                                     request_id: upstream_request_id,
                                     virtual_key_id: Some(key_id.clone()),
                                     usage: UsageTotals::missing(),
                                     attempt_index,
                                     session_id: session.clone(),
+                                    trace_id: Some(trace_id.clone()),
                                 },
                             )
                             .await;
@@ -589,12 +806,13 @@ async fn forward(
                             latency_ms,
                             status: "success".to_string(),
                             http_status: Some(status.as_u16() as i64),
-                            error_message: None,
+                            error: None,
                             request_id: upstream_request_id,
                             virtual_key_id: Some(key_id),
                             usage,
                             attempt_index,
                             session_id: session.clone(),
+                            trace_id: Some(trace_id.clone()),
                         },
                     )
                     .await;
@@ -611,12 +829,13 @@ async fn forward(
                             latency_ms,
                             status: "error".to_string(),
                             http_status: Some(status.as_u16() as i64),
-                            error_message: Some(message),
+                            error: Some(LogError::new(classify_upstream_status(status), message)),
                             request_id: upstream_request_id,
                             virtual_key_id: Some(key_id.clone()),
                             usage: UsageTotals::missing(),
                             attempt_index,
                             session_id: session.clone(),
+                            trace_id: Some(trace_id.clone()),
                         },
                     )
                     .await;
@@ -637,12 +856,13 @@ async fn forward(
                             latency_ms,
                             status: "error".to_string(),
                             http_status: Some(status.as_u16() as i64),
-                            error_message: Some(message),
+                            error: Some(LogError::new(classify_upstream_status(status), message)),
                             request_id: upstream_request_id,
                             virtual_key_id: Some(key_id),
                             usage: UsageTotals::missing(),
                             attempt_index,
                             session_id: session.clone(),
+                            trace_id: Some(trace_id.clone()),
                         },
                     )
                     .await;
@@ -659,17 +879,18 @@ async fn forward(
                             latency_ms,
                             status: "error".to_string(),
                             http_status: Some(status.as_u16() as i64),
-                            error_message: Some(message),
+                            error: Some(LogError::new(classify_upstream_status(status), message)),
                             request_id: upstream_request_id,
                             virtual_key_id: Some(key_id.clone()),
                             usage: UsageTotals::missing(),
                             attempt_index,
                             session_id: session.clone(),
+                            trace_id: Some(trace_id.clone()),
                         },
                     )
                     .await;
                     last_error = Some((status, text, content_type));
-                    mark_cooling_for(&state, &candidate, status);
+                    pending.push(PendingCooldown::from_status(&candidate, status));
                     attempt_index += 1;
                     break;
                 }
@@ -677,7 +898,48 @@ async fn forward(
         }
     }
 
-    // 候选耗尽：透传最后一次错误响应；若全是连接失败则回 502。
+    // 候选耗尽：先结算冷却。若**多个不同 provider** 同时出现链路失败，几乎不可能是
+    // 它们一起宕机——判定为本机出口不可达：放弃全部待冷却（否则会把所有候选一起冷却，
+    // 下次请求就只剩「全部候选处于冷却中」，归因还错到网上），并回一个明确的 502。
+    let link_providers: HashSet<&str> = pending
+        .iter()
+        .filter(|entry| entry.kind.is_link())
+        .map(|entry| entry.provider_id.as_str())
+        .collect();
+    if link_providers.len() >= 2 {
+        let message = "多个上游同时链路失败，疑似本机网络出口不可达；本次不冷却任何上游";
+        record_log(
+            &state,
+            LogContext {
+                endpoint: endpoint.to_string(),
+                alias: alias.clone(),
+                is_stream,
+                route: None,
+                latency_ms: 0,
+                status: "error".to_string(),
+                http_status: Some(StatusCode::BAD_GATEWAY.as_u16() as i64),
+                error: Some(LogError::new(ErrorKind::EgressUnreachable, message)),
+                request_id: None,
+                virtual_key_id: Some(key_id.clone()),
+                usage: UsageTotals::missing(),
+                attempt_index,
+                session_id: session.clone(),
+                trace_id: Some(trace_id.clone()),
+            },
+        )
+        .await;
+        return error_response(StatusCode::BAD_GATEWAY, message);
+    }
+    for entry in pending {
+        state.mark_cooling(
+            &entry.upstream_model_id,
+            &entry.provider_id,
+            entry.kind,
+            entry.duration,
+        );
+    }
+
+    // 透传最后一次错误响应；若全是连接失败则回 502。
     match last_error {
         Some((status, text, content_type)) => passthrough(status, text, content_type),
         None => error_response(StatusCode::BAD_GATEWAY, "所有上游候选均不可用"),
@@ -694,7 +956,8 @@ fn build_attempt(
     inbound_protocol: &str,
     is_stream: bool,
 ) -> Result<(Value, Option<convert::Conversion>), AppError> {
-    let needs_conversion = convert::needs_conversion(inbound_protocol, &candidate.upstream_protocol);
+    let needs_conversion =
+        convert::needs_conversion(inbound_protocol, &candidate.upstream_protocol);
     if needs_conversion {
         if let Some(reason) = convert::unsupported_request(body, is_stream, inbound_protocol) {
             return Err(AppError::message(reason));
@@ -730,10 +993,7 @@ fn build_attempt(
 }
 
 /// 把上游非流式响应体转回客户端协议。
-fn convert_response(
-    conversion: &mut convert::Conversion,
-    text: &str,
-) -> Result<String, AppError> {
+fn convert_response(conversion: &mut convert::Conversion, text: &str) -> Result<String, AppError> {
     let converted = conversion.response(text.as_bytes())?;
     String::from_utf8(converted).map_err(|_| AppError::message("协议转换输出不是合法 UTF-8"))
 }
@@ -743,23 +1003,68 @@ async fn record_log(state: &AppState, context: LogContext) {
     let _ = record(state, build_log(context)).await;
 }
 
-/// 按上游状态码决定冷却时长：429 视为额度 / 长限流，其余为瞬时失败。
-fn mark_cooling_for(state: &AppState, candidate: &ResolvedRoute, status: StatusCode) {
-    let duration = if status == StatusCode::TOO_MANY_REQUESTS {
-        COOLDOWN_EXHAUSTED
-    } else {
-        COOLDOWN_TRANSIENT
-    };
-    state.mark_cooling(&candidate.upstream_model_id, duration);
+/// 一次候选失败对应的待结算冷却。
+///
+/// 失败当刻**不落盘**：等候选全部耗尽后统一决定是否真的冷却。这样当多个不同 provider
+/// 同时出现链路失败时，可以判定为本机出口问题而放弃全部冷却（见 `forward` 末尾）。
+struct PendingCooldown {
+    upstream_model_id: String,
+    provider_id: String,
+    kind: ErrorKind,
+    duration: Duration,
+}
+
+impl PendingCooldown {
+    fn new(candidate: &ResolvedRoute, kind: ErrorKind, duration: Duration) -> Self {
+        Self {
+            upstream_model_id: candidate.upstream_model_id.clone(),
+            provider_id: candidate.provider_id.clone(),
+            kind,
+            duration,
+        }
+    }
+
+    /// 按上游状态码决定冷却时长与类目：429 视为额度 / 长限流，其余为瞬时失败。
+    fn from_status(candidate: &ResolvedRoute, status: StatusCode) -> Self {
+        let duration = if status == StatusCode::TOO_MANY_REQUESTS {
+            COOLDOWN_EXHAUSTED
+        } else {
+            COOLDOWN_TRANSIENT
+        };
+        Self::new(candidate, classify_upstream_status(status), duration)
+    }
 }
 
 /// 原样透传上游响应（状态码 + body + Content-Type）。
 fn passthrough(status: StatusCode, text: String, content_type: Option<HeaderValue>) -> Response {
     let mut output = (status, text).into_response();
     if let Some(content_type) = content_type {
-        output.headers_mut().insert(header::CONTENT_TYPE, content_type);
+        output
+            .headers_mut()
+            .insert(header::CONTENT_TYPE, content_type);
     }
     output
+}
+
+/// 2xx 响应里带顶层 `error` 字段（非 null / 非空对象 / 非空串）即视为「假成功」，
+/// 返回人话诊断。上游真正的错误是 4xx/5xx，所以这是中转站特有的异常。
+fn upstream_error_body(value: &Value) -> Option<String> {
+    let error = value.get("error")?;
+    let is_error = match error {
+        Value::Object(map) => !map.is_empty(),
+        Value::String(text) => !text.trim().is_empty(),
+        _ => false,
+    };
+    if !is_error {
+        return None;
+    }
+    let detail = error
+        .get("message")
+        .and_then(Value::as_str)
+        .or_else(|| error.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| error.to_string());
+    Some(format!("上游以 2xx 返回错误体：{detail}"))
 }
 
 fn error_message(value: &Value, fallback: &str) -> String {
@@ -1082,6 +1387,35 @@ mod tests {
         serve(app).await
     }
 
+    /// 以 200 返回错误体的上游（中转站常见的「假成功」）。
+    async fn start_fake_success_upstream() -> String {
+        let app = axum::Router::new().route(
+            "/chat/completions",
+            axum::routing::post(|| async {
+                (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "application/json")],
+                    r#"{"error":{"message":"insufficient quota"}}"#,
+                )
+            }),
+        );
+        serve(app).await
+    }
+
+    /// 只发一块 SSE、不给终止符就关闭的上游，用于验证「截断」不再算成功。
+    async fn start_truncated_sse_upstream() -> String {
+        let app = axum::Router::new().route(
+            "/chat/completions",
+            axum::routing::post(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/event-stream")],
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n",
+                )
+            }),
+        );
+        serve(app).await
+    }
+
     /// 返回一段标准 Anthropic Messages SSE 的上游，用于跨协议流式转换测试。
     async fn start_anthropic_sse_upstream() -> String {
         let app = axum::Router::new().route(
@@ -1186,7 +1520,11 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].route_alias.as_deref(), Some("lumen/mock"));
         assert_eq!(logs[0].total_tokens, 150);
-        assert!((logs[0].cost - 0.0002).abs() < 1e-9, "cost was {}", logs[0].cost);
+        assert!(
+            (logs[0].cost - 0.0002).abs() < 1e-9,
+            "cost was {}",
+            logs[0].cost
+        );
         assert_eq!(sink.logs.lock().unwrap().len(), 1);
     }
 
@@ -1288,12 +1626,19 @@ mod tests {
             list_logs(&conn, &LogFilter::default()).unwrap()
         };
         assert_eq!(logs.len(), 1);
-        assert_eq!(logs[0].status, "error", "log: {logs:?}");
+        assert_eq!(logs[0].status, "cancelled", "客户端取消不是失败：{logs:?}");
         assert!(logs[0]
             .error_message
             .as_deref()
             .unwrap_or_default()
             .contains("客户端中断"));
+        assert!(logs[0]
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("已发送"));
+        assert_eq!(logs[0].error_domain.as_deref(), Some("client"));
+        assert_eq!(logs[0].error_kind.as_deref(), Some("client_closed"));
     }
 
     #[tokio::test]
@@ -1317,14 +1662,191 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].status, "error");
         assert_eq!(logs[0].http_status, Some(404));
+        assert_eq!(logs[0].error_domain.as_deref(), Some("gateway"));
+        assert_eq!(logs[0].error_kind.as_deref(), Some("route_not_found"));
+    }
+
+    #[tokio::test]
+    async fn route_without_usable_candidate_is_attributed_to_config() {
+        let db = open_in_memory().unwrap();
+        let base_url = start_mock_upstream().await;
+        seed_upstream(&db, &base_url, "openai", "lumen/mock");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        // 别名仍在，但其下目标全停用——应与「别名不存在」区分为配置类归因。
+        {
+            let conn = db.lock().unwrap();
+            conn.execute("UPDATE route_targets SET enabled = 0", [])
+                .unwrap();
+        }
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].error_domain.as_deref(), Some("gateway"));
+        assert_eq!(logs[0].error_kind.as_deref(), Some("route_no_candidate"));
+    }
+
+    #[tokio::test]
+    async fn missing_model_is_logged_as_invalid_request() {
+        let db = open_in_memory().unwrap();
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post("/v1/chat/completions", json!({ "messages": [] })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1, "缺 model 也要留痕");
+        assert_eq!(logs[0].error_domain.as_deref(), Some("client"));
+        assert_eq!(logs[0].error_kind.as_deref(), Some("invalid_request"));
+        assert!(logs[0].route_alias.is_none());
+    }
+
+    #[tokio::test]
+    async fn unknown_endpoint_is_logged() {
+        let db = open_in_memory().unwrap();
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post("/nope", json!({ "model": "x" })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let logs = {
+            let conn = db.lock().unwrap();
+            list_logs(&conn, &LogFilter::default()).unwrap()
+        };
+        assert_eq!(logs.len(), 1, "未知端点也要留痕");
+        assert_eq!(logs[0].error_domain.as_deref(), Some("client"));
+        assert_eq!(logs[0].error_kind.as_deref(), Some("unknown_endpoint"));
+        assert_eq!(logs[0].endpoint, "/nope");
+    }
+
+    #[tokio::test]
+    async fn two_hundred_with_error_body_is_not_a_success() {
+        let base = start_fake_success_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base, "openai", "lumen/mock");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        // 单候选：假成功被当作可恢复失败后，最后透传成 502。
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].status, "error", "2xx 错误体不得记成功");
+        assert_eq!(logs[0].error_domain.as_deref(), Some("upstream"));
+        assert_eq!(logs[0].error_kind.as_deref(), Some("upstream_bad_response"));
+        assert_eq!(logs[0].usage_source, "missing");
+    }
+
+    #[tokio::test]
+    async fn truncated_stream_is_flagged_not_success() {
+        let base = start_truncated_sse_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base, "openai", "lumen/mock");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "stream": true, "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let mut body = response.into_body().into_data_stream();
+        while futures_util::StreamExt::next(&mut body).await.is_some() {}
+        drop(body);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].status, "error", "未见终止符的流不得记成功");
+        assert_eq!(logs[0].error_kind.as_deref(), Some("upstream_truncated"));
+    }
+
+    #[tokio::test]
+    async fn attempts_of_one_request_share_a_trace_id() {
+        let bad = start_error_upstream(500).await;
+        let good = start_mock_upstream().await;
+        let db = open_in_memory().unwrap();
+        let bad_model = add_provider_model(&db, &bad, "openai", "bad-model");
+        let good_model = add_provider_model(&db, &good, "openai", "good-model");
+        save_route_targets(
+            &db,
+            "openai",
+            "lumen/mock",
+            vec![(bad_model, 0), (good_model, 1)],
+        );
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 2, "失败与成功各一条");
+        assert_eq!(logs[0].attempt_index, 0);
+        assert_eq!(logs[1].attempt_index, 1);
+        let trace = logs[0].trace_id.clone().expect("每条尝试都应带 trace");
+        assert_eq!(
+            logs[1].trace_id.as_deref(),
+            Some(trace.as_str()),
+            "同请求共享 trace"
+        );
     }
 
     #[tokio::test]
     async fn anthropic_messages_passthrough_sets_headers_and_records_usage() {
-        let app = axum::Router::new().route(
-            "/messages",
-            axum::routing::post(anthropic_messages),
-        );
+        let app = axum::Router::new().route("/messages", axum::routing::post(anthropic_messages));
         let base_url = serve(app).await;
         let db = open_in_memory().unwrap();
         seed_upstream(&db, &base_url, "anthropic", "lumen/claude");
@@ -1354,7 +1876,11 @@ mod tests {
         assert_eq!(logs[0].route_alias.as_deref(), Some("lumen/claude"));
         assert_eq!(logs[0].total_tokens, 30);
         assert_eq!(logs[0].endpoint, "/v1/messages");
-        assert!((logs[0].cost - 0.00004).abs() < 1e-9, "cost was {}", logs[0].cost);
+        assert!(
+            (logs[0].cost - 0.00004).abs() < 1e-9,
+            "cost was {}",
+            logs[0].cost
+        );
     }
 
     #[tokio::test]
@@ -1568,6 +2094,8 @@ mod tests {
         assert_eq!(logs[0].status, "error");
         assert_eq!(logs[0].http_status, Some(401));
         assert!(logs[0].virtual_key_id.is_none());
+        assert_eq!(logs[0].error_domain.as_deref(), Some("client"));
+        assert_eq!(logs[0].error_kind.as_deref(), Some("unauthorized"));
     }
 
     #[tokio::test]
@@ -1612,6 +2140,8 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].status, "error");
         assert_eq!(logs[0].http_status, Some(429));
+        assert_eq!(logs[0].error_domain.as_deref(), Some("gateway"));
+        assert_eq!(logs[0].error_kind.as_deref(), Some("quota_exceeded"));
     }
 
     #[tokio::test]
@@ -1809,8 +2339,10 @@ mod tests {
 
     #[tokio::test]
     async fn gemini_generate_passthrough_rewrites_path_and_auth() {
-        let app = axum::Router::new()
-            .route("/models/{model_action}", axum::routing::post(gemini_upstream));
+        let app = axum::Router::new().route(
+            "/models/{model_action}",
+            axum::routing::post(gemini_upstream),
+        );
         let base_url = serve(app).await;
         let db = open_in_memory().unwrap();
         seed_upstream(&db, &base_url, "gemini", "lumen/gemini");
@@ -1838,14 +2370,19 @@ mod tests {
             list_logs(&conn, &LogFilter::default()).unwrap()
         };
         assert_eq!(logs.len(), 1);
-        assert_eq!(logs[0].endpoint, "/v1beta/models/lumen/gemini:generateContent");
+        assert_eq!(
+            logs[0].endpoint,
+            "/v1beta/models/lumen/gemini:generateContent"
+        );
         assert_eq!(logs[0].total_tokens, 120);
     }
 
     #[tokio::test]
     async fn gemini_endpoint_accepts_goog_api_key() {
-        let app = axum::Router::new()
-            .route("/models/{model_action}", axum::routing::post(gemini_upstream));
+        let app = axum::Router::new().route(
+            "/models/{model_action}",
+            axum::routing::post(gemini_upstream),
+        );
         let base_url = serve(app).await;
         let db = open_in_memory().unwrap();
         seed_upstream(&db, &base_url, "gemini", "lumen/gemini");
@@ -1890,8 +2427,10 @@ mod tests {
 
     #[tokio::test]
     async fn gemini_stream_appends_alt_sse() {
-        let app = axum::Router::new()
-            .route("/models/{model_action}", axum::routing::post(gemini_sse_upstream));
+        let app = axum::Router::new().route(
+            "/models/{model_action}",
+            axum::routing::post(gemini_sse_upstream),
+        );
         let base_url = serve(app).await;
         let db = open_in_memory().unwrap();
         seed_upstream(&db, &base_url, "gemini", "lumen/gemini");
@@ -2044,8 +2583,15 @@ mod tests {
         assert_eq!(logs[0].http_status, Some(500));
         assert_eq!(logs[1].attempt_index, 1);
         assert_eq!(logs[1].status, "success");
-        assert_eq!(logs[1].upstream_model_id.as_deref(), Some(good_model.as_str()));
-        assert!((logs[1].cost - 0.0002).abs() < 1e-9, "cost was {}", logs[1].cost);
+        assert_eq!(
+            logs[1].upstream_model_id.as_deref(),
+            Some(good_model.as_str())
+        );
+        assert!(
+            (logs[1].cost - 0.0002).abs() < 1e-9,
+            "cost was {}",
+            logs[1].cost
+        );
     }
 
     #[tokio::test]
@@ -2055,7 +2601,12 @@ mod tests {
         let db = open_in_memory().unwrap();
         let bad_model = add_provider_model(&db, &bad, "openai", "bad-model");
         let good_model = add_provider_model(&db, &good, "openai", "good-model");
-        save_route_targets(&db, "openai", "lumen/mock", vec![(bad_model, 0), (good_model, 1)]);
+        save_route_targets(
+            &db,
+            "openai",
+            "lumen/mock",
+            vec![(bad_model, 0), (good_model, 1)],
+        );
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
         let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
@@ -2110,7 +2661,12 @@ mod tests {
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
         let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
-        state.mark_cooling(&model, Duration::from_secs(60));
+        state.mark_cooling(
+            &model,
+            "p-cool",
+            ErrorKind::UpstreamUnavailable,
+            Duration::from_secs(60),
+        );
         let router = crate::gateway::build_router(state);
 
         let response = router
@@ -2126,15 +2682,101 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].status, "error");
         assert_eq!(logs[0].http_status, Some(502));
+        assert_eq!(
+            logs[0].error_kind.as_deref(),
+            Some("all_candidates_cooling")
+        );
+        // 详情不再显示「未匹配到路由」：带上被冷却的候选与其原因 / 剩余时长。
+        assert!(logs[0].upstream_model_name.is_some(), "route 不应为 None");
+        assert!(logs[0]
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("剩余"));
     }
 
     #[tokio::test]
-    async fn stream_fails_over_before_first_byte() {        let bad = start_error_upstream(500).await;
+    async fn single_provider_link_failure_still_cools_the_candidate() {
+        let db = open_in_memory().unwrap();
+        let model = add_provider_model(&db, "http://127.0.0.1:1", "openai", "unreachable");
+        save_route_targets(&db, "openai", "lumen/mock", vec![(model, 0)]);
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state.clone());
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].error_domain.as_deref(), Some("upstream"));
+        assert_eq!(logs[0].error_kind.as_deref(), Some("link_connect"));
+
+        let cooling = state.cooling_snapshot();
+        assert_eq!(cooling.len(), 1, "单 provider 链路失败应冷却该候选");
+        assert_eq!(cooling[0].error_kind, "link_connect");
+    }
+
+    #[tokio::test]
+    async fn cross_provider_link_failure_is_attributed_to_egress_without_cooling() {
+        let db = open_in_memory().unwrap();
+        // 两个不同 provider，地址都不可达 → 同一请求内注定都是链路失败。
+        let a = add_provider_model(&db, "http://127.0.0.1:1", "openai", "a-model");
+        let b = add_provider_model(&db, "http://127.0.0.1:2", "openai", "b-model");
+        save_route_targets(&db, "openai", "lumen/mock", vec![(a, 0), (b, 1)]);
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state.clone());
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+
+        let logs = logs_by_attempt(&db);
+        let link: Vec<_> = logs
+            .iter()
+            .filter(|log| log.error_kind.as_deref() == Some("link_connect"))
+            .collect();
+        assert_eq!(link.len(), 2, "两个候选各一条链路失败");
+        assert_eq!(
+            logs.iter()
+                .filter(|log| log.error_kind.as_deref() == Some("egress_unreachable"))
+                .count(),
+            1,
+            "整体应归因为本机出口"
+        );
+        assert!(
+            state.cooling_snapshot().is_empty(),
+            "跨 provider 链路齐失败不应冷却任何候选"
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_fails_over_before_first_byte() {
+        let bad = start_error_upstream(500).await;
         let good = start_sse_upstream().await;
         let db = open_in_memory().unwrap();
         let bad_model = add_provider_model(&db, &bad, "openai", "bad-model");
         let good_model = add_provider_model(&db, &good, "openai", "good-model");
-        save_route_targets(&db, "openai", "lumen/mock", vec![(bad_model, 0), (good_model, 1)]);
+        save_route_targets(
+            &db,
+            "openai",
+            "lumen/mock",
+            vec![(bad_model, 0), (good_model, 1)],
+        );
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
         let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
@@ -2182,12 +2824,7 @@ mod tests {
         let base_url = start_mock_upstream().await;
         seed_upstream(db, &base_url, "openai", "lumen/mock");
         seed_virtual_key(db, TEST_KEY, true, None, "monthly");
-        let state = Arc::new(AppState::new(
-            db.clone(),
-            reqwest::Client::new(),
-            sink,
-            0,
-        ));
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         crate::gateway::build_router(state)
     }
 
@@ -2350,12 +2987,7 @@ mod tests {
 
     fn echo_router(db: &Db, sink: Arc<MockSink>) -> axum::Router {
         seed_virtual_key(db, TEST_KEY, true, None, "monthly");
-        let state = Arc::new(AppState::new(
-            db.clone(),
-            reqwest::Client::new(),
-            sink,
-            0,
-        ));
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
         crate::gateway::build_router(state)
     }
 
