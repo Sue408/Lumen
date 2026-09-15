@@ -1,0 +1,50 @@
+name: Bug 报告
+description: 报告安装、配置、调用、记账或界面问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请确认内容已移除 API Key、账号信息、完整数据库与真实账单数据。
+  - type: input
+    id: version
+    attributes:
+      label: Lumen 版本
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: 系统环境
+      placeholder: Windows 11 24H2 x64
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请给出从启动 Lumen 开始的最短复现路径。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 可附脱敏日志或截图。
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 其他信息
+      description: 上游协议、模型别名、是否流式等。
+    validations:
+      required: false

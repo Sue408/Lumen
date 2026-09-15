@@ -1,0 +1,32 @@
+name: 功能建议
+description: 描述真实工作流和当前痛点
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 当前痛点
+      description: 你现在怎样使用 Lumen？哪里卡住了？
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: 期望工作流
+      description: 请用一个具体场景说明，不要只写要接入哪个平台。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 已尝试的方法
+    validations:
+      required: false
+  - type: textarea
+    id: boundary
+    attributes:
+      label: 是否涉及新依赖或服务
+      description: 例如服务器、Docker、云同步、第三方账号。
+    validations:
+      required: false
