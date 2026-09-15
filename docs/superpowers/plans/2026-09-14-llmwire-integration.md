@@ -10,7 +10,7 @@
 
 **Spec:** `docs/llmwire对接文档.md`（集成契约与验收标准 §4）；`docs/后续功能计划备忘.md` §5.3。
 
-**依赖:** `llmwire` 以**本地路径**接入（`src-tauri/Cargo.toml` → `../../llmwire`），开发期不固定 commit。**P0（响应 `model` / `id` 透传）已由 llmwire 侧修复**（`8340d27`，交付基线 `153d74a`），见 `docs/llmwire移交报告.md`；`created` / `created_at` 仍编码为 `0`，不属本次范围。
+**依赖:** `llmwire` 以**本地路径**接入（`src-tauri/Cargo.toml` → `../../llmwire`），开发期不固定 commit（2026-09-15 已改为固定 commit `660edbf`，见 `docs/llmwire移交报告.md` §3.2）。**P0（响应 `model` / `id` 透传）已由 llmwire 侧修复**（`4f10c05`，交付基线 `660edbf`），见 `docs/llmwire移交报告.md`；`created` / `created_at` 仍编码为 `0`，不属本次范围。
 
 ## Global Constraints
 

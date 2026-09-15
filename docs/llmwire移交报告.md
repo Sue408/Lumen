@@ -1,12 +1,18 @@
 # llmwire 移交报告（Lumen 接入基线）
 
 > 报告日期：2026-09-14
+> 订正日期：2026-09-15
 > 交付对象：Lumen 开发
-> 交付基线：`llmwire` `main` @ `153d74a4da7df82a3c7a3b848d671429508fc8a2`
-> 仓库地址：`https://github.com/apneasu/llmwire`（public，MIT）
-> P0 提交：`8340d27 fix(codec): preserve response metadata`
-> 交付提交：`153d74a fix(ci): track cargo lockfile`
+> 交付基线：`llmwire` `main` @ `660edbf8c84e13ccd3f644509980fe76591262fb`
+> 仓库地址：`https://github.com/Sue408/llmwire`（public，MIT）
+> P0 提交：`4f10c05 fix(codec): preserve response metadata`
+> 交付提交：`660edbf fix(ci): track cargo lockfile`
 > 配套文档：同目录 `llmwire对接文档.md`、`F:\llmwire\README.md`、`F:\llmwire\docs\spec\*`
+
+> **订正说明（2026-09-15）**：本报告初版记录的仓库地址 `apneasu/llmwire` 与提交
+> `153d74a` / `8340d27` 均不存在——仓库当时从未推送到远端，且本地历史在此后经过重写，
+> 故旧 hash 已无对应对象。实际公开仓库为 `Sue408/llmwire`，交付基线为 `660edbf`，
+> P0 修复为其父提交 `4f10c05`。CI 于 `main` 推送后首次运行并全绿。
 
 ---
 
@@ -95,7 +101,7 @@ target 未上报 `model` 时，三协议统一输出：
 
 ```toml
 [dependencies]
-llmwire = { git = "https://github.com/apneasu/llmwire.git", rev = "153d74a4da7df82a3c7a3b848d671429508fc8a2" }
+llmwire = { git = "https://github.com/Sue408/llmwire.git", rev = "660edbf8c84e13ccd3f644509980fe76591262fb" }
 ```
 
 若同机/同仓库开发，可使用本地路径：
@@ -106,6 +112,10 @@ llmwire = { path = "../llmwire" }
 ```
 
 本地路径方案只适合开发期；正式移交和复现应固定 commit。
+
+**Lumen 现状（2026-09-15）**：已采用上述 Git 固定 revision 方案，`src-tauri/Cargo.toml`
+指向 `660edbf`，`Cargo.lock` 记录 `source = "git+https://github.com/Sue408/llmwire.git?rev=660edbf8..."`。
+本地路径依赖已移除。
 
 ---
 
@@ -379,7 +389,7 @@ Lumen 继续负责把模型表映射为 capability 策略：
 
 接入完成需要逐项打勾：
 
-- [ ] 依赖固定到 `153d74a4da7df82a3c7a3b848d671429508fc8a2` 或确认后续 commit。
+- [x] 依赖固定到 `660edbf8c84e13ccd3f644509980fe76591262fb`（2026-09-15 完成，见 §3.2）。
 - [ ] 同协议端点仍字节透传，不构造 `Converter`。
 - [ ] 跨协议 6 个有向组合，非流式文本转换正确。
 - [ ] 跨协议 6 个有向组合，流式转换与 `Termination` 正确。
@@ -420,7 +430,7 @@ pwsh -NoProfile -File scripts/check-live-gate.ps1
 
 建议在交接说明中明确：
 
-1. 交付基线为 `153d74a4da7df82a3c7a3b848d671429508fc8a2`，P0 功能修复位于其父提交 `8340d27e389e2101445a87735d6780487b598132`。
+1. 交付基线为 `660edbf8c84e13ccd3f644509980fe76591262fb`，P0 功能修复位于其父提交 `4f10c05 fix(codec): preserve response metadata`。
 2. Lumen 原 `llmwire对接文档.md` 仍是集成契约。
 3. P0 响应 `model` 问题已修复，并同步修复 `id`。
 4. 剩余风险在 Lumen-side E2E 接线与记账/降级策略，不在协议转换核。

@@ -161,7 +161,7 @@ request → resolve_candidates(alias, inbound_protocol)
 
 > 只列**通用**问题：任何 host 都会遇到，不是 Lumen 的特有需求。
 >
-> **状态（2026-09-14）**：P0 已由 llmwire `8340d27` 修复（交付基线 `153d74a`），响应 `model` 与 `id` 均透传上游上报值；下表保留作为问题记录与验证依据。`created` / `created_at` 仍为 `0`，见 `docs/llmwire移交报告.md` §6.4。
+> **状态（2026-09-14，hash 订正于 2026-09-15）**：P0 已由 llmwire `4f10c05` 修复（交付基线 `660edbf`），响应 `model` 与 `id` 均透传上游上报值；下表保留作为问题记录与验证依据。`created` / `created_at` 仍为 `0`，见 `docs/llmwire移交报告.md` §6.4。
 
 ### 6.1 P0：输出的响应 `model` 未透传（已定：应等于 target 上报的 model）
 
