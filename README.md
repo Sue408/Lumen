@@ -2,6 +2,10 @@
   <img src="assets/brand/lumen-rounded.png" width="96" alt="Lumen logo">
 </p>
 
+<p align="center">
+  <a href="README.en.md">English</a> | 简体中文
+</p>
+
 <h1 align="center">Lumen</h1>
 
 <p align="center"><strong>运行在本机的个人 LLM 网关与用量账本。</strong></p>
