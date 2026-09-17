@@ -40,18 +40,25 @@ function buildMockLogs(): RequestLog[] {
   const aliases = ["lumen/claude-sonnet", "lumen/gpt-5", "lumen/gemini-pro"];
   const now = new Date();
   const rows: RequestLog[] = [];
+  // 失败与部分失败按整条流水计数：`index` 每天都会重置且上界只有 7，
+  // 用它取模够不到阈值，原先的 `% 11` / `% 9` 实际是不可达分支。
+  let serial = 0;
   for (let dayOffset = 0; dayOffset < 45; dayOffset += 1) {
     const volume = 3 + ((dayOffset * 5) % 6);
     for (let index = 0; index < volume; index += 1) {
+      const seq = serial;
+      serial += 1;
       const occurredAt = new Date(now);
       occurredAt.setDate(occurredAt.getDate() - dayOffset);
       occurredAt.setHours((index * 4 + dayOffset) % 24, (index * 13 + dayOffset * 7) % 60, 0, 0);
       const modelIndex = (index + dayOffset) % MOCK_MODELS.length;
-      const inputTokens = 3000 + ((index * 4111 + dayOffset * 977) % 15000);
-      const outputTokens = 600 + ((index * 733 + dayOffset * 311) % 3500);
-      const failed = index % 11 === 10;
-      const partial = !failed && index % 9 === 8;
-      const cacheReadTokens = modelIndex === 0 ? 0 : (index * 617) % 4000;
+      const failed = seq % 17 === 16;
+      const partial = !failed && seq % 19 === 18;
+      // 失败的那一次上游没上报用量（usageSource = missing），因此不能同时给出 token 数：
+      // 「用量未上报」与一排非零 token 摆在一起是自相矛盾的。
+      const inputTokens = failed ? 0 : 3000 + ((index * 4111 + dayOffset * 977) % 15000);
+      const outputTokens = failed ? 0 : 600 + ((index * 733 + dayOffset * 311) % 3500);
+      const cacheReadTokens = failed || modelIndex === 0 ? 0 : (index * 617) % 4000;
       rows.push({
         id: `mock-${dayOffset}-${index}`,
         occurredAt: occurredAt.toISOString(),
@@ -69,9 +76,9 @@ function buildMockLogs(): RequestLog[] {
         outputTokens,
         totalTokens: inputTokens + outputTokens,
         cacheReadTokens,
-        cacheCreationTokens: modelIndex === 0 ? (index * 211) % 1500 : 0,
-        cacheReadInInput: modelIndex !== 0,
-        reasoningTokens: modelIndex === 1 ? (index * 353) % 2000 : 0,
+        cacheCreationTokens: failed || modelIndex === 0 ? 0 : (index * 211) % 1500,
+        cacheReadInInput: !failed && modelIndex !== 0,
+        reasoningTokens: !failed && modelIndex === 1 ? (index * 353) % 2000 : 0,
         cost: failed
           ? 0
           : Number((((inputTokens * 1.2 + outputTokens * 4) / 1_000_000) * (modelIndex + 1) * 1.5).toFixed(6)),
