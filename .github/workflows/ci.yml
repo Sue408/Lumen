@@ -1,0 +1,43 @@
+name: CI
+
+# 只在 Windows 上跑：Lumen 目前唯一的交付平台是 Windows NSIS 安装包，
+# 换到 ubuntu runner 需要额外装 webkit2gtk 等 Tauri 系统依赖，收益为零。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 仓库没有 packageManager 字段，pnpm 版本只能在这里显式指定。
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      # `pnpm test` 直接用 Node 内建的类型剥离跑 .ts 测试，需要 Node >= 22.18。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm build
+
+      # 不带 rustfmt：本仓库是手写排版，AGENTS.md 明确禁止引入 rustfmt。
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: cargo test --locked
+        working-directory: src-tauri
+      - run: cargo clippy --locked -- -D warnings
+        working-directory: src-tauri

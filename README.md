@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/Sue408/Lumen/releases/latest"><img src="https://img.shields.io/github/v/release/Sue408/Lumen?display_name=tag&sort=semver" alt="Release"></a>
+  <a href="https://github.com/Sue408/Lumen/actions/workflows/ci.yml"><img src="https://github.com/Sue408/Lumen/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white" alt="Tauri 2">
   <img src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white" alt="Rust">
@@ -35,6 +36,22 @@ Lumen 把多个上游提供商聚合成统一的本地入口，按模型别名�
 - **使用日志**：按时段、别名、状态和用量可信度检索；错误按上游 / 网关 / 客户端归因。
 - **本地优先**：配置、密钥和流水全部落本地 SQLite，升级走增量迁移。
 - **为个人而做**：单用户、桌面应用、安静可翻查，不与 New API、LiteLLM 这类团队平台正面竞争。
+
+## 界面
+
+用量是总账，日志是流水。成功记录安静退到淡墨，异常才被拱到台面。
+
+![用量统计：今日总账、花费趋势与模型花费构成](assets/screenshots/usage-ledger-light.png)
+
+<p align="center">
+  <img src="assets/screenshots/request-logs-light.png" width="49%" alt="使用日志：按天分组的调用流水">
+  <img src="assets/screenshots/request-logs-detail-light.png" width="49%" alt="使用日志：展开一条失败记录，查看请求 ID、追踪号、路由链路、用量来源与错误原文">
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/providers-light.png" width="49%" alt="上游提供商：登记簿与书写台双栏配置">
+  <img src="assets/screenshots/usage-ledger-dark.png" width="49%" alt="深色模式下的用量统计">
+</p>
 
 ## 下载
 

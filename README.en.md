@@ -2,12 +2,17 @@
   <img src="assets/brand/lumen-rounded.png" width="96" alt="Lumen logo">
 </p>
 
+<p align="center">
+  <a href="README.md">简体中文</a> | English
+</p>
+
 <h1 align="center">Lumen</h1>
 
 <p align="center"><strong>A local-first LLM gateway and usage ledger for one person.</strong></p>
 
 <p align="center">
   <a href="https://github.com/Sue408/Lumen/releases/latest"><img src="https://img.shields.io/github/v/release/Sue408/Lumen?display_name=tag&sort=semver" alt="Release"></a>
+  <a href="https://github.com/Sue408/Lumen/actions/workflows/ci.yml"><img src="https://github.com/Sue408/Lumen/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white" alt="Tauri 2">
   <img src="https://img.shields.io/badge/Rust-stable-000000?logo=rust&logoColor=white" alt="Rust">
@@ -31,6 +36,22 @@ Lumen aggregates multiple upstream providers behind one local endpoint, routes r
 - **Request logs**: inspect calls by period, alias, status, and usage confidence. Errors are attributed to the upstream, the gateway, or the client.
 - **Local-first storage**: configuration, API keys, and request history live in a local SQLite database, with incremental migrations on upgrade.
 - **Built for one person**: single-user desktop software that stays quiet and reviewable. It does not compete with team platforms such as New API or LiteLLM.
+
+## Screenshots
+
+Usage is the general ledger; request logs are the stream. Successful calls recede into light ink, and only the exceptions are pushed to the surface.
+
+![Usage: today's ledger, the spend trend, and the model cost breakdown](assets/screenshots/usage-ledger-light.png)
+
+<p align="center">
+  <img src="assets/screenshots/request-logs-light.png" width="49%" alt="Request logs: a flat call stream grouped by day">
+  <img src="assets/screenshots/request-logs-detail-light.png" width="49%" alt="Request logs: one failed record expanded, showing the request ID, trace ID, route chain, usage source, and the upstream error">
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/providers-light.png" width="49%" alt="Providers: a register and a writing desk, side by side">
+  <img src="assets/screenshots/usage-ledger-dark.png" width="49%" alt="Usage in dark mode">
+</p>
 
 ## Download
 
