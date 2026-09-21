@@ -55,10 +55,10 @@ Lumen 把多个上游提供商聚合成统一的本地入口，按模型别名�
 
 ## 下载
 
-首个公开版本为 `v0.1.0`。安装包发布后可从 [GitHub Releases](https://github.com/Sue408/Lumen/releases) 下载。
+最新版本为 `v0.1.2`。安装包可从 [GitHub Releases](https://github.com/Sue408/Lumen/releases) 下载。
 
 - 平台：Windows 10 / 11 x64
-- 安装包：`Lumen_0.1.0_x64-setup.exe`
+- 安装包：`Lumen_0.1.2_x64-setup.exe`
 - 当前未接代码签名与自动更新，首次运行可能出现 Windows SmartScreen 提示。
 
 ## 快速上手

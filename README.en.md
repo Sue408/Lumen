@@ -55,10 +55,10 @@ Usage is the general ledger; request logs are the stream. Successful calls reced
 
 ## Download
 
-The first public release is `v0.1.0`. Installers are available from [GitHub Releases](https://github.com/Sue408/Lumen/releases).
+The latest release is `v0.1.2`. Installers are available from [GitHub Releases](https://github.com/Sue408/Lumen/releases).
 
 - Platform: Windows 10 / 11 x64
-- Installer: `Lumen_0.1.0_x64-setup.exe`
+- Installer: `Lumen_0.1.2_x64-setup.exe`
 - The installer is not code-signed yet, and automatic updates are not available. Windows SmartScreen may warn on first launch.
 
 ## Quick Start
