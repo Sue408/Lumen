@@ -99,18 +99,6 @@ impl Cooldowns {
         }
     }
 
-    /// 试探结束。成功即解除该目标的冷却（失败计数一并归零）；失败只释放租约，
-    /// 冷却本身交给后续的 `mark` 续上。
-    fn release_probe(&mut self, key: &str, success: bool) {
-        if success {
-            self.until.remove(key);
-            return;
-        }
-        if let Some(cooling) = self.until.get_mut(key) {
-            cooling.probe_until = None;
-        }
-    }
-
     fn snapshot(&mut self, now: Instant) -> Vec<CoolingView> {
         self.until.retain(|_, cooling| cooling.until > now);
         self.until
@@ -126,8 +114,12 @@ impl Cooldowns {
 
     /// 清除冷却：`key` 为 `None` 时清空全部，返回被清除的条数。
     ///
-    /// 手动清除的语义是「当作没发生过」——整条记录丢掉，连将来的连续失败升级也一并
-    /// 归零，而不是只把倒计时拨回零、留着记忆继续惩罚下一个请求。
+    /// 两类调用点共用它：用户手动清除，以及**履约成功**——语义都是「当作没发生过」，
+    /// 整条记录丢掉，连将来的连续失败升级也一并归零，而不是只把倒计时拨回零、留着
+    /// 记忆继续惩罚下一个请求。
+    ///
+    /// 试探失败的收尾不在这里：失败路径最终会 `mark`，`mark` 重建记录时会把租约一起
+    /// 清掉；若该次失败没有走到 `mark`（请求提前返回），租约由 `PROBE_LEASE` 过期兜底。
     fn clear(&mut self, key: Option<&str>) -> usize {
         match key {
             Some(key) => usize::from(self.until.remove(key).is_some()),
@@ -310,14 +302,7 @@ impl AppState {
             .unwrap_or(true)
     }
 
-    /// 结束试探：`success` 为真即解除该目标的冷却，为假只释放租约。
-    pub fn release_cooling_probe(&self, upstream_model_id: &str, success: bool) {
-        if let Ok(mut guard) = self.cooldowns.lock() {
-            guard.release_probe(upstream_model_id, success);
-        }
-    }
-
-    /// 手动清除冷却：`upstream_model_id` 为 `None` 时清空全部。返回被清除的条数。
+    /// 清除冷却：手动（`model` 为 `None` 时清空全部）与履约成功共用。返回被清除的条数。
     pub fn clear_cooling(&self, upstream_model_id: Option<&str>) -> usize {
         self.cooldowns
             .lock()
@@ -411,17 +396,18 @@ mod tests {
             "租约过期后可再抢"
         );
 
-        cooldowns.release_probe("m1", true);
+        cooldowns.clear(Some("m1"));
         assert!(
             cooldowns.snapshot(now + Duration::from_secs(1)).is_empty(),
             "试探成功即解除冷却"
         );
 
-        // 失败只释放租约，冷却仍在。
+        // 失败路径不在这里收尾：租约由下一次 `mark` 重建记录时清掉。
         cooldowns.mark("m2", "p1", ErrorKind::LinkTimeout, now);
         assert!(cooldowns.try_claim_probe("m2", now));
-        cooldowns.release_probe("m2", false);
-        assert_eq!(cooldowns.snapshot(now + Duration::from_secs(1)).len(), 1);
+        cooldowns.mark("m2", "p1", ErrorKind::LinkTimeout, now);
+        assert!(cooldowns.until["m2"].probe_until.is_none(), "mark 一并清掉租约");
+        assert!(cooldowns.try_claim_probe("m2", now + Duration::from_secs(1)));
     }
 
     #[test]

@@ -198,6 +198,7 @@ pub async fn count_tokens(
     else {
         return error_response(StatusCode::BAD_REQUEST, "请求缺少 model 字段");
     };
+    let alias = strip_model_variant(alias);
     if let Err(error) = authenticate(&state, &headers).await {
         return error.into_response();
     }
@@ -334,6 +335,10 @@ async fn forward(
         },
     };
 
+    // 上下文变体后缀是客户端的能力断言，不是别名的一部分：`xxx[1m]` 与 `xxx` 对网关
+    // 同义，剥掉后按基础别名解析——账本也因此按基础别名聚合，不会被拆成两条。
+    alias = strip_model_variant(&alias).to_string();
+
     // 强制鉴权：无有效 key 直接拒绝，并落一条无归属的 error 日志。
     let virtual_key = match authenticate(&state, &headers).await {
         Ok(key) => key,
@@ -403,7 +408,7 @@ async fn forward(
         return error.into_response();
     }
 
-    let candidates = match resolve_with_variant(&state, &mut alias, required_protocol).await {
+    let candidates = match resolve_all(&state, &alias, required_protocol).await {
         Ok(candidates) => candidates,
         // 路由解析本身失败（DB / 锁）也要留痕，否则是一次无声的 500。
         Err(error) => {
@@ -687,7 +692,7 @@ async fn forward(
                     }
                     // 请求体在手，先估出输入 token；上游漏报时由它补齐。
                     // 履约成功即解除该目标的冷却——它已经证明自己活着。
-                    state.release_cooling_probe(&candidate.upstream_model_id, true);
+                    state.clear_cooling(Some(&candidate.upstream_model_id));
                     let input_estimate =
                         Some(estimate::estimate_input(&candidate.model_id, &attempt_body));
                     return stream_response(
@@ -752,9 +757,12 @@ async fn forward(
 
             let text = match response.text().await {
                 Ok(text) => text,
-                // 读上游响应体失败（多半是连接中途断）：也要留一条，别让它无声消失。
+                // 读上游响应体失败（多半是连接中途断）也是链路类失败：与建连阶段同一套
+                // 处理——先原地退避重试，扛不住再降级并冷却。不给它另开一条「记完账就抛
+                // 500」的岔路，否则同样的 link_stream_reset 会因发生时机不同而行为不同。
                 Err(error) => {
-                    let error = AppError::from(error);
+                    let log_error = AppError::from(error).log_error();
+                    let kind = log_error.kind;
                     record_log(
                         &state,
                         LogContext {
@@ -765,7 +773,7 @@ async fn forward(
                             latency_ms,
                             status: "error".to_string(),
                             http_status: None,
-                            error: Some(error.log_error()),
+                            error: Some(log_error),
                             request_id: upstream_request_id,
                             virtual_key_id: Some(key_id.clone()),
                             usage: UsageTotals::missing(),
@@ -775,7 +783,17 @@ async fn forward(
                         },
                     )
                     .await;
-                    return error.into_response();
+                    attempt_index += 1;
+                    if kind.is_link()
+                        && attempts_used < MAX_RETRIES_PER_TARGET
+                        && started_at.elapsed() < RETRY_DEADLINE
+                    {
+                        attempts_used += 1;
+                        tokio::time::sleep(retry_delay(attempts_used)).await;
+                        continue;
+                    }
+                    pending.push(PendingCooldown::new(&candidate, kind));
+                    break;
                 }
             };
             let value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
@@ -880,7 +898,7 @@ async fn forward(
                         }
                     };
                     // 履约成功即解除该目标的冷却——它已经证明自己活着。
-                    state.release_cooling_probe(&candidate.upstream_model_id, true);
+                    state.clear_cooling(Some(&candidate.upstream_model_id));
                     record_log(
                         &state,
                         LogContext {
@@ -1208,37 +1226,14 @@ fn error_message(value: &Value, fallback: &str) -> String {
 
 /// 剥掉模型名末尾的上下文变体后缀（`claude-sonnet[1m]` → `claude-sonnet`）。
 ///
-/// 客户端会用它表达上下文窗口变体（Claude Code 的 `[1m]` 即 1M）。只在 `[` 之前非空时
-/// 才剥离，免得把畸形输入削成空串。
+/// 客户端用它表达上下文窗口变体（Claude Code 的 `[1m]` 即 1M），那是**能力断言而非
+/// 别名**——网关视同无后缀，因此所有别名入口都必须先过这里，否则同一个模型会在不同
+/// 端点上被认成两个别名。只在 `[` 之前非空时才剥离，免得把畸形输入削成空串。
 fn strip_model_variant(alias: &str) -> &str {
     match (alias.find('['), alias.ends_with(']')) {
         (Some(index), true) if index > 0 => &alias[..index],
         _ => alias,
     }
-}
-
-/// 按别名解析候选：原样命中优先；落空且带变体后缀时剥掉重试一次。
-///
-/// 命中后把 `alias` 换成**真正匹配的那个**——账本按别名聚合，记客户端的原始串会把
-/// 同一个别名拆成两条。
-async fn resolve_with_variant(
-    state: &AppState,
-    alias: &mut String,
-    required_protocol: &str,
-) -> Result<Vec<ResolvedRoute>, AppError> {
-    let candidates = resolve_all(state, alias, required_protocol).await?;
-    if !candidates.is_empty() {
-        return Ok(candidates);
-    }
-    let variant_free = strip_model_variant(alias);
-    if variant_free == alias {
-        return Ok(candidates);
-    }
-    let stripped = resolve_all(state, variant_free, required_protocol).await?;
-    if !stripped.is_empty() {
-        *alias = variant_free.to_string();
-    }
-    Ok(stripped)
 }
 
 /// 空候选时的人话诊断：把每个被静默跳过的目标与其原因摊开。用户看到「无可用上游」
@@ -1996,6 +1991,62 @@ mod tests {
             Some("lumen/mock"),
             "账本按基础别名聚合，不记客户端的原始串"
         );
+    }
+
+    /// 变体后缀在**所有**别名入口同义。计数端点曾漏掉这一步，于是同一个客户端会出现
+    /// 「对话正常、计数 404」——两个端点对同一个模型名给出不同答案。
+    #[tokio::test]
+    async fn count_tokens_accepts_context_variant_suffix() {
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, "http://127.0.0.1:1", "anthropic", "lumen/claude");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/messages/count_tokens",
+                json!({
+                    "model": "lumen/claude[1m]",
+                    "messages": [{ "role": "user", "content": "hello world" }]
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    /// 带变体后缀且候选为空时，诊断必须照看点名「哪一关卡住了」——归一化若只做在
+    /// 「剥完能解析出候选」的分支上，这里会退化成「未找到模型：lumen/mock[1m]」，
+    /// 那正是这次改动要消灭的误导归因。
+    #[tokio::test]
+    async fn variant_suffix_still_reports_the_blocking_gate() {
+        let base_url = start_mock_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "openai", "lumen/mock");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        // 目标停用：别名在、路由启用，但候选为空。
+        db.lock()
+            .unwrap()
+            .execute("UPDATE route_targets SET enabled = 0", [])
+            .unwrap();
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock[1m]", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        let message = value["error"]["message"].as_str().unwrap_or_default();
+        assert!(message.contains("目标已停用"), "应点名阻塞闸门，实际：{message}");
     }
 
     /// 计数是本地估算：不走上游、不花钱，也不该进账本搅浑调用次数。
@@ -3225,6 +3276,66 @@ mod tests {
             state.cooling_snapshot().is_empty(),
             "跨 provider 链路齐失败不应冷却任何候选"
         );
+    }
+
+    /// 一个「响应头正常、body 半截就断」的上游：模拟非流式请求读到一半连接中断。
+    async fn start_truncated_body_upstream() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    // 请求体很小，一次读完即清空接收缓冲：之后直接 close 发的是 FIN 而非
+                    // RST，客户端才会把它当成「响应体截断」而不是连接被重置。
+                    let mut buffer = [0u8; 4096];
+                    let _ = socket.read(&mut buffer).await;
+                    let _ = socket
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                              Content-Length: 512\r\n\r\n{\"choices\":",
+                        )
+                        .await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    /// 读响应体失败与建连失败同属链路类：先原地退避重试，扛不住再换候选——不再是一条
+    /// 「记完账就抛 500」的岔路（那条岔路既不重试、也不降级、还不冷却）。
+    #[tokio::test]
+    async fn truncated_non_stream_body_retries_then_fails_over() {
+        let bad = start_truncated_body_upstream().await;
+        let good = start_mock_upstream().await;
+        let db = open_in_memory().unwrap();
+        let bad_model = add_provider_model(&db, &bad, "openai", "bad-model");
+        let good_model = add_provider_model(&db, &good, "openai", "good-model");
+        save_route_targets(
+            &db,
+            "openai",
+            "lumen/mock",
+            vec![(bad_model, 0), (good_model, 1)],
+        );
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 5, "坏候选首次 + 3 次原地重试，再换好候选成功");
+        assert!(logs[..4].iter().all(|log| log.status == "error"));
+        assert_eq!(logs[4].upstream_model_name.as_deref(), Some("good-model"));
     }
 
     #[tokio::test]
