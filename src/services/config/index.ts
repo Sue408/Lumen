@@ -17,6 +17,9 @@ export type {
   RouteWithTargets,
   RouteTargetInput,
   RouteInput,
+  RouteExplanation,
+  ProtocolResolution,
+  SkippedTarget,
   QuotaPeriod,
   VirtualKey,
   VirtualKeyInput,
@@ -32,7 +35,7 @@ export {
   deleteUpstreamModel,
 } from "./providers";
 
-export { listRoutes, saveRoute, deleteRoute } from "./routes";
+export { listRoutes, saveRoute, deleteRoute, previewRoute } from "./routes";
 
 export {
   listVirtualKeys,

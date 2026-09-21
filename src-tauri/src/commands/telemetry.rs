@@ -54,6 +54,19 @@ pub async fn query_telemetry_cmd(
     })
 }
 
+/// 手动清除降级冷却：`model` 为 `None` 时清空全部。返回清空后的冷却快照，供前端
+/// 就地刷新——冷却没有推送事件，只能靠轮询，等下一轮会让用户以为「点了没反应」。
+///
+/// 注意清除**不等于修复**：上游仍不可用时，下一次请求会立刻把它重新冷却。
+#[tauri::command]
+pub async fn clear_cooling_cmd(
+    state: State<'_, Arc<AppState>>,
+    model: Option<String>,
+) -> Result<Vec<CoolingView>, AppError> {
+    state.clear_cooling(model.as_deref());
+    Ok(state.cooling_snapshot())
+}
+
 /// 手动连通性测试：对指定模型（缺省首个启用）在指定协议端点（缺省全部）各发一次最小消息请求。
 #[tauri::command]
 pub async fn test_provider_cmd(

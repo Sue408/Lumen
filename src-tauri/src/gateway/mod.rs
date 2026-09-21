@@ -39,9 +39,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // 兜底 404，且不进任何 handler、连调用流水都不会有，极难排查。
     Router::new()
         .route("/health", get(handlers::health))
+        // Claude Desktop 用 HEAD /api/hello 探连通性；GET 一并放行，同样不落账本。
+        .route("/api/hello", get(handlers::hello).head(handlers::hello))
         .route("/v1/models", get(handlers::list_models))
         .route("/v1/chat/completions", post(handlers::chat_completions))
         .route("/v1/messages", post(handlers::messages))
+        .route("/v1/messages/count_tokens", post(handlers::count_tokens))
         .route("/v1/responses", post(handlers::responses))
         .route(
             "/v1beta/models/{*model_action}",
@@ -50,6 +53,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/models", get(handlers::list_models))
         .route("/chat/completions", post(handlers::chat_completions))
         .route("/messages", post(handlers::messages))
+        .route("/messages/count_tokens", post(handlers::count_tokens))
         .route("/responses", post(handlers::responses))
         .fallback(handlers::not_found)
         // 放宽 body 上限：axum 对 `Json` 的默认 2 MiB 会让正常的大请求在进 handler 前

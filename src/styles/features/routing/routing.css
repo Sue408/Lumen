@@ -306,6 +306,79 @@
   color: var(--ink-faint);
 }
 
+/* 目标在所有入站协议下都被跳过：它看着配好了，网关却永远不会尝试它。 */
+.target-dead {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  overflow: hidden;
+  color: var(--danger);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.target-dead svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: none;
+}
+
+/* ---- 解析预览：三协议各自会走谁、谁被静默跳过 ---- */
+
+.resolution-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 1rem;
+}
+
+.resolution-column {
+  display: grid;
+  align-content: start;
+  gap: 0.35rem;
+}
+
+.resolution-protocol {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 0.75rem;
+}
+
+.resolution-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: 0.2rem;
+  list-style: none;
+}
+
+.resolution-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  color: var(--ink);
+  font-size: 0.8125rem;
+}
+
+.resolution-rank {
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.resolution-empty {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 0.8125rem;
+}
+
+.resolution-skip {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.75rem;
+}
+
 /* ---- model picker: trigger + portal panel ---- */
 
 .model-picker-trigger {

@@ -77,17 +77,23 @@ impl serde::Serialize for AppError {
     }
 }
 
+/// 与 `IntoResponse` 同形的错误体。抽出来供「消息要自定义、错误码须保持对外契约」
+/// 的调用点使用——例如空候选的 404 要带诊断文案，但机器可读的码仍是 `model_not_found`。
+pub fn error_payload(code: &str, message: &str) -> serde_json::Value {
+    json!({
+        "error": {
+            "message": message,
+            "type": "lumen_error",
+            "code": code,
+        }
+    })
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let status = self.status_code();
-        let body = json!({
-            "error": {
-                "message": self.to_string(),
-                "type": "lumen_error",
-                "code": error_code(&self),
-            }
-        });
-        (status, axum::Json(body)).into_response()
+        let payload = error_payload(error_code(&self), &self.to_string());
+        (status, axum::Json(payload)).into_response()
     }
 }
 

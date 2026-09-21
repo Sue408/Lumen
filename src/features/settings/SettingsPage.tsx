@@ -20,6 +20,7 @@ import {
 } from "../../services/settings";
 import { injectDemo, type DemoScenario } from "../../services/demo";
 import { AppearanceSection } from "./AppearanceSection";
+import { CoolingSection } from "./CoolingSection";
 import { DataSection } from "./DataSection";
 import { DevToolsSection } from "./DevToolsSection";
 import { GatewaySection } from "./GatewaySection";
@@ -382,6 +383,8 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
                 onConfirmReset={() => void runReset()}
                 onCancelReset={() => setConfirmingReset(false)}
               />
+
+              <CoolingSection />
 
               {import.meta.env.DEV ? (
                 <DevToolsSection demoBusy={demoBusy} onRunDemo={(scenario) => void runDemo(scenario)} />

@@ -1,8 +1,10 @@
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
+use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::db::models::{
     parse_provider_header_rules, Provider, ProviderEndpoint, ProviderHeaderRules,
+    PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
 };
 use crate::db::with_db;
 use crate::error::AppError;
@@ -70,6 +72,24 @@ fn select_endpoint<'a>(
                 .iter()
                 .find(|endpoint| convert::needs_conversion(inbound_protocol, &endpoint.protocol))
         })
+}
+
+/// 端点按 provider 归组，顺序稳定（rowid 升序）——`select_endpoint` 的回退选择依赖它。
+/// 热路径解析与诊断预览共用，避免两处各自取端点而产生语义漂移。
+fn load_endpoints(
+    conn: &Connection,
+) -> Result<HashMap<String, Vec<ProviderEndpoint>>, AppError> {
+    let mut by_provider: HashMap<String, Vec<ProviderEndpoint>> = HashMap::new();
+    let mut stmt = conn.prepare("SELECT * FROM provider_endpoints ORDER BY rowid ASC")?;
+    let rows = stmt.query_map([], ProviderEndpoint::from_row)?;
+    for row in rows {
+        let endpoint = row?;
+        by_provider
+            .entry(endpoint.provider_id.clone())
+            .or_default()
+            .push(endpoint);
+    }
+    Ok(by_provider)
 }
 
 struct CandidateBase {
@@ -143,18 +163,7 @@ pub fn resolve_candidates(
     }
 
     // 端点按 provider 归组，交给 `select_endpoint` 按入站协议挑选。
-    let mut endpoints_by_provider: HashMap<String, Vec<ProviderEndpoint>> = HashMap::new();
-    {
-        let mut stmt = conn.prepare("SELECT * FROM provider_endpoints ORDER BY rowid ASC")?;
-        let rows = stmt.query_map([], ProviderEndpoint::from_row)?;
-        for row in rows {
-            let endpoint = row?;
-            endpoints_by_provider
-                .entry(endpoint.provider_id.clone())
-                .or_default()
-                .push(endpoint);
-        }
-    }
+    let endpoints_by_provider = load_endpoints(conn)?;
 
     let mut candidates = Vec::new();
     for base in bases {
@@ -200,6 +209,224 @@ pub async fn resolve_all(
         resolve_candidates(conn, &alias, &inbound_protocol)
     })
     .await
+}
+
+/// 诊断预览覆盖的入站协议：参与跨协议转换回退的三个。Gemini 的别名在 URL path 上
+/// 而非请求体，不走同一套候选解析，故不在此列。
+pub const EXPLAIN_PROTOCOLS: &[&str] =
+    &[PROTOCOL_ANTHROPIC, PROTOCOL_OPENAI, PROTOCOL_RESPONSES];
+
+/// 一个目标为何没能进入某协议的候选链。
+///
+/// 热路径的 `resolve_candidates` 是**静默过滤**——目标停用、提供商停用、端点服务不了
+/// 入站协议，全都只表现为「这个目标没出现在候选里」；路由页照着 `route_targets` 渲染，
+/// 三条目标看着一模一样。这些原因在此显式化，供路由页预览与空候选时的错误文案使用。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkipReason {
+    /// 路由本身已停用。
+    RouteDisabled,
+    /// 该目标在路由里被停用。
+    TargetDisabled,
+    /// 上游模型被停用。
+    ModelDisabled,
+    /// 提供商被停用。
+    ProviderDisabled,
+    /// 提供商一个协议端点都没有。
+    NoEndpoint,
+    /// 现有端点都无法服务该入站协议：既不同协议，也不在转换核内。
+    NoEndpointForProtocol { available: Vec<String> },
+}
+
+impl SkipReason {
+    pub fn describe(&self, inbound_protocol: &str) -> String {
+        match self {
+            SkipReason::RouteDisabled => "路由已停用".to_string(),
+            SkipReason::TargetDisabled => "目标已停用".to_string(),
+            SkipReason::ModelDisabled => "上游模型已停用".to_string(),
+            SkipReason::ProviderDisabled => "提供商已停用".to_string(),
+            SkipReason::NoEndpoint => "提供商没有任何协议端点".to_string(),
+            SkipReason::NoEndpointForProtocol { available } => {
+                let list = if available.is_empty() {
+                    "无".to_string()
+                } else {
+                    available.join(" / ")
+                };
+                format!("没有可服务 {inbound_protocol} 的端点（现有：{list}）")
+            }
+        }
+    }
+}
+
+/// 一个被跳过的目标及其原因（面向 UI 的扁平形状，原因已是人话）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkippedTarget {
+    pub upstream_model_id: String,
+    pub display_name: String,
+    pub reason: String,
+}
+
+/// 某个入站协议下的解析结果：会按序尝试谁、谁被跳过、为什么。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProtocolResolution {
+    pub protocol: String,
+    /// 该协议下实际会按序尝试的上游模型（与热路径候选同序）。
+    pub candidates: Vec<String>,
+    pub skipped: Vec<SkippedTarget>,
+}
+
+/// 一条别名解析的完整解释。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteExplanation {
+    pub alias: String,
+    /// 别名是否存在（不存在时 `protocols` 为空）。
+    pub found: bool,
+    /// 路由是否启用。
+    pub enabled: bool,
+    pub protocols: Vec<ProtocolResolution>,
+}
+
+/// 单个目标在诊断中的中间态。
+struct ExplainTarget {
+    upstream_model_id: String,
+    display_name: String,
+    target_enabled: bool,
+    model_enabled: bool,
+    provider_enabled: bool,
+    provider_id: String,
+    endpoints: Vec<ProviderEndpoint>,
+}
+
+/// 目标在某入站协议下能否成为候选；`None` 表示可以。判定顺序与热路径的过滤条件一致。
+fn skip_reason(
+    route_enabled: bool,
+    target_enabled: bool,
+    model_enabled: bool,
+    provider_enabled: bool,
+    endpoints: &[ProviderEndpoint],
+    inbound_protocol: &str,
+) -> Option<SkipReason> {
+    if !route_enabled {
+        return Some(SkipReason::RouteDisabled);
+    }
+    if !target_enabled {
+        return Some(SkipReason::TargetDisabled);
+    }
+    if !model_enabled {
+        return Some(SkipReason::ModelDisabled);
+    }
+    if !provider_enabled {
+        return Some(SkipReason::ProviderDisabled);
+    }
+    if endpoints.is_empty() {
+        return Some(SkipReason::NoEndpoint);
+    }
+    if select_endpoint(endpoints, inbound_protocol).is_none() {
+        return Some(SkipReason::NoEndpointForProtocol {
+            available: endpoints
+                .iter()
+                .map(|endpoint| endpoint.protocol.clone())
+                .collect(),
+        });
+    }
+    None
+}
+
+/// 解释一条别名的解析：三协议各自会走谁、谁被跳过、为什么。
+///
+/// 刻意**不复用**热路径的 SQL：热路径的 `WHERE ... = 1` 过滤正是要诊断的东西，诊断
+/// 必须看得见被过滤掉的行。两者的一致性由测试 `explain_matches_resolve` 锁定。
+pub fn explain_route(conn: &Connection, alias: &str) -> Result<RouteExplanation, AppError> {
+    let route = conn
+        .query_row(
+            "SELECT id, enabled FROM routes WHERE alias = ?1",
+            [alias],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0)),
+        )
+        .optional()?;
+    let Some((route_id, route_enabled)) = route else {
+        return Ok(RouteExplanation {
+            alias: alias.to_string(),
+            found: false,
+            enabled: false,
+            protocols: Vec::new(),
+        });
+    };
+
+    // 目标 / 模型 / 提供商一次读齐；外键保证模型与提供商必然存在。
+    let mut targets = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT t.upstream_model_id, t.enabled,
+                    m.display_name, m.enabled,
+                    p.id, p.enabled
+               FROM route_targets t
+               JOIN upstream_models m ON m.id = t.upstream_model_id
+               JOIN providers p       ON p.id = m.provider_id
+              WHERE t.route_id = ?1
+              ORDER BY t.priority ASC, t.rowid ASC",
+        )?;
+        let rows = stmt.query_map([&route_id], |row| {
+            Ok(ExplainTarget {
+                upstream_model_id: row.get(0)?,
+                target_enabled: row.get::<_, i64>(1)? != 0,
+                display_name: row.get(2)?,
+                model_enabled: row.get::<_, i64>(3)? != 0,
+                provider_id: row.get(4)?,
+                provider_enabled: row.get::<_, i64>(5)? != 0,
+                endpoints: Vec::new(),
+            })
+        })?;
+        for row in rows {
+            targets.push(row?);
+        }
+    }
+
+    let endpoints_by_provider = load_endpoints(conn)?;
+    for target in &mut targets {
+        if let Some(endpoints) = endpoints_by_provider.get(&target.provider_id) {
+            target.endpoints = endpoints.clone();
+        }
+    }
+
+    let protocols = EXPLAIN_PROTOCOLS
+        .iter()
+        .map(|protocol| {
+            let mut candidates = Vec::new();
+            let mut skipped = Vec::new();
+            for target in &targets {
+                match skip_reason(
+                    route_enabled,
+                    target.target_enabled,
+                    target.model_enabled,
+                    target.provider_enabled,
+                    &target.endpoints,
+                    protocol,
+                ) {
+                    None => candidates.push(target.upstream_model_id.clone()),
+                    Some(reason) => skipped.push(SkippedTarget {
+                        upstream_model_id: target.upstream_model_id.clone(),
+                        display_name: target.display_name.clone(),
+                        reason: reason.describe(protocol),
+                    }),
+                }
+            }
+            ProtocolResolution {
+                protocol: (*protocol).to_string(),
+                candidates,
+                skipped,
+            }
+        })
+        .collect();
+
+    Ok(RouteExplanation {
+        alias: alias.to_string(),
+        found: true,
+        enabled: route_enabled,
+        protocols,
+    })
 }
 
 #[cfg(test)]
@@ -520,5 +747,121 @@ mod tests {
         // Gemini 不在转换核内，其它入站协议既不回退到它，也不从它回退出去。
         assert!(resolve_candidates(&conn, "g", "openai").unwrap().is_empty());
         assert!(resolve_candidates(&conn, "g", "anthropic").unwrap().is_empty());
+    }
+
+    fn resolution<'a>(explanation: &'a RouteExplanation, name: &str) -> &'a ProtocolResolution {
+        explanation
+            .protocols
+            .iter()
+            .find(|entry| entry.protocol == name)
+            .expect("预览应覆盖该协议")
+    }
+
+    /// 诊断必须与热路径给出同一份候选——两套查询一旦漂移，预览就会骗人。
+    #[test]
+    fn explain_matches_resolve() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = multi_provider(&conn);
+        let primary = seed_model(&conn, &provider, "primary");
+        let backup = seed_model(&conn, &provider, "backup");
+        save_targets(
+            &conn,
+            vec![
+                RouteTargetInput {
+                    upstream_model_id: backup.clone(),
+                    priority: 1,
+                    enabled: true,
+                },
+                RouteTargetInput {
+                    upstream_model_id: primary.clone(),
+                    priority: 0,
+                    enabled: true,
+                },
+            ],
+        );
+        // 停用一条：诊断与热路径都要把它排除，且顺序都按 priority。
+        conn.execute(
+            "UPDATE route_targets SET enabled = 0 WHERE upstream_model_id = ?1",
+            [&backup],
+        )
+        .unwrap();
+
+        let explanation = explain_route(&conn, "lumen/x").unwrap();
+        assert!(explanation.found && explanation.enabled);
+        for name in EXPLAIN_PROTOCOLS {
+            let expected: Vec<String> = resolve_candidates(&conn, "lumen/x", name)
+                .unwrap()
+                .into_iter()
+                .map(|candidate| candidate.upstream_model_id)
+                .collect();
+            assert_eq!(
+                &expected,
+                &resolution(&explanation, name).candidates,
+                "{name} 的候选应与热路径一致"
+            );
+        }
+    }
+
+    #[test]
+    fn explain_reports_unknown_alias() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let explanation = explain_route(&conn, "missing").unwrap();
+        assert!(!explanation.found);
+        assert!(explanation.protocols.is_empty());
+    }
+
+    /// 四道启用闸门按序命中，每道都给出各自的原因。
+    #[test]
+    fn explain_names_each_disabled_gate() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = seed_provider(&conn);
+        let model = seed_model(&conn, &provider, "gpt-x");
+        save_targets(
+            &conn,
+            vec![RouteTargetInput {
+                upstream_model_id: model,
+                priority: 0,
+                enabled: true,
+            }],
+        );
+
+        // 逐个闸门关上、断言每次只报当前这一道；每轮结束恢复全部状态。
+        for (statement, expected) in [
+            ("UPDATE routes SET enabled = 0", "路由已停用"),
+            ("UPDATE route_targets SET enabled = 0", "目标已停用"),
+            ("UPDATE upstream_models SET enabled = 0", "上游模型已停用"),
+            ("UPDATE providers SET enabled = 0", "提供商已停用"),
+        ] {
+            conn.execute(statement, []).unwrap();
+            let explanation = explain_route(&conn, "lumen/x").unwrap();
+            let skipped = &resolution(&explanation, "openai").skipped;
+            assert_eq!(skipped.len(), 1, "{statement} 后应只剩一个被跳过目标");
+            assert_eq!(skipped[0].reason, expected, "语句：{statement}");
+            conn.execute("UPDATE routes SET enabled = 1", []).unwrap();
+            conn.execute("UPDATE route_targets SET enabled = 1", []).unwrap();
+            conn.execute("UPDATE upstream_models SET enabled = 1", []).unwrap();
+            conn.execute("UPDATE providers SET enabled = 1", []).unwrap();
+        }
+    }
+
+    /// 端点服务不了入站协议时，原因要点出「现有是哪些协议」，否则用户无从下手。
+    #[test]
+    fn explain_names_unserviceable_endpoints() {
+        let db = open_in_memory().unwrap();
+        let conn = db.lock().unwrap();
+        let provider = gemini_provider(&conn);
+        let model = seed_model(&conn, &provider, "gemini-pro");
+        route_for_protocol(&conn, "g", "gemini", &model);
+
+        let explanation = explain_route(&conn, "g").unwrap();
+        let anthropic = resolution(&explanation, "anthropic");
+        assert!(anthropic.candidates.is_empty());
+        assert_eq!(
+            anthropic.skipped[0].reason,
+            "没有可服务 anthropic 的端点（现有：gemini）"
+        );
     }
 }

@@ -20,6 +20,7 @@ use crate::db::routes::{delete_route, list_routes, save_route};
 use crate::db::with_db;
 use crate::error::AppError;
 use crate::gateway::quota::{period_start, QuotaPeriod};
+use crate::gateway::resolve::{explain_route, RouteExplanation};
 use crate::state::AppState;
 use crate::util::round2;
 
@@ -90,6 +91,16 @@ pub async fn delete_route_cmd(
     id: String,
 ) -> Result<(), AppError> {
     with_db(&state.db, move |conn| delete_route(conn, &id)).await
+}
+
+/// 预览一条别名的解析：三协议各自会走哪些上游、谁被静默跳过、为什么。
+/// 供路由页回答「我明明配了这条目标，为什么它从不生效」。
+#[tauri::command]
+pub async fn preview_route_cmd(
+    state: State<'_, Arc<AppState>>,
+    alias: String,
+) -> Result<RouteExplanation, AppError> {
+    with_db(&state.db, move |conn| explain_route(conn, &alias)).await
 }
 
 #[tauri::command]

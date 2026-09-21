@@ -87,6 +87,14 @@
   justify-self: end;
 }
 
+/* 冷却倒计时：与「解除」按钮同行，等宽数字避免每秒跳动时抖动。 */
+.settings-page .cooling-remaining {
+  margin-right: 0.5rem;
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .settings-page .settings-input {
   width: 8rem;
   height: 2rem;

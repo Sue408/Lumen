@@ -1,3 +1,4 @@
+import type { Protocol } from "../protocol";
 import type {
   KeyUsage,
   Provider,
@@ -5,8 +6,10 @@ import type {
   ProviderHeaderRules,
   ProviderInput,
   QuotaPeriod,
+  RouteExplanation,
   RouteInput,
   RouteWithTargets,
+  SkippedTarget,
   UpstreamModel,
   UpstreamModelInput,
   VirtualKey,
@@ -140,6 +143,19 @@ let routes: RouteWithTargets[] = [
     createdAt: "2026-09-04T09:00:00+00:00",
     targets: [
       { id: "t-3", routeId: "r-reason", upstreamModelId: "m-ds-reason", priority: 0, enabled: true },
+    ],
+  },
+  {
+    id: "r-gpt4o",
+    alias: "openai/gpt-4o",
+    displayName: "GPT-4o",
+    protocol: "openai",
+    icon: null,
+    iconTint: null,
+    enabled: true,
+    createdAt: "2026-09-06T04:00:00+00:00",
+    targets: [
+      { id: "t-4", routeId: "r-gpt4o", upstreamModelId: "m-gpt-4o", priority: 0, enabled: true },
     ],
   },
 ];
@@ -286,6 +302,58 @@ export function mockSaveRoute(input: RouteInput): RouteWithTargets {
 
 export function mockDeleteRoute(id: string): void {
   routes = routes.filter((route) => route.id !== id);
+}
+
+/// 浏览器态镜像后端的 `explain_route` 判定，供路由页预览在无 Tauri 时也可用。
+const EXPLAIN_PROTOCOLS: Protocol[] = ["anthropic", "openai", "responses"];
+const CONVERTIBLE_PROTOCOLS: Protocol[] = ["openai", "anthropic", "responses"];
+
+function selectEndpoint(endpoints: ProviderEndpoint[], inbound: Protocol): ProviderEndpoint | null {
+  const sameProtocol = endpoints.find((endpoint) => endpoint.protocol === inbound);
+  if (sameProtocol) return sameProtocol;
+  if (!CONVERTIBLE_PROTOCOLS.includes(inbound)) return null;
+  return endpoints.find((endpoint) => CONVERTIBLE_PROTOCOLS.includes(endpoint.protocol)) ?? null;
+}
+
+export function mockPreviewRoute(alias: string): RouteExplanation {
+  const route = routes.find((item) => item.alias === alias);
+  if (!route) return { alias, found: false, enabled: false, protocols: [] };
+
+  const targets = [...route.targets].sort((a, b) => a.priority - b.priority);
+  const protocols = EXPLAIN_PROTOCOLS.map((protocol) => {
+    const candidates: string[] = [];
+    const skipped: SkippedTarget[] = [];
+    for (const target of targets) {
+      const model = models.find((item) => item.id === target.upstreamModelId);
+      const provider = model
+        ? providers.find((item) => item.id === model.providerId) ?? null
+        : null;
+      let reason: string | null = null;
+      if (!route.enabled) reason = "路由已停用";
+      else if (!target.enabled) reason = "目标已停用";
+      else if (!model) reason = "上游模型已删除";
+      else if (!model.enabled) reason = "上游模型已停用";
+      else if (!provider) reason = "提供商不存在";
+      else if (!provider.enabled) reason = "提供商已停用";
+      else if (provider.endpoints.length === 0) reason = "提供商没有任何协议端点";
+      else if (!selectEndpoint(provider.endpoints, protocol)) {
+        const available = provider.endpoints.map((endpoint) => endpoint.protocol).join(" / ");
+        reason = `没有可服务 ${protocol} 的端点（现有：${available}）`;
+      }
+      if (reason) {
+        skipped.push({
+          upstreamModelId: target.upstreamModelId,
+          displayName: model?.displayName ?? target.upstreamModelId,
+          reason,
+        });
+      } else {
+        candidates.push(target.upstreamModelId);
+      }
+    }
+    return { protocol, candidates, skipped };
+  });
+
+  return { alias, found: true, enabled: route.enabled, protocols };
 }
 
 export function mockListVirtualKeys(): VirtualKey[] {

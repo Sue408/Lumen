@@ -7,6 +7,7 @@ import {
   Plus,
   Route,
   Trash,
+  TriangleAlert,
 } from "lucide-react";
 import {
   EmptyNote,
@@ -26,9 +27,12 @@ import {
   listProviders,
   listRoutes,
   listUpstreamModels,
+  previewRoute,
+  protocolLabel,
   saveRoute,
   type IconTint,
   type Provider,
+  type RouteExplanation,
   type RouteTargetInput,
   type RouteWithTargets,
   type UpstreamModel,
@@ -68,6 +72,25 @@ function targetInputs(targets: RouteWithTargets["targets"]): RouteTargetInput[] 
   }));
 }
 
+/// 「所有入站协议下都被跳过」的目标 → 原因。只有这类目标真的从不生效。
+/// 路由自身停用时返回空：那是路由状态，行内的停用样式已经表达了。
+function deadTargetReasons(explanation: RouteExplanation | null): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!explanation?.found || !explanation.enabled) return map;
+  const live = new Set<string>();
+  for (const resolution of explanation.protocols) {
+    for (const id of resolution.candidates) live.add(id);
+  }
+  for (const resolution of explanation.protocols) {
+    for (const target of resolution.skipped) {
+      if (!live.has(target.upstreamModelId)) {
+        map.set(target.upstreamModelId, target.reason);
+      }
+    }
+  }
+  return map;
+}
+
 type RoutePatch = {
   alias?: string;
   displayName?: string;
@@ -89,6 +112,10 @@ export function RoutingPage() {
   const [basicsDraft, setBasicsDraft] = useState<RouteBasicsDraft | null>(null);
   const [basicsError, setBasicsError] = useState<string | null>(null);
   const { busy, run } = useAsyncAction();
+  /// 解析预览：保存后路由对象会换新、但 alias 不变，故用显式计数触发重取。
+  const [resolutionRevision, setResolutionRevision] = useState(0);
+  const [explanation, setExplanation] = useState<RouteExplanation | null>(null);
+  const [showResolution, setShowResolution] = useState(false);
 
   const brands = useMemo(() => buildBrandLookup(providers, models), [providers, models]);
   const modelById = useMemo(() => new Map(models.map((model) => [model.id, model])), [models]);
@@ -106,9 +133,14 @@ export function RoutingPage() {
   const hasEnabledTarget = targets.some((target) => target.enabled);
   const enabledCount = targets.filter((target) => target.enabled).length;
 
+  /// 目标在**所有入站协议下都被跳过**时的原因——只有这种目标才真的从不生效。
+  /// 路由自身停用时不做标注：那是路由状态，行内的停用样式已经表达了。
+  const deadReasons = useMemo(() => deadTargetReasons(explanation), [explanation]);
+
   const refreshRoutes = async () => {
     const next = await listRoutes();
     setRoutes(next);
+    setResolutionRevision((value) => value + 1);
     return next;
   };
 
@@ -138,6 +170,30 @@ export function RoutingPage() {
       alive = false;
     };
   }, []);
+
+  // 解析预览随选中路由与保存动作刷新：它是「配了目标却不生效」的第一手线索。
+  // 拉取失败静默降级为「无预览」，绝不因为它挡住路由页本身。
+  useEffect(() => {
+    const alias = selected?.alias;
+    if (!alias) {
+      setExplanation(null);
+      return;
+    }
+    let alive = true;
+    previewRoute(alias)
+      .then((value) => {
+        if (!alive) return;
+        setExplanation(value);
+        // 有目标从不生效就默认摊开（这是用户来这一页要找的答案），没有则收起。
+        setShowResolution(deadTargetReasons(value).size > 0);
+      })
+      .catch(() => {
+        if (alive) setExplanation(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [selected?.alias, resolutionRevision]);
 
   // 所有改动即改即存：从已保存实体出发，只覆盖 patch 里的字段。
   const persist = (route: RouteWithTargets, patch: RoutePatch) =>
@@ -422,6 +478,12 @@ export function RoutingPage() {
                                     {providerNameById.get(model.providerId) ?? ""}
                                   </span>
                                 ) : null}
+                                {deadReasons.has(target.upstreamModelId) ? (
+                                  <span className="target-dead">
+                                    <TriangleAlert aria-hidden="true" />
+                                    从不生效 · {deadReasons.get(target.upstreamModelId)}
+                                  </span>
+                                ) : null}
                               </span>
                               <TogglePill
                                 small
@@ -460,6 +522,54 @@ export function RoutingPage() {
                       </ol>
                     )}
                   </section>
+
+                  {explanation?.found && explanation.enabled ? (
+                    <section className="sheet-section">
+                      <SectionTitle
+                        icon={<ListOrdered aria-hidden="true" />}
+                        action={
+                          <button
+                            className="text-action"
+                            type="button"
+                            aria-expanded={showResolution}
+                            onClick={() => setShowResolution((value) => !value)}
+                          >
+                            {showResolution ? "收起" : "预览解析"}
+                          </button>
+                        }
+                      >
+                        解析预览
+                      </SectionTitle>
+                      {showResolution ? (
+                        <div className="resolution-grid">
+                          {explanation.protocols.map((resolution) => (
+                            <article className="resolution-column" key={resolution.protocol}>
+                              <h4 className="resolution-protocol">
+                                {protocolLabel[resolution.protocol]}
+                              </h4>
+                              {resolution.candidates.length > 0 ? (
+                                <ol className="resolution-list">
+                                  {resolution.candidates.map((id, index) => (
+                                    <li key={id}>
+                                      <span className="resolution-rank">{index + 1}</span>
+                                      {modelById.get(id)?.displayName ?? id}
+                                    </li>
+                                  ))}
+                                </ol>
+                              ) : (
+                                <p className="resolution-empty">没有可用上游</p>
+                              )}
+                              {resolution.skipped.map((target) => (
+                                <p className="resolution-skip" key={target.upstreamModelId}>
+                                  {target.displayName} · {target.reason}
+                                </p>
+                              ))}
+                            </article>
+                          ))}
+                        </div>
+                      ) : null}
+                    </section>
+                  ) : null}
 
                   {targets.length > 0 && !hasUsableBackup(targets) ? (
                     <InlineWarning message="没有备用目标，降级将不可用。" />

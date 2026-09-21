@@ -125,6 +125,28 @@ export type RouteInput = {
   targets: RouteTargetInput[];
 };
 
+/** 一个被静默跳过的上游目标：它在路由里看着正常，网关解析时却永远不会尝试它。 */
+export type SkippedTarget = {
+  upstreamModelId: string;
+  displayName: string;
+  reason: string;
+};
+
+/** 某入站协议下的解析结果：会按序尝试谁（upstreamModelId）、谁被跳过、为什么。 */
+export type ProtocolResolution = {
+  protocol: Protocol;
+  candidates: string[];
+  skipped: SkippedTarget[];
+};
+
+/** 一条别名解析的完整解释，供路由页回答「配了这条目标为什么它从不生效」。 */
+export type RouteExplanation = {
+  alias: string;
+  found: boolean;
+  enabled: boolean;
+  protocols: ProtocolResolution[];
+};
+
 export type QuotaPeriod = "daily" | "weekly" | "monthly" | "total";
 
 export type VirtualKey = {

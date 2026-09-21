@@ -42,6 +42,22 @@ pub fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
     raw.parse::<u64>().ok().map(Duration::from_secs)
 }
 
+/// 链路类失败（连不上 / 等不到头 / 流中断）的原地退避阶梯，第 3 次之后固定 3s。
+///
+/// 网络抖动多半是一次性的：网关自己扛一扛，客户端只会觉得「这次慢了点」；把瞬时的
+/// 抖动直接抛回去，客户端就只会重试，两边一起打上游。
+const LINK_BACKOFF: &[Duration] = &[
+    Duration::from_millis(500),
+    Duration::from_millis(1500),
+    Duration::from_secs(3),
+];
+
+/// 第 `attempt` 次重试（从 1 起）前的退避时长。
+pub fn link_backoff(attempt: u8) -> Duration {
+    let index = (attempt.saturating_sub(1) as usize).min(LINK_BACKOFF.len() - 1);
+    LINK_BACKOFF[index]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +145,14 @@ mod tests {
         assert_eq!(parse_retry_after(&headers), None);
 
         assert_eq!(parse_retry_after(&HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn link_backoff_ramps_then_caps() {
+        assert_eq!(link_backoff(1), Duration::from_millis(500));
+        assert_eq!(link_backoff(2), Duration::from_millis(1500));
+        assert_eq!(link_backoff(3), Duration::from_secs(3));
+        assert_eq!(link_backoff(9), Duration::from_secs(3), "阶梯封顶");
+        assert_eq!(link_backoff(0), Duration::from_millis(500), "越界按第一次算");
     }
 }

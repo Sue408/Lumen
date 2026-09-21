@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::extract::{Path, State};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::Local;
@@ -11,9 +11,9 @@ use serde_json::{json, Value};
 
 use crate::db::keys::virtual_key_spend;
 use crate::db::models::{PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES};
-use crate::db::routes::{enabled_alias_exists, list_enabled_aliases};
+use crate::db::routes::list_enabled_aliases;
 use crate::db::with_db;
-use crate::error::{classify_upstream_status, AppError, ErrorKind, LogError};
+use crate::error::{classify_upstream_status, error_payload, AppError, ErrorKind, LogError};
 use crate::gateway::auth::authenticate;
 use crate::gateway::body::JsonBody;
 use crate::gateway::convert;
@@ -25,15 +25,37 @@ use crate::gateway::forward::{
 };
 use crate::gateway::quota::{exceeded_limit, period_label, period_start, QuotaPeriod};
 use crate::gateway::reject::{reject, reject_with};
-use crate::gateway::resolve::{resolve_all, ResolvedRoute};
+use crate::gateway::resolve::{explain_route, resolve_all, ResolvedRoute, RouteExplanation};
 use crate::gateway::session;
 use crate::gateway::usage::{build_log, extract_usage_estimated, record, LogContext, UsageTotals};
-use crate::state::{AppState, COOLDOWN_EXHAUSTED, COOLDOWN_TRANSIENT};
+use crate::state::AppState;
 
 const CHAT_ENDPOINT: &str = "/v1/chat/completions";
 const MESSAGES_ENDPOINT: &str = "/v1/messages";
 const RESPONSES_ENDPOINT: &str = "/v1/responses";
 const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(600);
+/// 等上游响应头的上限（流式与非流式同）。超时即按链路失败处理，可原地重试。
+///
+/// 必须有这一层：流式请求不能给 reqwest 设 `.timeout()`（它连 body 一起限时，会杀掉
+/// 长流），于是「上游收下连接却不发头」会永久挂住——重试永远不会触发。
+const ATTEMPT_HEADER_TIMEOUT: Duration = Duration::from_secs(120);
+/// 单个候选允许的原地重试次数（不含首次尝试），链路失败与 429 共用此配额。
+const MAX_RETRIES_PER_TARGET: u8 = 3;
+/// 整个请求的原地重试墙钟预算。必须明显小于常见客户端超时，否则我们还在扛、
+/// 客户端已经放弃——那笔账就白扛了。
+const RETRY_DEADLINE: Duration = Duration::from_secs(45);
+
+/// 原地重试前的退避时长。测试下置零——相关用例没必要真等满阶梯，而阶梯本身由
+/// `failover::tests::link_backoff_ramps_then_caps` 锁定。
+#[cfg(not(test))]
+fn retry_delay(attempt: u8) -> Duration {
+    crate::gateway::failover::link_backoff(attempt)
+}
+
+#[cfg(test)]
+fn retry_delay(_attempt: u8) -> Duration {
+    Duration::ZERO
+}
 
 pub async fn health() -> Response {
     Json(json!({ "status": "ok" })).into_response()
@@ -76,26 +98,30 @@ pub async fn not_found(
     tracing::warn!("网关收到未知端点：{method} {path}（请检查客户端的 base_url 与路径）");
     let message = format!("未知端点：{method} {path}");
     // 运行日志之外也补一条流水：客户端 base_url 写错时，账本里应看得见这次打偏的请求。
-    record_log(
-        &state,
-        LogContext {
-            endpoint: path,
-            alias: String::new(),
-            is_stream: false,
-            route: None,
-            latency_ms: 0,
-            status: "error".to_string(),
-            http_status: Some(StatusCode::NOT_FOUND.as_u16() as i64),
-            error: Some(LogError::new(ErrorKind::UnknownEndpoint, message.clone())),
-            request_id: None,
-            virtual_key_id: None,
-            usage: UsageTotals::missing(),
-            attempt_index: 0,
-            session_id: None,
-            trace_id: None,
-        },
-    )
-    .await;
+    // 但 HEAD 例外——那是客户端的连通性探测（如 Claude Desktop），不是业务调用，
+    // 记进去只会把「调用次数」这类账目搅浑。
+    if method != Method::HEAD {
+        record_log(
+            &state,
+            LogContext {
+                endpoint: path,
+                alias: String::new(),
+                is_stream: false,
+                route: None,
+                latency_ms: 0,
+                status: "error".to_string(),
+                http_status: Some(StatusCode::NOT_FOUND.as_u16() as i64),
+                error: Some(LogError::new(ErrorKind::UnknownEndpoint, message.clone())),
+                request_id: None,
+                virtual_key_id: None,
+                usage: UsageTotals::missing(),
+                attempt_index: 0,
+                session_id: None,
+                trace_id: None,
+            },
+        )
+        .await;
+    }
     error_response(StatusCode::NOT_FOUND, &message)
 }
 
@@ -153,6 +179,49 @@ pub async fn messages(
         None,
     )
     .await
+}
+
+/// Anthropic 的 token 计数端点：**本地估算**，不走上游、不花费、不记账。
+///
+/// 客户端（Claude Code 等）在正式请求前会调它。此前网关没注册该路径，请求落到兜底
+/// 404——它曾是账本里最高频的错误类目，而它本可以几微秒本地算完。
+/// 复用与转发时同一个 `estimate`，保证「预估的量」和「真正跑起来时算的量」同源。
+pub async fn count_tokens(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    JsonBody(body): JsonBody,
+) -> Response {
+    let Some(alias) = body
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|alias| !alias.is_empty())
+    else {
+        return error_response(StatusCode::BAD_REQUEST, "请求缺少 model 字段");
+    };
+    if let Err(error) = authenticate(&state, &headers).await {
+        return error.into_response();
+    }
+
+    // 借别名解析取到真实上游模型名，好让 tokenizer 选对编码表。
+    let candidates = match resolve_all(&state, alias, PROTOCOL_ANTHROPIC).await {
+        Ok(candidates) => candidates,
+        Err(error) => return error.into_response(),
+    };
+    let Some(candidate) = candidates.first() else {
+        let message = format!("未找到模型：{alias}");
+        return (StatusCode::NOT_FOUND, Json(error_payload("model_not_found", &message)))
+            .into_response();
+    };
+
+    Json(json!({ "input_tokens": estimate::estimate_input(&candidate.model_id, &body) }))
+        .into_response()
+}
+
+/// Claude Desktop 的连通性探测端点（`HEAD /api/hello`；顺带放行 GET）。
+///
+/// 它不是业务调用：回 200 空体即可，且**不进账本**——探测不该搅浑「调用次数」这类账目。
+pub async fn hello() -> Response {
+    StatusCode::OK.into_response()
 }
 
 /// OpenAI Responses 直通：别名取自 body.model，流式靠 response.* 事件收尾。
@@ -233,7 +302,7 @@ async fn forward(
     let trace_id = uuid::Uuid::new_v4().to_string();
     let is_stream =
         path_stream.unwrap_or_else(|| body.get("stream").and_then(Value::as_bool).unwrap_or(false));
-    let alias = match path_alias {
+    let mut alias = match path_alias {
         Some(alias) => alias,
         None => match body.get("model").and_then(Value::as_str) {
             Some(alias) if !alias.is_empty() => alias.to_string(),
@@ -334,7 +403,7 @@ async fn forward(
         return error.into_response();
     }
 
-    let candidates = match resolve_all(&state, &alias, required_protocol).await {
+    let candidates = match resolve_with_variant(&state, &mut alias, required_protocol).await {
         Ok(candidates) => candidates,
         // 路由解析本身失败（DB / 锁）也要留痕，否则是一次无声的 500。
         Err(error) => {
@@ -354,18 +423,28 @@ async fn forward(
     };
     if candidates.is_empty() {
         // 同为 404，但要分开归因：别名根本不存在（`route_not_found`）与别名在、只是
-        // 目标 / 模型 / 协议端点全不可用（`route_no_candidate`）。后者多半是配置问题。
-        let error = AppError::ModelNotFound(alias.clone());
-        let alias_key = alias.clone();
-        let alias_exists = with_db(&state.db, move |conn| {
-            enabled_alias_exists(conn, &alias_key)
-        })
-        .await
-        .unwrap_or(false);
-        let kind = if alias_exists {
-            ErrorKind::RouteNoCandidate
-        } else {
-            ErrorKind::RouteNotFound
+        // 目标 / 模型 / 端点全不可用（`route_no_candidate`）。后者多半是配置问题，
+        // 故把**每个被静默跳过的目标与原因**摊进消息——只说「无可用上游」等于没说。
+        let explanation = {
+            let alias = alias.clone();
+            with_db(&state.db, move |conn| explain_route(conn, &alias))
+                .await
+                .ok()
+        };
+        let (kind, message) = match explanation {
+            Some(explanation) if explanation.found && explanation.enabled => (
+                ErrorKind::RouteNoCandidate,
+                no_candidate_message(&explanation, required_protocol),
+            ),
+            Some(explanation) if explanation.found => (
+                ErrorKind::RouteNotFound,
+                format!("路由 {} 已停用", explanation.alias),
+            ),
+            // 别名不存在，或诊断本身失败（DB 锁等）：退回原有的粗粒度归因。
+            _ => (
+                ErrorKind::RouteNotFound,
+                AppError::ModelNotFound(alias.clone()).to_string(),
+            ),
         };
         reject_with(
             &state,
@@ -374,75 +453,32 @@ async fn forward(
             is_stream,
             None,
             Some(key_id.clone()),
-            error.status_code(),
-            LogError::new(kind, error.to_string()),
+            StatusCode::NOT_FOUND,
+            LogError::new(kind, message.clone()),
             Some(trace_id.clone()),
         )
         .await;
-        return error.into_response();
+        // 消息换成诊断文案，机器可读的码沿用 `model_not_found`（对外契约不变）。
+        return (StatusCode::NOT_FOUND, Json(error_payload("model_not_found", &message)))
+            .into_response();
     }
 
-    // 过滤冷却中的目标（快照顺带清理过期项）。若因此无候选可用，直接回 502，并把
-    // 每个候选的冷却原因与剩余时长写进日志——只留一句「全部冷却」等于没有线索。
+    // 冷却中的目标**降权而非剔除**：非冷却的按原序在前，冷却的按剩余时长升序垫后。
+    //
+    // 「全冷却就回 502」曾是最痛的死锁——一次网络抖动锁死整条路由，客户端随即重试又
+    // 撞上冷却，两边打架。现在即便全部在冷却，也会挑剩余最短的做一次半开试探。
     let cooling = state.cooling_snapshot();
-    let cooling_ids: HashSet<String> = cooling
-        .iter()
-        .map(|entry| entry.upstream_model_id.clone())
-        .collect();
+    let remaining_of = |id: &str| {
+        cooling
+            .iter()
+            .find(|entry| entry.upstream_model_id == id)
+            .map(|entry| entry.remaining_secs)
+    };
     let resolved_ids: Vec<String> = candidates
         .iter()
         .map(|candidate| candidate.upstream_model_id.clone())
         .collect();
     let fallback_route = candidates.first().cloned();
-    let candidates: Vec<ResolvedRoute> = candidates
-        .into_iter()
-        .filter(|candidate| !cooling_ids.contains(&candidate.upstream_model_id))
-        .collect();
-    if candidates.is_empty() {
-        let detail: Vec<String> = cooling
-            .iter()
-            .filter(|entry| resolved_ids.contains(&entry.upstream_model_id))
-            .map(|entry| {
-                format!(
-                    "{}（{}，剩余 {}s）",
-                    entry.upstream_model_id, entry.error_kind, entry.remaining_secs
-                )
-            })
-            .collect();
-        let message = if detail.is_empty() {
-            "全部候选目标处于冷却中，暂无可用上游".to_string()
-        } else {
-            format!(
-                "全部候选目标处于冷却中，暂无可用上游：{}",
-                detail.join("；")
-            )
-        };
-        record_log(
-            &state,
-            LogContext {
-                endpoint: endpoint.to_string(),
-                alias: alias.clone(),
-                is_stream,
-                // 填首个被冷却的候选：详情里能看到实际命中的目标，而不是「未匹配到路由」。
-                route: fallback_route,
-                latency_ms: 0,
-                status: "error".to_string(),
-                http_status: Some(StatusCode::BAD_GATEWAY.as_u16() as i64),
-                error: Some(LogError::new(
-                    ErrorKind::AllCandidatesCooling,
-                    message.clone(),
-                )),
-                request_id: None,
-                virtual_key_id: Some(key_id.clone()),
-                usage: UsageTotals::missing(),
-                attempt_index: 0,
-                session_id: session.clone(),
-                trace_id: Some(trace_id.clone()),
-            },
-        )
-        .await;
-        return error_response(StatusCode::BAD_GATEWAY, &message);
-    }
 
     // 全部候选都需要跨协议转换、且请求用到了转换核无法表达的语义时，显式拒绝，
     // 而不是静默把错误形状的请求发上游（混合路由下由 `build_attempt` 逐个跳过）。
@@ -478,13 +514,33 @@ async fn forward(
         }
     }
 
+    // 到这里候选不会再被整体拒绝，可以拆分了：非冷却的按原序在前，冷却的垫后。
+    let (mut ready, mut cooling_candidates): (Vec<_>, Vec<_>) = candidates
+        .into_iter()
+        .partition(|candidate| remaining_of(&candidate.upstream_model_id).is_none());
+    cooling_candidates
+        .sort_by_key(|candidate| remaining_of(&candidate.upstream_model_id).unwrap_or_default());
+
+    // 整请求的重试墙钟从这里开始算。
+    let started_at = Instant::now();
     let mut attempt_index: i64 = 0;
     let mut last_error: Option<(StatusCode, String, Option<HeaderValue>)> = None;
     // 待结算的冷却：失败当刻不落盘，等候选全部耗尽后统一决定（见「全局性抑制」）。
     let mut pending: Vec<PendingCooldown> = Vec::new();
+    // 真正试过的候选数。为 0 说明全在冷却、且都已被并发请求占着试探权。
+    let mut attempted = 0usize;
 
-    for candidate in candidates {
-        let mut retry_remaining = 1u8;
+    for candidate in ready.drain(..).chain(cooling_candidates.drain(..)) {
+        // 冷却中的目标要先抢到半开试探权——否则并发的几个请求会一起捶同一个上游，
+        // 把「试探」变成惊群。
+        if remaining_of(&candidate.upstream_model_id).is_some()
+            && !state.try_claim_cooling_probe(&candidate.upstream_model_id)
+        {
+            continue;
+        }
+        attempted += 1;
+        // 本候选的原地重试配额，链路失败与 429 的短等待共用它——两者相加不会超过上限。
+        let mut attempts_used = 0u8;
         loop {
             let (attempt_body, mut conversion) =
                 match build_attempt(&body, &candidate, required_protocol, is_stream) {
@@ -526,38 +582,61 @@ async fn forward(
             } else {
                 Some(UPSTREAM_TIMEOUT)
             };
-            let response =
-                match send(&state, &candidate, &attempt_body, &path, timeout, &headers).await {
-                    Ok(response) => response,
-                    Err(error) => {
-                        // 发送失败：`AppError::Http` 走链路的 is_timeout / is_connect 细分。
-                        let log_error = error.log_error();
-                        let kind = log_error.kind;
-                        record_log(
-                            &state,
-                            LogContext {
-                                endpoint: endpoint.to_string(),
-                                alias: alias.clone(),
-                                is_stream,
-                                route: Some(candidate.clone()),
-                                latency_ms: started.elapsed().as_millis() as i64,
-                                status: "error".to_string(),
-                                http_status: None,
-                                error: Some(log_error),
-                                request_id: None,
-                                virtual_key_id: Some(key_id.clone()),
-                                usage: UsageTotals::missing(),
-                                attempt_index,
-                                session_id: session.clone(),
-                                trace_id: Some(trace_id.clone()),
-                            },
-                        )
-                        .await;
-                        pending.push(PendingCooldown::new(&candidate, kind, COOLDOWN_TRANSIENT));
-                        attempt_index += 1;
-                        break;
+            // reqwest 的 `.timeout()` 连 body 一起限时，会杀掉长流，所以这里另用
+            // `tokio::time::timeout` 只圈住「拿到响应头」那一段。
+            let response = match tokio::time::timeout(
+                ATTEMPT_HEADER_TIMEOUT,
+                send(&state, &candidate, &attempt_body, &path, timeout, &headers),
+            )
+            .await
+            {
+                Ok(Ok(response)) => Ok(response),
+                // 发送失败：`AppError::Http` 走链路的 is_timeout / is_connect 细分。
+                Ok(Err(error)) => Err(error.log_error()),
+                Err(_) => Err(LogError::new(
+                    ErrorKind::LinkTimeout,
+                    format!("上游在 {ATTEMPT_HEADER_TIMEOUT:?} 内未返回响应头"),
+                )),
+            };
+            let response = match response {
+                Ok(response) => response,
+                Err(log_error) => {
+                    let kind = log_error.kind;
+                    record_log(
+                        &state,
+                        LogContext {
+                            endpoint: endpoint.to_string(),
+                            alias: alias.clone(),
+                            is_stream,
+                            route: Some(candidate.clone()),
+                            latency_ms: started.elapsed().as_millis() as i64,
+                            status: "error".to_string(),
+                            http_status: None,
+                            error: Some(log_error),
+                            request_id: None,
+                            virtual_key_id: Some(key_id.clone()),
+                            usage: UsageTotals::missing(),
+                            attempt_index,
+                            session_id: session.clone(),
+                            trace_id: Some(trace_id.clone()),
+                        },
+                    )
+                    .await;
+                    attempt_index += 1;
+                    // 网络类失败先自己扛：原地退避重试，对客户端只是「这次慢了点」。
+                    // 直接抛回去的话，客户端只会重试，两边一起打上游。
+                    if kind.is_link()
+                        && attempts_used < MAX_RETRIES_PER_TARGET
+                        && started_at.elapsed() < RETRY_DEADLINE
+                    {
+                        attempts_used += 1;
+                        tokio::time::sleep(retry_delay(attempts_used)).await;
+                        continue;
                     }
-                };
+                    pending.push(PendingCooldown::new(&candidate, kind));
+                    break;
+                }
+            };
 
             let status = response.status();
             let retry_after = parse_retry_after(response.headers());
@@ -607,6 +686,8 @@ async fn forward(
                         break;
                     }
                     // 请求体在手，先估出输入 token；上游漏报时由它补齐。
+                    // 履约成功即解除该目标的冷却——它已经证明自己活着。
+                    state.release_cooling_probe(&candidate.upstream_model_id, true);
                     let input_estimate =
                         Some(estimate::estimate_input(&candidate.model_id, &attempt_body));
                     return stream_response(
@@ -650,8 +731,11 @@ async fn forward(
                 )
                 .await;
                 last_error = Some((status, text.clone(), content_type.clone()));
-                if matches!(action, AttemptAction::RetrySame { .. }) && retry_remaining > 0 {
-                    retry_remaining -= 1;
+                if matches!(action, AttemptAction::RetrySame { .. })
+                    && attempts_used < MAX_RETRIES_PER_TARGET
+                    && started_at.elapsed() < RETRY_DEADLINE
+                {
+                    attempts_used += 1;
                     attempt_index += 1;
                     if let AttemptAction::RetrySame { delay } = action {
                         tokio::time::sleep(delay).await;
@@ -734,7 +818,6 @@ async fn forward(
                         pending.push(PendingCooldown::new(
                             &candidate,
                             ErrorKind::UpstreamBadResponse,
-                            COOLDOWN_TRANSIENT,
                         ));
                         attempt_index += 1;
                         break;
@@ -796,6 +879,8 @@ async fn forward(
                             break;
                         }
                     };
+                    // 履约成功即解除该目标的冷却——它已经证明自己活着。
+                    state.release_cooling_probe(&candidate.upstream_model_id, true);
                     record_log(
                         &state,
                         LogContext {
@@ -818,7 +903,10 @@ async fn forward(
                     .await;
                     return passthrough(status, text, content_type);
                 }
-                AttemptAction::RetrySame { delay } if retry_remaining > 0 => {
+                AttemptAction::RetrySame { delay }
+                    if attempts_used < MAX_RETRIES_PER_TARGET
+                        && started_at.elapsed() < RETRY_DEADLINE =>
+                {
                     record_log(
                         &state,
                         LogContext {
@@ -840,7 +928,7 @@ async fn forward(
                     )
                     .await;
                     last_error = Some((status, text, content_type));
-                    retry_remaining -= 1;
+                    attempts_used += 1;
                     attempt_index += 1;
                     tokio::time::sleep(delay).await;
                     continue;
@@ -931,12 +1019,55 @@ async fn forward(
         return error_response(StatusCode::BAD_GATEWAY, message);
     }
     for entry in pending {
-        state.mark_cooling(
-            &entry.upstream_model_id,
-            &entry.provider_id,
-            entry.kind,
-            entry.duration,
-        );
+        state.mark_cooling(&entry.upstream_model_id, &entry.provider_id, entry.kind);
+    }
+
+    if attempted == 0 {
+        // 一个候选都没试成：全部在冷却里，且都已被并发请求占着试探权。
+        // 这条归因现在罕见得多（冷却只降权、不再一刀切），但真出现时要说出是被谁挡住的。
+        let detail: Vec<String> = cooling
+            .iter()
+            .filter(|entry| resolved_ids.contains(&entry.upstream_model_id))
+            .map(|entry| {
+                format!(
+                    "{}（{}，剩余 {}s）",
+                    entry.upstream_model_id, entry.error_kind, entry.remaining_secs
+                )
+            })
+            .collect();
+        let message = if detail.is_empty() {
+            "全部候选目标处于冷却中，暂无可用上游".to_string()
+        } else {
+            format!(
+                "全部候选目标处于冷却中，暂无可用上游：{}",
+                detail.join("；")
+            )
+        };
+        record_log(
+            &state,
+            LogContext {
+                endpoint: endpoint.to_string(),
+                alias: alias.clone(),
+                is_stream,
+                // 填首个被冷却的候选：详情里能看到实际命中的目标，而不是「未匹配到路由」。
+                route: fallback_route,
+                latency_ms: 0,
+                status: "error".to_string(),
+                http_status: Some(StatusCode::BAD_GATEWAY.as_u16() as i64),
+                error: Some(LogError::new(
+                    ErrorKind::AllCandidatesCooling,
+                    message.clone(),
+                )),
+                request_id: None,
+                virtual_key_id: Some(key_id.clone()),
+                usage: UsageTotals::missing(),
+                attempt_index: 0,
+                session_id: session.clone(),
+                trace_id: Some(trace_id.clone()),
+            },
+        )
+        .await;
+        return error_response(StatusCode::BAD_GATEWAY, &message);
     }
 
     // 透传最后一次错误响应；若全是连接失败则回 502。
@@ -1011,27 +1142,20 @@ struct PendingCooldown {
     upstream_model_id: String,
     provider_id: String,
     kind: ErrorKind,
-    duration: Duration,
 }
 
 impl PendingCooldown {
-    fn new(candidate: &ResolvedRoute, kind: ErrorKind, duration: Duration) -> Self {
+    fn new(candidate: &ResolvedRoute, kind: ErrorKind) -> Self {
         Self {
             upstream_model_id: candidate.upstream_model_id.clone(),
             provider_id: candidate.provider_id.clone(),
             kind,
-            duration,
         }
     }
 
-    /// 按上游状态码决定冷却时长与类目：429 视为额度 / 长限流，其余为瞬时失败。
+    /// 冷却时长由 `state::mark_cooling` 按类目与连续失败次数决定，这里只定类目。
     fn from_status(candidate: &ResolvedRoute, status: StatusCode) -> Self {
-        let duration = if status == StatusCode::TOO_MANY_REQUESTS {
-            COOLDOWN_EXHAUSTED
-        } else {
-            COOLDOWN_TRANSIENT
-        };
-        Self::new(candidate, classify_upstream_status(status), duration)
+        Self::new(candidate, classify_upstream_status(status))
     }
 }
 
@@ -1080,6 +1204,66 @@ fn error_message(value: &Value, fallback: &str) -> String {
                 fallback.to_string()
             }
         })
+}
+
+/// 剥掉模型名末尾的上下文变体后缀（`claude-sonnet[1m]` → `claude-sonnet`）。
+///
+/// 客户端会用它表达上下文窗口变体（Claude Code 的 `[1m]` 即 1M）。只在 `[` 之前非空时
+/// 才剥离，免得把畸形输入削成空串。
+fn strip_model_variant(alias: &str) -> &str {
+    match (alias.find('['), alias.ends_with(']')) {
+        (Some(index), true) if index > 0 => &alias[..index],
+        _ => alias,
+    }
+}
+
+/// 按别名解析候选：原样命中优先；落空且带变体后缀时剥掉重试一次。
+///
+/// 命中后把 `alias` 换成**真正匹配的那个**——账本按别名聚合，记客户端的原始串会把
+/// 同一个别名拆成两条。
+async fn resolve_with_variant(
+    state: &AppState,
+    alias: &mut String,
+    required_protocol: &str,
+) -> Result<Vec<ResolvedRoute>, AppError> {
+    let candidates = resolve_all(state, alias, required_protocol).await?;
+    if !candidates.is_empty() {
+        return Ok(candidates);
+    }
+    let variant_free = strip_model_variant(alias);
+    if variant_free == alias {
+        return Ok(candidates);
+    }
+    let stripped = resolve_all(state, variant_free, required_protocol).await?;
+    if !stripped.is_empty() {
+        *alias = variant_free.to_string();
+    }
+    Ok(stripped)
+}
+
+/// 空候选时的人话诊断：把每个被静默跳过的目标与其原因摊开。用户看到「无可用上游」
+/// 时最需要知道的是「哪一关卡住了」——一句同义反复帮不上忙。
+fn no_candidate_message(explanation: &RouteExplanation, inbound_protocol: &str) -> String {
+    let alias = &explanation.alias;
+    let Some(resolution) = explanation
+        .protocols
+        .iter()
+        .find(|entry| entry.protocol == inbound_protocol)
+    else {
+        return format!("别名 {alias} 在当前协议下没有可用上游");
+    };
+    if resolution.skipped.is_empty() {
+        return format!("别名 {alias} 没有配置任何上游目标");
+    }
+    let detail: Vec<String> = resolution
+        .skipped
+        .iter()
+        .map(|target| format!("{}（{}）", target.display_name, target.reason))
+        .collect();
+    format!(
+        "别名 {alias} 在 {inbound_protocol} 入站下没有可用上游：{}",
+        detail.join("；")
+    )
 }
 
 /// 客户端请求流式、上游返回的却不是 `text/event-stream`。缺少 Content-Type 时不判定
@@ -1700,6 +1884,36 @@ mod tests {
         assert_eq!(logs[0].error_kind.as_deref(), Some("route_no_candidate"));
     }
 
+    /// 空候选的 404 必须点名卡住的那一关——提供商停用是路由页看不出来的静默跳过。
+    #[tokio::test]
+    async fn empty_candidate_message_names_the_blocking_gate() {
+        let base_url = start_mock_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "openai", "lumen/mock");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        {
+            let conn = db.lock().unwrap();
+            conn.execute("UPDATE providers SET enabled = 0", []).unwrap();
+        }
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post("/v1/chat/completions", json!({ "model": "lumen/mock" })))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        let message = value["error"]["message"].as_str().unwrap();
+        assert!(message.contains("提供商已停用"), "应点名卡住的闸门：{message}");
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].error_kind.as_deref(), Some("route_no_candidate"));
+    }
+
     #[tokio::test]
     async fn missing_model_is_logged_as_invalid_request() {
         let db = open_in_memory().unwrap();
@@ -1745,6 +1959,125 @@ mod tests {
         assert_eq!(logs[0].error_domain.as_deref(), Some("client"));
         assert_eq!(logs[0].error_kind.as_deref(), Some("unknown_endpoint"));
         assert_eq!(logs[0].endpoint, "/nope");
+    }
+
+    #[test]
+    fn strips_only_trailing_context_variants() {
+        assert_eq!(strip_model_variant("claude-sonnet[1m]"), "claude-sonnet");
+        assert_eq!(strip_model_variant("claude-sonnet"), "claude-sonnet");
+        assert_eq!(strip_model_variant("[1m]"), "[1m]", "剥成空串不是剥离");
+        assert_eq!(strip_model_variant("a[1m]b"), "a[1m]b", "只见于末尾");
+    }
+
+    #[tokio::test]
+    async fn context_variant_suffix_resolves_to_the_base_alias() {
+        let base_url = start_mock_upstream().await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "openai", "lumen/mock");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        // Claude Code 的 1M 上下文变体带 `[1m]` 后缀，应落到同一别名。
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock[1m]", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(
+            logs[0].route_alias.as_deref(),
+            Some("lumen/mock"),
+            "账本按基础别名聚合，不记客户端的原始串"
+        );
+    }
+
+    /// 计数是本地估算：不走上游、不花钱，也不该进账本搅浑调用次数。
+    #[tokio::test]
+    async fn count_tokens_is_estimated_locally_without_billing() {
+        let db = open_in_memory().unwrap();
+        // 故意指向不可达地址：一旦走了上游，这条请求必然失败。
+        seed_upstream(&db, "http://127.0.0.1:1", "anthropic", "lumen/claude");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/messages/count_tokens",
+                json!({
+                    "model": "lumen/claude",
+                    "messages": [{ "role": "user", "content": "hello world" }]
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(value["input_tokens"].as_i64().unwrap_or(0) > 0);
+
+        assert!(logs_by_attempt(&db).is_empty(), "计数不是业务调用，不进账本");
+    }
+
+    #[tokio::test]
+    async fn count_tokens_rejects_unknown_alias() {
+        let db = open_in_memory().unwrap();
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/messages/count_tokens",
+                json!({ "model": "missing", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Claude Desktop 用 HEAD /api/hello 探连通性；探测不该进账本。
+    #[tokio::test]
+    async fn hello_probe_answers_without_touching_the_ledger() {
+        let db = open_in_memory().unwrap();
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let request = Request::builder()
+            .method("HEAD")
+            .uri("/api/hello")
+            .body(Body::empty())
+            .unwrap();
+        let response = router.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(logs_by_attempt(&db).is_empty());
+    }
+
+    #[tokio::test]
+    async fn head_probe_on_unknown_path_stays_out_of_the_ledger() {
+        let db = open_in_memory().unwrap();
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let request = Request::builder()
+            .method("HEAD")
+            .uri("/nope")
+            .body(Body::empty())
+            .unwrap();
+        let response = router.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert!(logs_by_attempt(&db).is_empty(), "HEAD 探测不落账本");
     }
 
     #[tokio::test]
@@ -2652,6 +2985,8 @@ mod tests {
         assert_eq!(logs[1].status, "success");
     }
 
+    /// 全部候选在冷却、且试探权已被别的请求占住时，才回 502——这是冷却改为「降权 +
+    /// 半开」之后，唯一还会命中该归因的路径。
     #[tokio::test]
     async fn all_candidates_cooling_returns_502() {
         let base = start_mock_upstream().await;
@@ -2661,12 +2996,9 @@ mod tests {
         seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
         let sink = Arc::new(MockSink::default());
         let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
-        state.mark_cooling(
-            &model,
-            "p-cool",
-            ErrorKind::UpstreamUnavailable,
-            Duration::from_secs(60),
-        );
+        state.mark_cooling(&model, "p-cool", ErrorKind::UpstreamUnavailable);
+        // 占住试探权：模拟并发下另一个请求正在试这个目标。
+        assert!(state.try_claim_cooling_probe(&model));
         let router = crate::gateway::build_router(state);
 
         let response = router
@@ -2695,8 +3027,106 @@ mod tests {
             .contains("剩余"));
     }
 
+    /// 冷却中的目标不再被一刀切剔除：单目标照样被半开试探，成功即解除冷却。
     #[tokio::test]
-    async fn single_provider_link_failure_still_cools_the_candidate() {
+    async fn cooled_target_is_still_probed_and_released_on_success() {
+        let base = start_mock_upstream().await;
+        let db = open_in_memory().unwrap();
+        let model = add_provider_model(&db, &base, "openai", "cool-model");
+        save_route_targets(&db, "openai", "lumen/mock", vec![(model.clone(), 0)]);
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        state.mark_cooling(&model, "p-cool", ErrorKind::LinkTimeout);
+        let router = crate::gateway::build_router(state.clone());
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "冷却中的唯一目标也应被试探");
+        assert!(state.cooling_snapshot().is_empty(), "试探成功即解除冷却");
+    }
+
+    /// 主目标处于冷却时，备胎应直接顶上；冷却的目标不产生任何尝试记录。
+    #[tokio::test]
+    async fn cooled_primary_serves_from_backup() {
+        let good = start_mock_upstream().await;
+        let db = open_in_memory().unwrap();
+        let primary = add_provider_model(&db, "http://127.0.0.1:1", "openai", "primary-model");
+        let backup = add_provider_model(&db, &good, "openai", "backup-model");
+        save_route_targets(
+            &db,
+            "openai",
+            "lumen/mock",
+            vec![(primary.clone(), 0), (backup, 1)],
+        );
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        state.mark_cooling(&primary, "p-primary", ErrorKind::UpstreamUnavailable);
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 1, "冷却的目标不该产生尝试记录");
+        assert_eq!(logs[0].upstream_model_name.as_deref(), Some("backup-model"));
+    }
+
+    /// 主目标（同协议）冷却时，需要跨协议转换的备胎也要顶上。
+    #[tokio::test]
+    async fn cooled_primary_fails_over_to_cross_protocol_backup() {
+        let backup = start_mock_upstream().await;
+        let db = open_in_memory().unwrap();
+        let primary = add_provider_model(&db, "http://127.0.0.1:1", "anthropic", "primary-model");
+        let backup_model = add_provider_model(&db, &backup, "openai", "backup-model");
+        save_route_targets(
+            &db,
+            "anthropic",
+            "lumen/mock",
+            vec![(primary.clone(), 0), (backup_model, 1)],
+        );
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        state.mark_cooling(&primary, "p-primary", ErrorKind::LinkTimeout);
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/messages",
+                json!({
+                    "model": "lumen/mock",
+                    "max_tokens": 8,
+                    "messages": [{ "role": "user", "content": "hi" }]
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["type"], "message", "跨协议备胎应转回 anthropic 形状");
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 1, "冷却的目标不该产生尝试记录");
+        assert_eq!(logs[0].upstream_model_name.as_deref(), Some("backup-model"));
+    }
+
+    /// 链路失败先原地退避重试，扛不住才冷却——一次网络抖动不该直接把错误抛给客户端。
+    #[tokio::test]
+    async fn single_provider_link_failure_retries_in_place_then_cools() {
         let db = open_in_memory().unwrap();
         let model = add_provider_model(&db, "http://127.0.0.1:1", "openai", "unreachable");
         save_route_targets(&db, "openai", "lumen/mock", vec![(model, 0)]);
@@ -2715,13 +3145,46 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
 
         let logs = logs_by_attempt(&db);
-        assert_eq!(logs.len(), 1);
-        assert_eq!(logs[0].error_domain.as_deref(), Some("upstream"));
-        assert_eq!(logs[0].error_kind.as_deref(), Some("link_connect"));
+        assert_eq!(logs.len(), 4, "首次 + 3 次原地重试，每次尝试都要记账");
+        assert!(logs
+            .iter()
+            .all(|log| log.error_kind.as_deref() == Some("link_connect")));
 
         let cooling = state.cooling_snapshot();
-        assert_eq!(cooling.len(), 1, "单 provider 链路失败应冷却该候选");
+        assert_eq!(cooling.len(), 1, "重试耗尽后仍应冷却该候选");
         assert_eq!(cooling[0].error_kind, "link_connect");
+    }
+
+    /// 5xx 是上游明确表态，不原地重试——重试只会把一次失败拖成好几倍时长。
+    #[tokio::test]
+    async fn upstream_5xx_fails_over_without_in_place_retry() {
+        let bad = start_error_upstream(503).await;
+        let good = start_mock_upstream().await;
+        let db = open_in_memory().unwrap();
+        let bad_model = add_provider_model(&db, &bad, "openai", "bad-model");
+        let good_model = add_provider_model(&db, &good, "openai", "good-model");
+        save_route_targets(
+            &db,
+            "openai",
+            "lumen/mock",
+            vec![(bad_model, 0), (good_model, 1)],
+        );
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let logs = logs_by_attempt(&db);
+        assert_eq!(logs.len(), 2, "5xx 只留一条，随即换下一个候选");
     }
 
     #[tokio::test]
@@ -2750,7 +3213,7 @@ mod tests {
             .iter()
             .filter(|log| log.error_kind.as_deref() == Some("link_connect"))
             .collect();
-        assert_eq!(link.len(), 2, "两个候选各一条链路失败");
+        assert_eq!(link.len(), 8, "两个候选 × （首次 + 3 次原地重试）");
         assert_eq!(
             logs.iter()
                 .filter(|log| log.error_kind.as_deref() == Some("egress_unreachable"))

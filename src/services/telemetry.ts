@@ -40,12 +40,23 @@ export type ProviderConnectivity = {
   lastErrorAt: string | null;
 };
 
+/** 一条降级冷却：哪个上游模型、因何冷却、还剩多久。 */
+export type CoolingDetail = {
+  upstreamModelId: string;
+  providerId: string;
+  /** 触发冷却的错误类目（后端 `ErrorKind` 的 snake_case）。 */
+  errorKind: string;
+  remainingSecs: number;
+};
+
 export type TelemetrySnapshot = {
   throughput: Throughput;
   generation: GenerationSpeed[];
   connectivity: ProviderConnectivity[];
   /** 当前处于降级冷却中的上游模型 id。 */
   cooling: string[];
+  /** 冷却明细（原因 / 提供方 / 剩余秒数），与 `cooling` 同一份数据的展开式。 */
+  coolingDetail: CoolingDetail[];
 };
 
 export type ProbeResult = {
@@ -149,7 +160,15 @@ function buildMockTelemetry(period: PeriodKey, anchor?: Date): TelemetrySnapshot
         lastErrorAt: new Date(Date.now() - 1_800_000).toISOString(),
       },
     ],
-    cooling: [],
+    cooling: ["m-ds-reason"],
+    coolingDetail: [
+      {
+        upstreamModelId: "m-ds-reason",
+        providerId: "p-deepseek",
+        errorKind: "link_timeout",
+        remainingSecs: 37,
+      },
+    ],
   };
 }
 
@@ -194,4 +213,14 @@ export async function listRemoteModels(
     ];
   }
   return invoke<RemoteModel[]>("list_remote_models_cmd", { providerId, protocol });
+}
+
+/**
+ * 手动清除降级冷却：`model` 缺省清空全部。返回清空后的冷却明细，供调用方就地刷新。
+ *
+ * 清除**不等于修复**——上游仍不可用时，下一次请求会立刻把它重新冷却。
+ */
+export async function clearCooling(model?: string | null): Promise<CoolingDetail[]> {
+  if (!isTauriRuntime(window)) return [];
+  return invoke<CoolingDetail[]>("clear_cooling_cmd", { model: model ?? null });
 }

@@ -13,17 +13,36 @@ use crate::error::{AppError, ErrorKind};
 
 pub const DEFAULT_PORT: u16 = 8787;
 
-/// 瞬时失败（5xx / 连接失败 / 短限流耗尽）后的目标冷却时长。
-pub const COOLDOWN_TRANSIENT: Duration = Duration::from_secs(60);
-/// 疑似额度耗尽（长 `Retry-After` / 额度类错误）后的目标冷却时长。
-pub const COOLDOWN_EXHAUSTED: Duration = Duration::from_secs(300);
+/// 瞬时类失败（链路 / 5xx）的冷却阶梯，单位秒。一次网络抖动只压两秒——冷却是给上游
+/// 恢复的余地，不是惩罚；同一目标持续失败才逐级拉长。
+const TRANSIENT_COOLDOWN_LADDER: &[u64] = &[2, 5, 15, 45];
+/// 额度类失败（429）的冷却阶梯，单位秒。上游明说了额度问题，起步就得给足恢复时间。
+const EXHAUSTED_COOLDOWN_LADDER: &[u64] = &[30, 60, 150, 300];
+/// 半开试探的租约：一次试探最长占位多久。带过期是兜底——试探请求被丢弃时，
+/// 目标不能被永久冻结在「有人正在试」的状态里。
+const PROBE_LEASE: Duration = Duration::from_secs(30);
 
-/// 一条冷却记录：哪个上游模型、被哪一类失败触发、冷却到何时。
+/// 某类失败在第 `fails` 次连续失败时的冷却时长（阶梯封顶）。
+fn cooldown_for(kind: ErrorKind, fails: u32) -> Duration {
+    let ladder = if kind == ErrorKind::UpstreamRateLimited {
+        EXHAUSTED_COOLDOWN_LADDER
+    } else {
+        TRANSIENT_COOLDOWN_LADDER
+    };
+    let step = fails.saturating_sub(1) as usize;
+    Duration::from_secs(ladder[step.min(ladder.len() - 1)])
+}
+
+/// 一条冷却记录：哪个上游模型、被哪一类失败触发、连续失败几次、冷却到何时。
 #[derive(Debug, Clone)]
 struct Cooling {
     provider_id: String,
     kind: ErrorKind,
+    /// 连续失败次数（被清除或自然过期即归零）。冷却时长由它决定。
+    fails: u32,
     until: Instant,
+    /// 半开试探租约：`Some` 且未过期表示已有请求在试探该目标。
+    probe_until: Option<Instant>,
 }
 
 /// 冷却快照：把 `Instant` 折算成可序列化的剩余秒数，供日志与连通性展示。
@@ -44,23 +63,52 @@ struct Cooldowns {
 }
 
 impl Cooldowns {
-    fn mark(
-        &mut self,
-        key: &str,
-        provider_id: &str,
-        kind: ErrorKind,
-        duration: Duration,
-        now: Instant,
-    ) {
-        // 同目标重复失败以「最近一次」覆盖：原因与剩余都取最新。
+    fn mark(&mut self, key: &str, provider_id: &str, kind: ErrorKind, now: Instant) {
+        let previous = self.until.get(key);
+        // 连续失败累加：记录在被清除或自然过期前一直存在。
+        let fails = previous.map_or(1, |cooling| cooling.fails + 1);
+        let proposed = now + cooldown_for(kind, fails);
+        // 两类失败混用时取更长的那个：不因后一次是「瞬时」就把已判定的额度冷却缩短。
+        let until = previous.map_or(proposed, |cooling| cooling.until.max(proposed));
         self.until.insert(
             key.to_string(),
             Cooling {
                 provider_id: provider_id.to_string(),
                 kind,
-                until: now + duration,
+                fails,
+                until,
+                probe_until: None,
             },
         );
+    }
+
+    /// 抢占一次半开试探权；已有请求在试探且租约未过期时返回 `false`。
+    ///
+    /// 必须在**同一把锁内**完成「判定 + 占位」——否则并发的几个请求会一起捶同一个
+    /// 冷却中的上游，把试探变成惊群。
+    fn try_claim_probe(&mut self, key: &str, now: Instant) -> bool {
+        let Some(cooling) = self.until.get_mut(key) else {
+            return true; // 不在冷却里：走正常路径，不占租约
+        };
+        match cooling.probe_until {
+            Some(until) if until > now => false,
+            _ => {
+                cooling.probe_until = Some(now + PROBE_LEASE);
+                true
+            }
+        }
+    }
+
+    /// 试探结束。成功即解除该目标的冷却（失败计数一并归零）；失败只释放租约，
+    /// 冷却本身交给后续的 `mark` 续上。
+    fn release_probe(&mut self, key: &str, success: bool) {
+        if success {
+            self.until.remove(key);
+            return;
+        }
+        if let Some(cooling) = self.until.get_mut(key) {
+            cooling.probe_until = None;
+        }
     }
 
     fn snapshot(&mut self, now: Instant) -> Vec<CoolingView> {
@@ -74,6 +122,21 @@ impl Cooldowns {
                 remaining_secs: cooling.until.saturating_duration_since(now).as_secs(),
             })
             .collect()
+    }
+
+    /// 清除冷却：`key` 为 `None` 时清空全部，返回被清除的条数。
+    ///
+    /// 手动清除的语义是「当作没发生过」——整条记录丢掉，连将来的连续失败升级也一并
+    /// 归零，而不是只把倒计时拨回零、留着记忆继续惩罚下一个请求。
+    fn clear(&mut self, key: Option<&str>) -> usize {
+        match key {
+            Some(key) => usize::from(self.until.remove(key).is_some()),
+            None => {
+                let count = self.until.len();
+                self.until.clear();
+                count
+            }
+        }
     }
 }
 
@@ -231,23 +294,35 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    /// 将某上游模型标记为冷却一段时间，并记下原因与所属 provider。
-    pub fn mark_cooling(
-        &self,
-        upstream_model_id: &str,
-        provider_id: &str,
-        kind: ErrorKind,
-        duration: Duration,
-    ) {
+    /// 将某上游模型标记为冷却。时长由失败类目与**连续**失败次数决定（见 `cooldown_for`），
+    /// 调用方不再传时长——同一条记录在被清除或自然过期前会一直累加。
+    pub fn mark_cooling(&self, upstream_model_id: &str, provider_id: &str, kind: ErrorKind) {
         if let Ok(mut guard) = self.cooldowns.lock() {
-            guard.mark(
-                upstream_model_id,
-                provider_id,
-                kind,
-                duration,
-                Instant::now(),
-            );
+            guard.mark(upstream_model_id, provider_id, kind, Instant::now());
         }
+    }
+
+    /// 抢占某目标的半开试探权；已有请求在试探中时返回 `false`。
+    pub fn try_claim_cooling_probe(&self, upstream_model_id: &str) -> bool {
+        self.cooldowns
+            .lock()
+            .map(|mut guard| guard.try_claim_probe(upstream_model_id, Instant::now()))
+            .unwrap_or(true)
+    }
+
+    /// 结束试探：`success` 为真即解除该目标的冷却，为假只释放租约。
+    pub fn release_cooling_probe(&self, upstream_model_id: &str, success: bool) {
+        if let Ok(mut guard) = self.cooldowns.lock() {
+            guard.release_probe(upstream_model_id, success);
+        }
+    }
+
+    /// 手动清除冷却：`upstream_model_id` 为 `None` 时清空全部。返回被清除的条数。
+    pub fn clear_cooling(&self, upstream_model_id: Option<&str>) -> usize {
+        self.cooldowns
+            .lock()
+            .map(|mut guard| guard.clear(upstream_model_id))
+            .unwrap_or(0)
     }
 
     pub fn status(&self) -> GatewayStatus {
@@ -274,52 +349,108 @@ mod tests {
     fn marks_and_reads_cooling() {
         let mut cooldowns = Cooldowns::default();
         let now = Instant::now();
-        cooldowns.mark(
-            "m1",
-            "p1",
-            ErrorKind::UpstreamUnavailable,
-            Duration::from_secs(60),
-            now,
-        );
+        cooldowns.mark("m1", "p1", ErrorKind::UpstreamUnavailable, now);
 
         assert_eq!(cooldowns.snapshot(now).len(), 1);
-        assert_eq!(cooldowns.snapshot(now + Duration::from_secs(59)).len(), 1);
-        assert!(cooldowns.snapshot(now + Duration::from_secs(60)).is_empty());
+        assert_eq!(cooldowns.snapshot(now + Duration::from_secs(1)).len(), 1);
+        assert!(cooldowns.snapshot(now + Duration::from_secs(2)).is_empty());
     }
 
     #[test]
     fn expired_cooldown_is_pruned() {
         let mut cooldowns = Cooldowns::default();
         let now = Instant::now();
-        cooldowns.mark(
-            "m1",
-            "p1",
-            ErrorKind::UpstreamUnavailable,
-            Duration::from_secs(1),
-            now,
-        );
-        assert!(cooldowns.snapshot(now + Duration::from_secs(2)).is_empty());
+        cooldowns.mark("m1", "p1", ErrorKind::UpstreamUnavailable, now);
+        assert!(cooldowns.snapshot(now + Duration::from_secs(3)).is_empty());
         assert!(cooldowns.until.is_empty(), "过期项应被清理");
+    }
+
+    /// 连续失败逐级拉长；两侧各走各的阶梯，混用时取更长的那个。
+    #[test]
+    fn cooldown_ladder_escalates_per_kind() {
+        let step = |kind: ErrorKind, fails: u32| cooldown_for(kind, fails).as_secs();
+
+        assert_eq!(step(ErrorKind::LinkTimeout, 1), 2, "一次网络抖动只压两秒");
+        assert_eq!(step(ErrorKind::LinkTimeout, 2), 5);
+        assert_eq!(step(ErrorKind::LinkTimeout, 3), 15);
+        assert_eq!(step(ErrorKind::LinkTimeout, 4), 45);
+        assert_eq!(step(ErrorKind::LinkTimeout, 9), 45, "阶梯封顶");
+
+        assert_eq!(step(ErrorKind::UpstreamRateLimited, 1), 30, "额度类起步就得给足");
+        assert_eq!(step(ErrorKind::UpstreamRateLimited, 4), 300);
+
+        let mut cooldowns = Cooldowns::default();
+        let now = Instant::now();
+        cooldowns.mark("m", "p", ErrorKind::LinkTimeout, now);
+        assert_eq!(cooldowns.until["m"].until, now + Duration::from_secs(2));
+        cooldowns.mark("m", "p", ErrorKind::LinkTimeout, now);
+        assert_eq!(cooldowns.until["m"].fails, 2);
+        assert_eq!(cooldowns.until["m"].until, now + Duration::from_secs(5));
+
+        // 后一次是「瞬时」不得把已判定的额度冷却缩短。
+        cooldowns.mark("m", "p", ErrorKind::UpstreamRateLimited, now);
+        let quota_until = cooldowns.until["m"].until;
+        cooldowns.mark("m", "p", ErrorKind::LinkTimeout, now);
+        assert_eq!(cooldowns.until["m"].until, quota_until, "取更长的那个");
+    }
+
+    /// 半开试探：同一时刻只有一个请求抢得到，且租约带过期。
+    #[test]
+    fn probe_claim_is_exclusive_and_released_on_success() {
+        let mut cooldowns = Cooldowns::default();
+        let now = Instant::now();
+        cooldowns.mark("m1", "p1", ErrorKind::LinkTimeout, now);
+
+        assert!(cooldowns.try_claim_probe("m1", now), "首个请求抢到试探权");
+        assert!(
+            !cooldowns.try_claim_probe("m1", now + Duration::from_secs(1)),
+            "租约内别人抢不到"
+        );
+        assert!(
+            cooldowns.try_claim_probe("m1", now + Duration::from_secs(31)),
+            "租约过期后可再抢"
+        );
+
+        cooldowns.release_probe("m1", true);
+        assert!(
+            cooldowns.snapshot(now + Duration::from_secs(1)).is_empty(),
+            "试探成功即解除冷却"
+        );
+
+        // 失败只释放租约，冷却仍在。
+        cooldowns.mark("m2", "p1", ErrorKind::LinkTimeout, now);
+        assert!(cooldowns.try_claim_probe("m2", now));
+        cooldowns.release_probe("m2", false);
+        assert_eq!(cooldowns.snapshot(now + Duration::from_secs(1)).len(), 1);
     }
 
     #[test]
     fn snapshot_carries_reason_and_remaining() {
         let mut cooldowns = Cooldowns::default();
         let now = Instant::now();
-        cooldowns.mark(
-            "m1",
-            "p1",
-            ErrorKind::LinkConnect,
-            Duration::from_secs(60),
-            now,
-        );
-        let view = cooldowns.snapshot(now + Duration::from_secs(10));
+        cooldowns.mark("m1", "p1", ErrorKind::LinkConnect, now);
+        let view = cooldowns.snapshot(now + Duration::from_secs(1));
         assert_eq!(view.len(), 1);
         assert_eq!(view[0].upstream_model_id, "m1");
         assert_eq!(view[0].provider_id, "p1");
         assert_eq!(view[0].error_kind, "link_connect");
-        assert_eq!(view[0].remaining_secs, 50);
-        assert!(cooldowns.snapshot(now + Duration::from_secs(61)).is_empty());
+        assert_eq!(view[0].remaining_secs, 1);
+        assert!(cooldowns.snapshot(now + Duration::from_secs(2)).is_empty());
+    }
+
+    #[test]
+    fn clears_one_cooldown_or_all() {
+        let mut cooldowns = Cooldowns::default();
+        let now = Instant::now();
+        cooldowns.mark("m1", "p1", ErrorKind::UpstreamUnavailable, now);
+        cooldowns.mark("m2", "p1", ErrorKind::LinkTimeout, now);
+
+        assert_eq!(cooldowns.clear(Some("m1")), 1);
+        assert_eq!(cooldowns.snapshot(now).len(), 1, "只清掉指定的那个");
+        assert_eq!(cooldowns.clear(Some("m1")), 0, "重复清除不计数");
+
+        assert_eq!(cooldowns.clear(None), 1, "清空返回剩余条数");
+        assert!(cooldowns.snapshot(now).is_empty());
     }
 
     #[test]
