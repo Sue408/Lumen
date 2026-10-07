@@ -1,6 +1,6 @@
 //! per-provider 请求头映射：由**下游请求头**构建**上游请求头**（四意图）。
 //!
-//! 求值顺序固定为 `内置底座 → forward(透传) → replace(替换) → extra_headers(添加)
+//! 求值顺序固定为 `内置底座 → forward(透传) → extra_headers(添加) → replace(替换)
 //! → remove(移除) → 硬黑名单`。鉴权头不在这里注入——由 `forward::send` 在规则结果
 //! 之后无条件覆盖，保证规则永远无法伪造鉴权。硬黑名单则无条件剥离，防止把客户端的
 //! 传输层头带坏上游。
@@ -68,8 +68,10 @@ fn header_name(raw: &str) -> Option<HeaderName> {
 
 /// 按 provider 的四意图构建上游请求头（不含鉴权；鉴权由调用方最后注入）。
 ///
-/// 顺序固定：内置底座 → `forward`（透传）→ `replace`（替换）→ `extra_headers`
-/// （添加）→ `remove`（移除，deny wins）→ 硬黑名单。
+/// 顺序固定：内置底座 → `forward`（透传）→ `extra_headers`（添加）→ `replace`
+/// （替换）→ `remove`（移除，deny wins）→ 硬黑名单。
+///
+/// 故「替换优先、添加兜底」：替换命中的目标头用客户端值，未命中时留下添加的常量。
 pub fn build_upstream_headers(
     client: &HeaderMap,
     rules: &ProviderHeaderRules,
@@ -95,7 +97,17 @@ pub fn build_upstream_headers(
         }
     }
 
-    // 3. 替换：把客户端 `from` 的值以 `to` 的名字写出（覆盖目标名既有值）。
+    // 3. 添加：常量写入（可被随后的替换覆盖）。
+    for (name, value) in extra_headers {
+        if let (Some(header), Ok(header_value)) =
+            (header_name(name), HeaderValue::from_str(value))
+        {
+            output.insert(header, header_value);
+        }
+    }
+
+    // 4. 替换：把客户端 `from` 的值以 `to` 的名字写出（覆盖目标名既有值，故优先于
+    //    添加；来源缺失时跳过，留下添加的常量兜底）。
     for rule in &rules.replace {
         let Some(to_name) = header_name(&rule.to) else {
             continue;
@@ -107,15 +119,6 @@ pub fn build_upstream_headers(
         output.remove(to_name.clone());
         for value in values {
             output.append(to_name.clone(), value);
-        }
-    }
-
-    // 4. 添加：常量覆盖。
-    for (name, value) in extra_headers {
-        if let (Some(header), Ok(header_value)) =
-            (header_name(name), HeaderValue::from_str(value))
-        {
-            output.insert(header, header_value);
         }
     }
 
@@ -272,6 +275,31 @@ mod tests {
         let out = build_upstream_headers(&client, &rules, &BTreeMap::new());
         assert_eq!(out.get("x-opencode-session").unwrap(), "ses_1");
         assert!(out.get("session_id").is_none(), "替换不保留原名");
+    }
+
+    #[test]
+    fn replace_outranks_provider_add() {
+        let client = headers(&[("session_id", "ses_1")]);
+        let mut rules = ProviderHeaderRules::default();
+        rules.replace.push(HeaderReplace {
+            from: "session_id".into(),
+            to: "x-opencode-session".into(),
+        });
+        let extra = BTreeMap::from([("x-opencode-session".to_string(), "fallback".to_string())]);
+        let out = build_upstream_headers(&client, &rules, &extra);
+        assert_eq!(out.get("x-opencode-session").unwrap(), "ses_1");
+    }
+
+    #[test]
+    fn add_fills_target_when_replace_source_absent() {
+        let mut rules = ProviderHeaderRules::default();
+        rules.replace.push(HeaderReplace {
+            from: "session_id".into(),
+            to: "x-opencode-session".into(),
+        });
+        let extra = BTreeMap::from([("x-opencode-session".to_string(), "fallback".to_string())]);
+        let out = build_upstream_headers(&HeaderMap::new(), &rules, &extra);
+        assert_eq!(out.get("x-opencode-session").unwrap(), "fallback");
     }
 
     #[test]

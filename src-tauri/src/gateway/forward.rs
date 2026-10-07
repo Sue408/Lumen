@@ -71,7 +71,7 @@ pub fn upstream_path(protocol: &str, model_id: &str, is_stream: bool) -> String 
     }
 }
 
-/// 把 provider 的四意图（内置底座 / 透传 / 替换 / 添加 / 移除）与鉴权注入请求：
+/// 把 provider 的四意图（内置底座 / 透传 / 添加 / 替换 / 移除）与鉴权注入请求：
 /// 鉴权最后注入、无条件覆盖，硬黑名单在求值阶段剥离。转发与只读探测共用此装饰。
 fn decorate(
     mut request: reqwest::RequestBuilder,

@@ -243,7 +243,8 @@ pub struct Route {
 /// `Provider.extra_headers`）。空规则序列化为 `{}`。
 ///
 /// 求值顺序（见 `gateway::headers::build_upstream_headers`）：
-/// 内置底座 → `forward` → `replace` → `extra_headers` → `remove` → 硬黑名单。
+/// 内置底座 → `forward` → `extra_headers` → `replace` → `remove` → 硬黑名单。
+/// 故替换优先于添加：替换命中目标头时用客户端值，未命中才用添加的常量兜底。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProviderHeaderRules {

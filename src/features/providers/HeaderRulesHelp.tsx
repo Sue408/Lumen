@@ -21,10 +21,13 @@ export function HeaderRulesHelp() {
           <ol className="section-help-order">
             <li>默认放行</li>
             <li>透传</li>
-            <li>替换</li>
             <li>添加</li>
+            <li>替换</li>
             <li>移除（最高优先）</li>
           </ol>
+          <p className="section-help-note">
+            替换优先于添加：替换命中目标头时用它，未命中才用添加的常量兜底。
+          </p>
           <p className="section-help-note">默认放行：</p>
           <p className="section-help-codes">
             {DEFAULT_FORWARD_HEADERS.map((name) => (
