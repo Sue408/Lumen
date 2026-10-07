@@ -29,7 +29,6 @@
    */
   --line-control: light-dark(#868074, #6e685e);
   --line-faint: light-dark(rgb(222 217 208 / 70%), rgb(255 255 255 / 8%));
-  --heat-cell-line: light-dark(rgb(155 120 84 / 8%), rgb(255 255 255 / 6%));
 
   /* surfaces */
   --surface-sidebar: light-dark(#f7f4ef, #201f1c);
@@ -98,8 +97,7 @@
   --brand-hunyuan: light-dark(#0052d9, #4d8fea);
   --brand-spark: light-dark(#1e6fff, #5c9bff);
 
-  /* heat scale */
-  --heat-0: light-dark(#f1ede6, #24221f);
+  /* heat scale：0 档不占颜色——它是「有这天但没量」，靠一圈内描边表态 */
   --heat-1: light-dark(#e9dfd4, #2f2b26);
   --heat-2: light-dark(#d7c3af, #4a4034);
   --heat-3: light-dark(#b28d68, #6f5539);

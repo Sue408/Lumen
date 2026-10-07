@@ -141,7 +141,10 @@ export function MonthlyUsageHeatmap({ period, anchor }: { period: UsagePeriod; a
         </h2>
         <span className="chart-meta">深色代表用量更高</span>
       </header>
-      <div className="heatmap-wrap">
+      <div
+        className="heatmap-wrap"
+        style={{ "--heat-rows": cells.length / 7 } as CSSProperties}
+      >
         <div className="heatmap-weekdays">
           {"一二三四五六日".split("").map((day) => (
             <span key={day}>周{day}</span>
