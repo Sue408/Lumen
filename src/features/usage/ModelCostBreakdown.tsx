@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { ChartPie } from "lucide-react";
 import { AnimatedMetricValue } from "./AnimatedMetricValue";
 import { buildDonutSegments } from "./chartGeometry";
 import { formatCurrency } from "../../lib/format";
@@ -21,8 +22,15 @@ export function ModelCostBreakdown({ period }: ModelCostBreakdownProps) {
   return (
     <article className="chart-panel cost-panel">
       <header className="chart-heading">
-        <h2>模型花费构成</h2>
-        <span className="chart-meta">金额 · 占比</span>
+        <div className="chart-heading-left">
+          <span className="chart-badge" aria-hidden="true">
+            <ChartPie />
+          </span>
+          <div className="chart-heading-text">
+            <h2>模型花费构成</h2>
+            <span className="chart-sub">金额与占比</span>
+          </div>
+        </div>
       </header>
 
       <div className="cost-content">

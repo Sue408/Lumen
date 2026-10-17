@@ -6,12 +6,20 @@
  * page styles; reference these tokens instead.
  */
 :root {
-  --sidebar-width: clamp(11.5rem, 13vw, 16rem);
+  --sidebar-width: clamp(12.5rem, 14vw, 17rem);
   --sidebar-gutter-x: clamp(1rem, 1.2vw, 1.5rem);
   --page-max: clamp(90rem, 82vw, 120rem);
-  --page-gutter-x: clamp(2.25rem, 2.6vw, 3.5rem);
-  --page-gutter-y: clamp(1.5rem, 4vh, 4rem);
+  --page-gutter-x: clamp(1.75rem, 2.4vw, 3.25rem);
+  --page-gutter-y: clamp(1.25rem, 3vh, 2.5rem);
   --page-gap: clamp(1rem, 2.5vh, 2.75rem);
+  /*
+   * Shape tokens — the four sanctioned radii: tag / control / panel / pill.
+   * 12px is the ceiling; paper is cut, not inflated, so nothing rounds more.
+   */
+  --radius-tag: 4px;
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --radius-pill: 999px;
   /*
    * Height of the custom title bar. Every page reserves at least this much
    * top padding so its header clears the window controls.

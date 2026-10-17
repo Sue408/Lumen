@@ -19,19 +19,26 @@
   --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono",
     "Cascadia Code", Consolas, Menlo, "Liberation Mono", monospace;
 
-  /* label tracking: eyebrow / section titles / field names share one value */
-  --tracking-label: 0.08em;
+  /*
+   * Label tracking — 微标签专用（eyebrow）。分区题与字段标签不再吃宽字距，
+   * 11px 大写 + 0.14em 只留给每页顶部的微标签与 tag。
+   */
+  --tracking-label: 0.14em;
 
   /*
-   * Fluid display sizes — these grow and shrink with the window instead of
-   * jumping between breakpoints, so the ledger keeps its proportions when the
-   * window is resized small or large.
+   * Type scale — 二期 9 档。Fluid display sizes grow and shrink with the
+   * window instead of jumping between breakpoints, so the ledger keeps its
+   * proportions when the window is resized small or large.
    */
-  --text-h1: clamp(1.5rem, 1.15rem + 1.05vw, 1.875rem);
-  --text-metric: clamp(1.45rem, 1rem + 1.5vw, 2rem);
-  --text-title: clamp(0.875rem, 0.82rem + 0.2vw, 0.9375rem);
-  --text-body: clamp(0.9rem, 0.8rem + 0.45vw, 1.125rem);
-  --text-small: clamp(0.75rem, 0.68rem + 0.25vw, 0.875rem);
+  --text-display: clamp(1.75rem, 1.05rem + 1.45vw, 2.5rem);
+  --text-metric: clamp(1.625rem, 1.125rem + 1vw, 2.125rem);
+  --text-section: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
+  --text-title: 0.9375rem;
+  --text-body: clamp(0.9375rem, 0.9375rem + 0.1vw, 1rem);
+  --text-small: 0.8125rem;
+  --text-caption: 0.75rem;
+  --text-eyebrow: 0.6875rem;
+  --text-mono: 0.8125rem;
 
   /*
    * Stacking scale — portal 浮层（下拉 / 日历 / 选择器 / 说明）会挂到 body，
@@ -79,7 +86,7 @@
 *::-webkit-scrollbar-thumb {
   background: var(--line);
   border: 2px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background-clip: padding-box;
 }
 

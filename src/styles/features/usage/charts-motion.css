@@ -3,8 +3,7 @@
   width: 100%;
   max-width: var(--page-max);
   justify-self: center;
-  grid-template-rows: auto auto auto clamp(22rem, 48vh, 44rem);
-  gap: var(--page-gap);
+  grid-template-rows: auto auto minmax(24rem, 1fr);
 }
 
 .metric-value {
@@ -16,24 +15,10 @@
   min-height: 0;
 }
 
-.chart-panel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-height: 0;
-}
-
 .trend-chart,
 .cost-content {
   height: 100%;
   min-height: 0;
-}
-
-.chart-unit,
-.chart-meta,
-.x-axis,
-.y-axis {
-  color: var(--ink-muted);
-  font-size: 0.8125rem;
 }
 
 .cost-content {
@@ -175,7 +160,7 @@
   width: 0.5rem;
   height: 0.5rem;
   background: var(--paper);
-  border: 0.125rem solid var(--ochre);
+  border: 0.125rem solid var(--dot-tone, var(--ochre));
   border-radius: 50%;
   opacity: 0;
   transform: translate(-50%, -50%);
@@ -197,7 +182,7 @@
   pointer-events: none;
   background: var(--tooltip-bg);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-control);
   box-shadow: var(--shadow-tooltip);
   opacity: 0;
   transform: translate(0.75rem, calc(-100% - 0.5rem)) scale(0.97);
@@ -253,7 +238,7 @@
   width: 0.5rem;
   height: 0.5rem;
   flex: 0 0 auto;
-  border-radius: 2px;
+  border-radius: var(--radius-tag);
 }
 
 .trend-tooltip dt,

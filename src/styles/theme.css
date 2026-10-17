@@ -7,55 +7,64 @@
  *
  * Keep every literal colour here. Page styles must reference these tokens and
  * never hardcode a hex value.
+ *
+ * 二期「夜晚的档案室」：深色是主场——画布压深到近黑暖调，层级靠三级面
+ * （paper / panel / panel-raised）与两级线（line / line-panel / line-strong）
+ * 表达；浅色同构对位。值见 docs/UIUX设计文档-第二期.md。
  */
 :root {
   color-scheme: light dark;
 
-  /* paper & ink */
-  --paper: light-dark(#fbfaf8, #1a1917);
-  --paper-deep: light-dark(#f0ece5, #24221f);
-  --ink: light-dark(#1c1a17, #ece8e1);
-  --ink-soft: light-dark(#403b35, #cfc9c0);
-  --ink-muted: light-dark(#6f6960, #9f988d);
-  --ink-faint: light-dark(#9a9389, #736d64);
+  /* paper, panels & ink */
+  --paper: light-dark(#fbfaf8, #141311);
+  --paper-deep: light-dark(#f0ece5, #201e1a);
+  --panel: light-dark(#fefdfb, #1a1916);
+  --panel-raised: light-dark(#ffffff, #262320);
+  --ink: light-dark(#1c1a17, #f2eee7);
+  --ink-soft: light-dark(#403b35, #d6d0c6);
+  /* 可读文本的最淡一档；--ink-faint 退出文本序列，只用于图形与提示符号 */
+  --ink-muted: light-dark(#6f6960, #a9a296);
+  --ink-faint: light-dark(#9a9389, #8a8378);
 
   /* lines & rules */
-  --line: light-dark(#ded9d0, #35322d);
-  --line-strong: light-dark(#b9b4ab, #4a463f);
+  --line: light-dark(#e2dcd2, #2a2722);
+  /* 面板描边：比发丝线可见一档，撑起深色下的层级 */
+  --line-panel: light-dark(#eae5dc, #2e2a25);
+  --line-strong: light-dark(#c4beb2, #3a362f);
   /*
    * Control boundary: form fields only, held to WCAG 1.4.11 (>=3:1 against
    * paper). `--line` stays decorative; this darker warm grey is what actually
    * outlines inputs so the box remains perceivable without colour.
    */
   --line-control: light-dark(#868074, #6e685e);
-  --line-faint: light-dark(rgb(222 217 208 / 70%), rgb(255 255 255 / 8%));
+  --line-faint: light-dark(rgb(222 217 208 / 60%), rgb(255 255 255 / 7%));
 
   /* surfaces */
-  --surface-sidebar: light-dark(#f7f4ef, #201f1c);
-  --surface-active: light-dark(#eeeae3, #2c2a26);
+  --surface-sidebar: light-dark(#f7f4ef, #161513);
+  --surface-active: light-dark(#eeeae3, #24221f);
   --surface-hover: light-dark(rgb(238 234 227 / 55%), rgb(255 255 255 / 6%));
   --surface-hover-soft: light-dark(rgb(238 234 227 / 45%), rgb(255 255 255 / 5%));
   --surface-hover-strong: light-dark(rgb(238 234 227 / 70%), rgb(255 255 255 / 8%));
   /* running gateway: a faint moss wash so "live" reads even without motion */
   --surface-live: light-dark(rgb(113 128 106 / 10%), rgb(143 158 134 / 9%));
-  --tooltip-bg: light-dark(rgb(251 250 248 / 97%), rgb(32 31 28 / 98%));
+  --tooltip-bg: light-dark(rgb(251 250 248 / 97%), rgb(38 35 32 / 98%));
 
   /* signals (vermilion stays reserved for failure / disabled / over-budget) */
-  --ochre: light-dark(#9b7854, #b98f66);
-  --danger: light-dark(#a65d55, #c76a58);
+  --ochre: light-dark(#9b7854, #c29a6d);
+  --danger: light-dark(#a65d55, #d0735f);
   --on-danger: light-dark(#ffffff, #1a1917);
 
   /* liveness: the only non-chart use of moss, an online status dot */
-  --live: light-dark(#71806a, #8f9e86);
-  --live-ring: light-dark(rgb(113 128 106 / 45%), rgb(143 158 134 / 45%));
+  --live: light-dark(#71806a, #96a78c);
+  --live-ring: light-dark(rgb(113 128 106 / 45%), rgb(150 167 140 / 45%));
   /* the sidebar heartbeat is the app's heaviest motion — give it a solid halo */
-  --live-halo: light-dark(rgb(113 128 106 / 55%), rgb(143 158 134 / 55%));
+  --live-halo: light-dark(rgb(113 128 106 / 55%), rgb(150 167 140 / 55%));
 
   /* chart mineral palette: ochre / indigo / moss / yellow, never vermilion */
-  --chart-ochre: light-dark(#9b7854, #b98f66);
-  --chart-indigo: light-dark(#607087, #7b8ba0);
-  --chart-moss: light-dark(#71806a, #8f9e86);
-  --chart-yellow: light-dark(#b39a60, #c8b078);
+  --chart-ochre: light-dark(#9b7854, #c79c6c);
+  --chart-indigo: light-dark(#607087, #8fa3be);
+  --chart-moss: light-dark(#71806a, #95a68a);
+  --chart-yellow: light-dark(#a88c4e, #d5bb80);
 
   /*
    * Brand marks: the only non-mineral colours in the system, and only when an
@@ -110,7 +119,7 @@
   --shadow-tooltip-color: light-dark(rgb(54 46 36 / 8%), rgb(0 0 0 / 0%));
   --shadow-float: 0 0.375rem 1.125rem var(--shadow-color);
   --shadow-tooltip: 0 0.4rem 1rem var(--shadow-tooltip-color);
-  --scrim: light-dark(rgb(28 26 23 / 30%), rgb(0 0 0 / 58%));
+  --scrim: light-dark(rgb(28 26 23 / 30%), rgb(0 0 0 / 65%));
 }
 
 :root[data-theme="light"] {

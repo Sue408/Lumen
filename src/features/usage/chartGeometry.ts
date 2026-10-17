@@ -1,6 +1,10 @@
 const round = (value: number) => Number(value.toFixed(2));
 
-export function buildSmoothPath(
+/**
+ * 直线段折线：线是账目的刻度，不做样条平滑——每一段都直说两个采样点之间的
+ * 事实。与面积共用同一组点。
+ */
+export function buildLinePath(
   values: number[],
   width: number,
   height: number,
@@ -18,11 +22,8 @@ export function buildSmoothPath(
   }
 
   let path = `M ${round(points[0].x)} ${round(points[0].y)}`;
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const current = points[index];
-    const next = points[index + 1];
-    const controlOffset = (next.x - current.x) * 0.42;
-    path += ` C ${round(current.x + controlOffset)} ${round(current.y)}, ${round(next.x - controlOffset)} ${round(next.y)}, ${round(next.x)} ${round(next.y)}`;
+  for (let index = 1; index < points.length; index += 1) {
+    path += ` L ${round(points[index].x)} ${round(points[index].y)}`;
   }
   return path;
 }
@@ -33,7 +34,7 @@ export function buildAreaPath(
   height: number,
   maxValue: number,
 ): string {
-  const line = buildSmoothPath(values, width, height, maxValue);
+  const line = buildLinePath(values, width, height, maxValue);
   if (!line) return "";
   return `${line} L ${round(width)} ${round(height)} L 0 ${round(height)} Z`;
 }

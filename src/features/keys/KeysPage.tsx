@@ -267,10 +267,23 @@ export function KeysPage() {
     <main className="keys-page">
       <div className="keys-column">
         <header className="page-header">
-          <div>
+          <div className="page-header-text">
             <div className="eyebrow">VIRTUAL KEYS</div>
             <h1>虚拟密钥</h1>
+            {loading ? null : (
+              <p className="page-subtitle">
+                {keys.length} 个密钥 · {enabledCount} 个已启用
+              </p>
+            )}
           </div>
+          {loading || keys.length === 0 ? null : (
+            <div className="header-actions">
+              <button className="quiet-button is-primary keys-new" type="button" onClick={openCreate}>
+                <Plus aria-hidden="true" />
+                新建密钥
+              </button>
+            </div>
+          )}
         </header>
 
         {error ? <InlineError message={error} /> : null}
@@ -287,15 +300,6 @@ export function KeysPage() {
           </div>
         ) : (
           <section className="keys-register">
-            <div className="keys-controls">
-              <p className="keys-summary">
-                {keys.length} 个密钥 · <strong>{enabledCount}</strong> 个启用
-              </p>
-              <button className="quiet-button is-primary keys-new" type="button" onClick={openCreate}>
-                <Plus aria-hidden="true" />
-                新建密钥
-              </button>
-            </div>
             <ul className="keys-list">
               {keys.map((key) => {
                 const usage = usages[key.id] ?? null;

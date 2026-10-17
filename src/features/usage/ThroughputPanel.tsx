@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Gauge } from "lucide-react";
 import { buildSparklinePath, formatRate } from "../../lib/telemetry";
 import { queryTelemetry, type TelemetrySnapshot } from "../../services/telemetry";
 import type { PeriodKey } from "./usageData";
@@ -70,8 +71,16 @@ export function ThroughputPanel({
 
   return (
     <article className="throughput-panel" aria-label={title}>
-      <header className="throughput-head">
-        <h2>{title}</h2>
+      <header className="chart-heading">
+        <div className="chart-heading-left">
+          <span className="chart-badge" aria-hidden="true">
+            <Gauge />
+          </span>
+          <div className="chart-heading-text">
+            <h2>{title}</h2>
+            <span className="chart-sub">tokens/s · 周期平均与峰值</span>
+          </div>
+        </div>
       </header>
       <div className="throughput-body">
         <div className="throughput-figure">

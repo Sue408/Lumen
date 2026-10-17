@@ -186,20 +186,19 @@ export function LogsPage() {
   return (
     <main className="logs-page">
       <header className="page-header">
-        <div>
+        <div className="page-header-text">
           <div className="eyebrow">USAGE LEDGER / STREAM</div>
           <h1>使用日志</h1>
+          <p className="page-subtitle" aria-live="polite">
+            <strong>{rangeLabel}</strong>
+            {summary
+              ? ` · 共 ${formatInteger(summary.all)} 次 · 失败 ${formatInteger(summary.failed)} · 用量存疑 ${formatInteger(summary.unreliable)}`
+              : " · 正在整理记录…"}
+          </p>
         </div>
       </header>
 
       <div className="logs-controls">
-        <p className="logs-summary" aria-live="polite">
-          <strong>{rangeLabel}</strong>
-          {summary
-            ? ` · 共 ${formatInteger(summary.all)} 次 · 失败 ${formatInteger(summary.failed)} · 用量存疑 ${formatInteger(summary.unreliable)}`
-            : " · 正在整理记录…"}
-        </p>
-
         <div className="logs-toolbar">
           <div className="logs-scope" role="group" aria-label="查看口径">
             {logScopes.map((item) => (

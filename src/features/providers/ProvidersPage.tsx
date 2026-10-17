@@ -527,9 +527,14 @@ export function ProvidersPage() {
     <main className="providers-page">
       <div className="config-column">
         <header className="page-header">
-          <div>
+          <div className="page-header-text">
             <div className="eyebrow">UPSTREAM REGISTER</div>
             <h1>上游提供商</h1>
+            {loading ? null : (
+              <p className="page-subtitle">
+                {providers.length} 家上游 · {providers.filter((provider) => provider.enabled).length} 家已启用
+              </p>
+            )}
           </div>
         </header>
 

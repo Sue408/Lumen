@@ -8,7 +8,8 @@ import {
   type CSSProperties,
   type PointerEvent,
 } from "react";
-import { buildAreaPath, buildSmoothPath } from "./chartGeometry";
+import { ChartLine } from "lucide-react";
+import { buildAreaPath, buildLinePath } from "./chartGeometry";
 import { toneFor } from "./chartTone";
 import { growCeiling, initialCeiling } from "./trendScale";
 import {
@@ -127,7 +128,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
     () =>
       layers.map((layer) => ({
         layer,
-        line: buildSmoothPath(layer.values, chartSize.width, chartSize.height, yMax),
+        line: buildLinePath(layer.values, chartSize.width, chartSize.height, yMax),
         area: buildAreaPath(layer.values, chartSize.width, chartSize.height, yMax),
       })),
     [layers, chartSize.width, chartSize.height, yMax],
@@ -181,13 +182,17 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
   return (
     <article className="chart-panel trend-panel">
       <header className="chart-heading">
-        <h2>
-          花费趋势
-          <span className="chart-unit">$ · 每小时</span>
-        </h2>
-        <span className="chart-meta">
-          {layers.length > 0 ? `${layers.length} 条曲线` : "暂无调用"}
-        </span>
+        <div className="chart-heading-left">
+          <span className="chart-badge" aria-hidden="true">
+            <ChartLine />
+          </span>
+          <div className="chart-heading-text">
+            <h2>花费趋势</h2>
+            <span className="chart-sub">
+              $ · 每小时{layers.length > 0 ? ` · ${layers.length} 条曲线` : ""}
+            </span>
+          </div>
+        </div>
       </header>
 
       <div className="trend-chart">
@@ -229,6 +234,21 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
                   />
                 </clipPath>
               ))}
+              {/* 面积是单色垂直渐隐：线色 26% 起、到基線归零 */}
+              {series.map(({ layer }, index) => (
+                <linearGradient
+                  key={`fill-${layer.name}`}
+                  id={`trend-fill-${id}-${index}`}
+                  gradientUnits="userSpaceOnUse"
+                  x1="0"
+                  y1="0"
+                  x2="0"
+                  y2={chartSize.height}
+                >
+                  <stop offset="0%" stopColor={toneFor(layer.tone)} stopOpacity="0.26" />
+                  <stop offset="100%" stopColor={toneFor(layer.tone)} stopOpacity="0" />
+                </linearGradient>
+              ))}
               <linearGradient
                 id={fadeId}
                 gradientUnits="userSpaceOnUse"
@@ -257,7 +277,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
                   key={`area-${layer.name}`}
                   className="trend-area"
                   d={area}
-                  fill={toneFor(layer.tone)}
+                  fill={`url(#trend-fill-${id}-${index})`}
                   clipPath={`url(#trend-reveal-${id}-${index})`}
                 />
               ))}
@@ -279,6 +299,19 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
                 />
               ))}
             </g>
+            {/* 端点聚焦：每条线的最右一点落一枚实心圆，纸色外壳把它从面积里切出来 */}
+            {hasValue
+              ? series.map(({ layer }) => (
+                  <circle
+                    key={`end-${layer.name}`}
+                    className="trend-end"
+                    cx={chartSize.width}
+                    cy={toY(layer.values[layer.values.length - 1] ?? 0)}
+                    r="2.5"
+                    fill={toneFor(layer.tone)}
+                  />
+                ))
+              : null}
             {hasValue ? null : (
               <path
                 className="trend-zero"
@@ -308,6 +341,7 @@ export function UsageTrendChart({ period, anchor }: { period: UsagePeriod; ancho
                   style={
                     {
                       "--hover-y": `${(toY(layer.values[activeIndex] ?? 0) / chartSize.height) * 100}%`,
+                      "--dot-tone": toneFor(layer.tone),
                     } as CSSProperties
                   }
                   aria-hidden="true"

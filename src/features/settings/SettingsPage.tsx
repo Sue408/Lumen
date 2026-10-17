@@ -316,9 +316,10 @@ export function SettingsPage({ theme, onToggleTheme }: SettingsPageProps) {
     <main className="settings-page">
       <div className="settings-column">
         <header className="page-header">
-          <div>
+          <div className="page-header-text">
             <div className="eyebrow">SETTINGS</div>
             <h1>设置</h1>
+            <p className="page-subtitle">运行参数、外观与数据维护</p>
           </div>
         </header>
 

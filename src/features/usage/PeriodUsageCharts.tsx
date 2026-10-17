@@ -1,4 +1,5 @@
 import { useState, type CSSProperties, type PointerEvent } from "react";
+import { CalendarDays, ChartColumn } from "lucide-react";
 import { cumulativeToDistribution, buildMonthHeatmap } from "./usageVisualData";
 import { toneFor } from "./chartTone";
 import { formatMoney } from "../../lib/format";
@@ -49,11 +50,15 @@ export function WeeklyUsageBars({ period }: { period: UsagePeriod }) {
   return (
     <article className="chart-panel trend-panel">
       <header className="chart-heading">
-        <h2>
-          每日花费构成
-          <span className="chart-unit">$</span>
-        </h2>
-        <span className="chart-meta">按分层堆叠</span>
+        <div className="chart-heading-left">
+          <span className="chart-badge" aria-hidden="true">
+            <ChartColumn />
+          </span>
+          <div className="chart-heading-text">
+            <h2>每日花费构成</h2>
+            <span className="chart-sub">$ · 按分层堆叠</span>
+          </div>
+        </div>
       </header>
       <div
         className={`weekly-bars${hovered !== null ? " is-hovering" : ""}`}
@@ -135,11 +140,15 @@ export function MonthlyUsageHeatmap({ period, anchor }: { period: UsagePeriod; a
   return (
     <article className="chart-panel trend-panel">
       <header className="chart-heading">
-        <h2>
-          每日使用活跃度
-          <span className="chart-unit">Token 强度</span>
-        </h2>
-        <span className="chart-meta">深色代表用量更高</span>
+        <div className="chart-heading-left">
+          <span className="chart-badge" aria-hidden="true">
+            <CalendarDays />
+          </span>
+          <div className="chart-heading-text">
+            <h2>每日使用活跃度</h2>
+            <span className="chart-sub">Token 强度 · 深色代表用量更高</span>
+          </div>
+        </div>
       </header>
       <div
         className="heatmap-wrap"

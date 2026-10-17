@@ -1,14 +1,14 @@
 @container page (max-width: 52rem) {
   .usage-charts {
     grid-template-columns: minmax(0, 1.6fr) minmax(14rem, 0.9fr);
-    gap: 1.5rem;
   }
 }
 
 @container page (max-width: 46rem) {
   .usage-charts {
-    grid-template-columns: minmax(0, 1.5fr) minmax(13.5rem, 0.9fr);
-    gap: 1.25rem;
+    grid-template-columns: minmax(0, 1fr);
+    /* 单列堆叠：行按内容自然高度铺开（而非被外层行压成等分），页面负责滚动 */
+    grid-template-rows: max-content max-content;
   }
 }
 

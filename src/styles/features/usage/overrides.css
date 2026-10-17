@@ -1,10 +1,9 @@
 /*
- * Usage page layout corrections: a compact metric strip, a reserved chart
- * track, and fluid header controls. Consolidated from a stack of historical
- * patches so each selector appears exactly once.
+ * Usage page layout corrections: header controls and panel flow. Consolidated
+ * from a stack of historical patches so each selector appears exactly once.
  */
 .usage-page {
-  grid-template-rows: auto auto auto minmax(24rem, 1fr);
+  grid-template-rows: auto auto minmax(24rem, 1fr);
 }
 
 .metric-strip {
@@ -17,20 +16,7 @@
   padding-top: 0.5rem;
 }
 
-/* Header actions: icon actions first, period controls second. */
-.header-actions {
-  display: flex;
-  align-items: flex-end;
-  gap: clamp(0.75rem, 1vw, 1.25rem);
-}
-
-.header-utility-actions {
-  display: flex;
-  align-items: center;
-  align-self: flex-end;
-  height: clamp(1.55rem, 2vw, 2rem);
-  gap: clamp(0.3rem, 0.5vw, 0.6rem);
-}
+/* Header actions: filter group and period group are separated by a hairline. */
 
 .icon-button {
   position: relative;
@@ -46,7 +32,7 @@
   color: var(--ink-muted);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-control);
   cursor: pointer;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease, opacity 150ms ease;
 }
@@ -72,30 +58,16 @@
   opacity: 0.4;
 }
 
-.icon-button.today-button {
-  margin-left: 0;
-}
-
 .period-control-stack {
-  display: grid;
-  justify-items: end;
-  gap: clamp(0.65rem, 0.8vw, 0.9rem);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: clamp(0.5rem, 0.7vw, 0.8rem);
 }
 
-.period-control-stack .period-switcher {
-  width: max-content;
-  gap: clamp(1rem, 1.6vw, 1.75rem);
-}
-
-.period-control-stack .period-switcher button {
-  font-size: clamp(0.875rem, 0.85vw, 1rem);
-}
-
-.period-control-stack .period-navigator {
+.period-navigator {
   min-height: clamp(1.55rem, 2vw, 2rem);
-  row-gap: 0.35rem;
-  column-gap: clamp(0.1rem, 0.18vw, 0.2rem);
-  justify-content: flex-start;
 }
 
 .period-control-stack .period-navigator > button:first-child,
@@ -116,12 +88,24 @@
   opacity: 0.4;
 }
 
+/* 窄屏：页头折行，工具条整行接手 */
 @container page (max-width: 46rem) {
-  .page-controls {
-    grid-template-columns: minmax(0, 1fr);
+  .page-header {
+    flex-wrap: wrap;
   }
 
-  .header-actions .period-control-stack {
+  .header-actions {
     margin-left: auto;
+  }
+
+  /*
+   * 单列 stack 后，max-content 行里百分比高度没有解析基准，而折线图的 viewBox
+   * 纵横比会经 ResizeObserver 把高度反馈回容器（曲线越涨越高的闭环）。给三种
+   * 周期图一个确定高度，闭环即断。
+   */
+  .trend-chart,
+  .weekly-bars,
+  .heatmap-wrap {
+    height: 16rem;
   }
 }

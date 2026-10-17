@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import {
   buildAreaPath,
   buildDonutSegments,
-  buildSmoothPath,
+  buildLinePath,
 } from "./chartGeometry.ts";
 
-test("smooth path spans the requested chart width and stays inside its height", () => {
-  const path = buildSmoothPath([0, 20, 10, 40, 60], 600, 210, 60);
-  assert.match(path, /^M 0 210 /);
+test("line path connects samples with straight segments and spans the width", () => {
+  const path = buildLinePath([0, 20, 10, 40, 60], 600, 210, 60);
+  assert.match(path, /^M 0 210 L /);
   assert.match(path, /600 0$/);
+  assert.equal(path.split("L").length - 1, 4);
+  assert.doesNotMatch(path, /C/);
 });
 
 test("area path closes the line against the chart baseline", () => {

@@ -23,20 +23,25 @@
 .keys-page h1 {
   margin: 0;
   font-family: var(--font-serif);
-  font-size: var(--text-h1);
+  font-size: var(--text-display);
   font-weight: 600;
-  line-height: 1.12;
+  letter-spacing: -0.01em;
+  line-height: 1.08;
 }
 
-/* the register holds the summary row and the list, so the new-key action can
-   sit close to the list's top rule */
+/* the register is the page's single panel: a hairline list of key rows */
 .keys-page .keys-register {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.4rem;
   min-width: 0;
   min-height: 0;
+  padding: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--line-panel);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-float);
 }
 
 .keys-page .keys-column {
@@ -49,14 +54,6 @@
   min-width: 0;
   min-height: 0;
   margin-inline: auto;
-}
-
-.keys-page .keys-controls {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding-right: 0.75rem;
 }
 
 .keys-page .keys-new {
@@ -76,18 +73,6 @@
   stroke-width: 1.5;
 }
 
-.keys-page .keys-summary {
-  margin: 0;
-  color: var(--ink-muted);
-  font-size: 0.875rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.keys-page .keys-summary strong {
-  color: var(--ink-soft);
-  font-weight: 600;
-}
-
 .keys-page .keys-empty {
   display: grid;
   gap: 0.85rem;
@@ -101,7 +86,7 @@
   align-content: start;
   min-width: 0;
   min-height: 0;
-  padding: 0 4px 1rem 0;
+  padding: 0 2px 0.5rem;
   margin: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -182,7 +167,7 @@
   color: var(--ink-muted);
   background: transparent;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-control);
   cursor: pointer;
   place-items: center;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
@@ -230,7 +215,7 @@
   height: 6px;
   overflow: hidden;
   background: var(--line-faint);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 /* unlimited quota has no fill to show — mark it with a faint hatch instead */

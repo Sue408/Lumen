@@ -14,14 +14,13 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 1.75rem var(--sidebar-gutter-x) 1.25rem;
+  padding: 1.25rem var(--sidebar-gutter-x) 1rem;
   background: var(--surface-sidebar);
   border-right: 1px solid var(--line);
 }
 
-.brand,
+.brand-name,
 .usage-page h1,
-.usage-summary,
 .metric-value,
 .chart-heading h2 {
   font-family: var(--font-serif);
@@ -30,22 +29,42 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin: 0 10px 28px;
-  font-size: 1.375rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  gap: 0.55rem;
+  margin: 0 10px 1.5rem;
 }
 
 .brand-logo {
   width: auto;
-  height: 1.5rem;
+  height: 1.75rem;
   flex: 0 0 auto;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.brand-name {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+}
+
+.brand-tagline {
+  color: var(--ink-muted);
+  font-size: var(--text-eyebrow);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1.2;
 }
 
 .navigation {
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 .nav-item {
@@ -59,7 +78,7 @@
   color: var(--ink-soft);
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-control);
   cursor: pointer;
   font-size: 0.875rem;
   transition:
@@ -68,8 +87,8 @@
 }
 
 .nav-icon {
-  width: 1.125rem;
-  height: 1.125rem;
+  width: 1.25rem;
+  height: 1.25rem;
   flex: 0 0 auto;
   stroke-width: 1.5;
 }
@@ -95,7 +114,7 @@
   margin-top: auto;
   padding: 0.65rem 0.75rem;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-control);
   background: none;
   color: var(--ink-muted);
   font: inherit;
@@ -242,4 +261,3 @@
     display: none;
   }
 }
-

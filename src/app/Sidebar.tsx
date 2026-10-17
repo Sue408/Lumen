@@ -32,7 +32,10 @@ export function Sidebar({ activeView, onNavigate }: SidebarProps) {
     <aside className="sidebar" aria-label="主导航">
       <div className="brand">
         <img className="brand-logo" src={logoMark} alt="" aria-hidden="true" />
-        <span>Lumen</span>
+        <span className="brand-text">
+          <span className="brand-name">Lumen</span>
+          <span className="brand-tagline" aria-hidden="true">PRIVATE LEDGER</span>
+        </span>
       </div>
       <nav className="navigation">
         {navigationItems.map((item) => {

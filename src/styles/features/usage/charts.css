@@ -1,43 +1,82 @@
 .usage-charts {
   display: grid;
   grid-template-columns: minmax(0, 1.78fr) minmax(17rem, 0.86fr);
-  gap: 2.25rem;
+  gap: 1rem;
   min-width: 0;
   min-height: 0;
 }
 
+/* 面板材质：1px 描边 + 12px 圆角；深色无阴影，浅色继承极淡纸层阴影 */
 .chart-panel {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
+  padding: 1.25rem;
+  background: var(--panel);
+  border: 1px solid var(--line-panel);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-float);
 }
 
 .chart-heading {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 10px;
+  gap: 1rem;
+  margin-bottom: 0.875rem;
+}
+
+.chart-heading-left {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.chart-badge {
+  display: inline-grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--ink-muted);
+  background: var(--paper-deep);
+  border-radius: var(--radius-control);
+}
+
+.chart-badge svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.chart-heading-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
 }
 
 .chart-heading h2 {
   margin: 0;
-  font-size: var(--text-title);
+  font-size: var(--text-section);
   font-weight: 600;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
-.chart-unit,
-.chart-meta {
+.chart-sub {
+  overflow: hidden;
   color: var(--ink-muted);
   font-family: var(--font-sans);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   font-weight: 400;
-}
-
-.chart-unit {
-  margin-left: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .trend-chart {
@@ -157,7 +196,7 @@
   width: 6px;
   height: 6px;
   margin-right: 7px;
-  border-radius: 2px;
+  border-radius: var(--radius-tag);
 }
 
 .model-cost,
@@ -187,17 +226,16 @@
   overflow: visible;
 }
 
-/* 极淡的体量影子：线是主信号，面积只暗示体量，交叠处也不糊 */
+/* 面积是单色垂直渐隐（线色 26% 到基线归零），透明度由 SVG 渐变承担 */
 .trend-area {
   stroke: none;
-  fill-opacity: 0.15;
 }
 
 /* 每条线先垫一层纸色外壳，多条交叠时把线切开，彼此才看得清 */
 .trend-line-casing {
   fill: none;
   stroke: var(--paper);
-  stroke-width: 3;
+  stroke-width: 3.5;
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
@@ -206,9 +244,16 @@
 
 .trend-line {
   fill: none;
-  stroke-width: 1.5;
+  stroke-width: 1.75;
   stroke-linecap: round;
   stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* 端点聚焦：每条线的最右一点落一枚实心圆，纸色外壳把点从面积里切出来 */
+.trend-end {
+  stroke: var(--paper);
+  stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
 
@@ -243,7 +288,7 @@
   width: 0.5rem;
   height: 0.5rem;
   flex: 0 0 auto;
-  border-radius: 2px;
+  border-radius: var(--radius-tag);
 }
 
 .trend-label b {

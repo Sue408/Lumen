@@ -316,9 +316,14 @@ export function RoutingPage() {
     <main className="routing-page">
       <div className="config-column">
         <header className="page-header">
-          <div>
+          <div className="page-header-text">
             <div className="eyebrow">ROUTING RECIPES</div>
             <h1>模型路由</h1>
+            {loading ? null : (
+              <p className="page-subtitle">
+                {routes.length} 条别名 · {routes.filter((route) => route.enabled).length} 条已启用
+              </p>
+            )}
           </div>
           <ProtocolHelp />
         </header>

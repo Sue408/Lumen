@@ -1,6 +1,6 @@
 .usage-page {
   display: grid;
-  grid-template-rows: auto auto auto minmax(20rem, 24rem);
+  grid-template-rows: auto auto minmax(24rem, 1fr);
   align-content: start;
   min-width: 0;
   padding: var(--chrome-h) var(--page-gutter-x) var(--page-gutter-y);
@@ -14,136 +14,141 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 24px;
+  gap: 1.5rem;
+}
+
+.page-header-text {
+  display: grid;
+  min-width: 0;
 }
 
 .eyebrow {
   margin-bottom: 4px;
   color: var(--ink-muted);
-  font-size: 0.875rem;
+  font-size: var(--text-eyebrow);
   letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
 }
 
 .usage-page h1 {
   margin: 0;
-  font-size: var(--text-h1);
+  font-size: var(--text-display);
   font-weight: 600;
-  line-height: 1.12;
+  letter-spacing: -0.01em;
+  line-height: 1.08;
 }
 
-.period-switcher {
-  display: flex;
-  gap: 22px;
-  border-bottom: 1px solid var(--line);
-}
+/* ---- page subtitle：标题下的一句话（先写那句话） ---- */
 
-.period-switcher button {
-  position: relative;
-  min-width: 1.5rem;
-  min-height: 1.5rem;
-  padding: 7px 1px 8px;
-  color: var(--ink-muted);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  text-align: center;
-}
-
-.period-switcher button::after {
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 2px;
-  content: "";
-  background: transparent;
-}
-
-.period-switcher button:hover,
-.period-switcher button.is-selected {
-  color: var(--ink);
-}
-
-.period-switcher button.is-selected {
-  font-weight: 600;
-}
-
-.period-switcher button.is-selected::after {
-  background: var(--ochre);
-}
-
+/* 页面级副题：标题下的一句话。usage 页沿用 usage-summary 的名字。 */
+.page-subtitle,
 .usage-summary {
-  margin: 0;
-  color: var(--ink-soft);
+  margin: 0.45rem 0 0;
+  color: var(--ink-muted);
   font-size: var(--text-body);
   line-height: 1.5;
 }
 
+.page-subtitle strong,
 .usage-summary strong {
-  font-size: 1.12em;
+  font-size: 1.05em;
   font-weight: 600;
 }
 
-.page-controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  column-gap: 1.5rem;
-  row-gap: 1rem;
-  min-width: 0;
+/* ---- period switcher：分段控件 ---- */
+
+.period-switcher {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
 }
 
-.page-controls .summary-stack {
-  display: grid;
-  flex: 1 1 auto;
-  gap: 0.3rem;
-  min-width: 0;
+.period-switcher button {
+  min-width: 2.25rem;
+  min-height: 1.5rem;
+  padding: 0 0.65rem;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  transition:
+    color 100ms ease,
+    background-color 100ms ease;
 }
+
+.period-switcher button:hover {
+  color: var(--ink);
+}
+
+.period-switcher button.is-selected {
+  color: var(--ink);
+  background: var(--surface-active);
+  font-weight: 600;
+}
+
+/* ---- metric cards ---- */
 
 .metric-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  padding: 12px 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  gap: 1rem;
 }
 
-.metric {
+.metric-card {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  padding: 0 18px;
-  border-right: 1px solid var(--line);
+  padding: 1rem 1.25rem 1.1rem;
+  background: var(--panel);
+  border: 1px solid var(--line-panel);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-float);
 }
 
-.metric:first-child {
-  padding-left: 0;
-}
-
-.metric:last-child {
-  padding-right: 0;
-  border-right: 0;
+.metric-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
 }
 
 .metric-label {
-  margin-bottom: 4px;
+  overflow: hidden;
   color: var(--ink-muted);
-  font-size: 0.875rem;
+  font-size: var(--text-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+  stroke-width: 1.5;
 }
 
 .metric-value {
   overflow: hidden;
   font-size: var(--text-metric);
   font-weight: 600;
-  line-height: 1.12;
+  line-height: 1.02;
+  letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
 .metric-comparison {
-  margin-top: 4px;
+  margin-top: 0.35rem;
   overflow: hidden;
   color: var(--ink-muted);
-  font-size: 0.8125rem;
+  font-size: var(--text-small);
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -153,7 +158,7 @@
 
 .insight-block {
   display: grid;
-  gap: 0.3rem;
+  gap: 0.65rem;
   min-width: 0;
 }
 
@@ -171,14 +176,23 @@
   padding-top: 0.1rem;
   color: var(--ink-muted);
   font-size: 0.75rem;
-  letter-spacing: var(--tracking-label);
 }
 
 /* ---- per-key scope filter ---- */
 
 .scope-select {
   display: inline-flex;
-  align-self: flex-end;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+/* 筛选（范围）与账期（时间）是两个维度，用一条细线分开 */
+.scope-select::after {
+  width: 1px;
+  height: 1.25rem;
+  flex: 0 0 auto;
+  content: "";
+  background: var(--line);
 }
 
 .scope-select .select-trigger {
@@ -189,3 +203,9 @@
   font-size: 0.8125rem;
 }
 
+/* 窄屏：指标卡两列排布 */
+@container page (max-width: 52rem) {
+  .metric-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

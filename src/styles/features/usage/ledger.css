@@ -2,7 +2,7 @@
 .header-actions {
   display: flex;
   align-items: flex-start;
-  gap: 1.25rem;
+  gap: 1rem;
 }
 
 .quiet-button,
@@ -12,7 +12,7 @@
   color: var(--ink-muted);
   background: transparent;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-control);
   cursor: pointer;
   font-size: 0.875rem;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
@@ -26,11 +26,14 @@
 }
 
 .period-navigator {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.625rem;
+  gap: 2px;
   min-height: 2rem;
+  padding: 2px;
   color: var(--ink-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
 }
 
 .period-navigator > button:first-child,
@@ -40,16 +43,15 @@
   padding: 0;
   color: var(--ink);
   background: transparent;
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  border: 0;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   font-size: 1.25rem;
   line-height: 1;
 }
 
 .period-navigator > button:hover:not(:disabled) {
-  border-color: var(--ochre);
-  background: var(--paper-deep);
+  background: var(--surface-hover);
 }
 
 .period-navigator button:disabled {
@@ -66,10 +68,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.today-button {
-  margin-left: 0.25rem;
-}
-
 @container page (max-width: 52rem) {
   .header-actions {
     gap: 0.75rem;
@@ -82,7 +80,8 @@
 
 @container page (max-width: 46rem) {
   .header-actions {
-    align-items: flex-end;
+    flex-wrap: wrap;
+    align-items: center;
     width: 100%;
   }
 

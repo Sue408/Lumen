@@ -7,38 +7,34 @@
  * 加载 / 空态与数据态等高，避免刷新时整页跳动。
  */
 
-/* 图表区左列：吞吐 + 周期花费视图垂直排列，右列仍是模型花费构成。 */
-.usage-main {
+/* 图表区：左列吞吐 + 周期花费视图，右列模型花费与洞察，两列各自堆叠。 */
+.usage-main,
+.usage-side {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1rem;
   min-width: 0;
   min-height: 0;
 }
 
-/* 花费视图吃掉左列剩余高度；吞吐保持内容高度。 */
+/* 花费视图吃掉左列剩余高度；吞吐保持内容高度。周期图卡保底 15rem：
+   窗口矮或窄时图表不被压扁重叠，宁可让页面滚动。 */
 .usage-main > .chart-panel {
   flex: 1 1 auto;
+  min-height: 15rem;
 }
 
 .throughput-panel {
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.6rem;
   min-height: 5.25rem;
-  padding: 0.65rem 0.9rem;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-
-.throughput-head h2 {
-  margin: 0;
-  color: var(--ink-muted);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  letter-spacing: var(--tracking-label);
+  padding: 1.25rem;
+  background: var(--panel);
+  border: 1px solid var(--line-panel);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-float);
 }
 
 .throughput-body {
@@ -52,21 +48,22 @@
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
-  gap: 0.1rem;
+  gap: 0.15rem;
 }
 
 .throughput-figure strong {
   color: var(--ink);
   font-family: var(--font-serif);
-  font-size: 1.375rem;
-  font-weight: 500;
+  font-size: var(--text-metric);
+  font-weight: 600;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
-  line-height: 1;
+  line-height: 1.05;
 }
 
 .throughput-figure span {
   color: var(--ink-muted);
-  font-size: 0.6875rem;
+  font-size: var(--text-caption);
   font-variant-numeric: tabular-nums;
 }
 
@@ -74,14 +71,14 @@
   flex: 1 1 auto;
   width: 100%;
   min-width: 0;
-  height: 3.25rem;
+  height: 3.5rem;
   overflow: visible;
 }
 
 .throughput-spark path {
   fill: none;
   stroke: var(--chart-ochre);
-  stroke-width: 1.5;
+  stroke-width: 1.75;
   stroke-linecap: round;
   stroke-linejoin: round;
 }

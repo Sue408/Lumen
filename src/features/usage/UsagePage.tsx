@@ -1,4 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  Activity,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  CircleDollarSign,
+  Sparkles,
+} from "lucide-react";
 import { useLiveRevision } from "../../app/useLiveRevision";
 import { InlineError, LoadingLines } from "../../components/ConfigControls";
 import { Select } from "../../components/Select";
@@ -16,6 +23,18 @@ import { periodLabels, type PeriodKey, type UsagePeriod } from "./usageData";
 
 const ALL_SCOPE = "all";
 const UNASSIGNED_SCOPE = "__unassigned__";
+
+/** 指标卡右上角的小图标：按标签关键词取，命中不到就不画。 */
+function MetricIcon({ label }: { label: string }) {
+  if (label.includes("调用")) return <Activity className="metric-icon" aria-hidden="true" />;
+  if (label.includes("输入"))
+    return <ArrowDownToLine className="metric-icon" aria-hidden="true" />;
+  if (label.includes("输出"))
+    return <ArrowUpFromLine className="metric-icon" aria-hidden="true" />;
+  if (label.includes("花费"))
+    return <CircleDollarSign className="metric-icon" aria-hidden="true" />;
+  return null;
+}
 
 export function UsagePage() {
   const [periodKey, setPeriodKey] = useState<PeriodKey>("day");
@@ -117,13 +136,9 @@ export function UsagePage() {
   return (
     <main className="usage-page">
       <header className="page-header">
-        <div>
+        <div className="page-header-text">
           <div className="eyebrow">USAGE LEDGER</div>
           <h1>{heading}</h1>
-        </div>
-      </header>
-      <div className="page-controls">
-        <div className="summary-stack">
           {overview ? (
             <p className="usage-summary" aria-live="polite">
               <strong>{current ? overview.summaryLead : cursor}</strong>
@@ -134,15 +149,6 @@ export function UsagePage() {
               {error ? "暂时无法读取用量数据。" : "正在整理用量数据…"}
             </p>
           )}
-          {overview ? (
-            <div className="insight-block" aria-label="本期洞察">
-              <AttributionLine
-                attribution={overview.attribution}
-                previousLabel={overview.series.previous}
-              />
-              <QualityLine quality={overview.quality} />
-            </div>
-          ) : null}
         </div>
         <div className="header-actions">
           <label className="scope-select">
@@ -158,22 +164,6 @@ export function UsagePage() {
               onChange={setScope}
             />
           </label>
-          <div className="header-utility-actions" aria-label="账本操作">
-            <button
-              className="icon-button today-button"
-              type="button"
-              title={current ? "当前已经是今天" : "回到今天"}
-              aria-label={current ? "当前已经是今天" : "回到今天"}
-              disabled={current}
-              onClick={() => setAnchor(new Date())}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="4" y="5.5" width="16" height="14" rx="1.5" />
-                <path d="M8 3.5v4M16 3.5v4M4 10h16M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01" />
-              </svg>
-              <span className="sr-only">回到今天</span>
-            </button>
-          </div>
           <div className="period-control-stack">
             <div className="period-switcher" aria-label="统计周期">
               {(Object.keys(periodLabels) as PeriodKey[]).map((key) => (
@@ -202,9 +192,23 @@ export function UsagePage() {
                 ›
               </button>
             </div>
+            <button
+              className="icon-button today-button"
+              type="button"
+              title={current ? "当前已经是今天" : "回到今天"}
+              aria-label={current ? "当前已经是今天" : "回到今天"}
+              disabled={current}
+              onClick={() => setAnchor(new Date())}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="4" y="5.5" width="16" height="14" rx="1.5" />
+                <path d="M8 3.5v4M16 3.5v4M4 10h16M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01" />
+              </svg>
+              <span className="sr-only">回到今天</span>
+            </button>
           </div>
         </div>
-      </div>
+      </header>
 
       {loading ? (
         <div className="usage-loading" aria-busy="true" aria-live="polite">
@@ -216,8 +220,11 @@ export function UsagePage() {
         <>
           <section className="metric-strip" aria-label="核心用量指标">
             {overview.metrics.map((metric) => (
-              <article className="metric" key={metric.label}>
-                <div className="metric-label">{metric.label}</div>
+              <article className="metric-card" key={metric.label}>
+                <div className="metric-card-head">
+                  <span className="metric-label">{metric.label}</span>
+                  <MetricIcon label={metric.label} />
+                </div>
                 <AnimatedMetricValue className="metric-value" target={metric.value} />
                 <div className="metric-comparison">
                   {current ? metric.comparison : "历史周期明细"}
@@ -249,7 +256,29 @@ export function UsagePage() {
                 />
               )}
             </div>
-            <ModelCostBreakdown key={`cost-${dataKey}`} period={overview} />
+            <div className="usage-side">
+              <ModelCostBreakdown key={`cost-${dataKey}`} period={overview} />
+              <article className="chart-panel insight-panel" aria-label="本期洞察">
+                <header className="chart-heading">
+                  <div className="chart-heading-left">
+                    <span className="chart-badge" aria-hidden="true">
+                      <Sparkles />
+                    </span>
+                    <div className="chart-heading-text">
+                      <h2>本期洞察</h2>
+                      <span className="chart-sub">与上期对比 · 归因与质量</span>
+                    </div>
+                  </div>
+                </header>
+                <div className="insight-block">
+                  <AttributionLine
+                    attribution={overview.attribution}
+                    previousLabel={overview.series.previous}
+                  />
+                  <QualityLine quality={overview.quality} />
+                </div>
+              </article>
+            </div>
           </section>
         </>
       ) : null}
