@@ -4,7 +4,7 @@
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 1rem;
   min-width: 0;
-  padding: var(--chrome-h) var(--page-gutter-x) var(--page-gutter-y);
+  padding: var(--page-pad-top) var(--page-gutter-x) var(--page-gutter-y);
   overflow: hidden;
 }
 

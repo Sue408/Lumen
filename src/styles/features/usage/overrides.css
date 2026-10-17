@@ -82,7 +82,7 @@
   font-size: clamp(0.75rem, 0.85vw, 0.95rem);
 }
 
-.period-control-stack .today-button,
+/* Disabled look only: the enabled today-button keeps a normal pointer. */
 .today-button:disabled {
   cursor: not-allowed;
   opacity: 0.4;

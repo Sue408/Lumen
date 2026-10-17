@@ -21,10 +21,14 @@
   --radius-panel: 12px;
   --radius-pill: 999px;
   /*
-   * Height of the custom title bar. Every page reserves at least this much
-   * top padding so its header clears the window controls.
+   * Height of the custom title bar. Pages never sit flush against it: the
+   * shared top padding below adds one vertical gutter of air, so the page
+   * header — and the right-aligned toolbar inside it — keeps clear of the
+   * window controls in the top-right corner.
    */
   --chrome-h: 2.5rem;
+  /* Top padding shared by every page: chrome band + one vertical gutter. */
+  --page-pad-top: calc(var(--chrome-h) + var(--page-gutter-y));
 }
 
 /*
