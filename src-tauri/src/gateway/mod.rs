@@ -1,3 +1,4 @@
+pub mod alias;
 pub mod auth;
 pub mod body;
 pub mod convert;

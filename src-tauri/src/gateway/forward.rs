@@ -13,6 +13,7 @@ use crate::db::models::{
     contains_cache_read, PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PROTOCOL_RESPONSES,
 };
 use crate::error::{classify_reqwest, AppError, ErrorKind, LogError};
+use crate::gateway::alias::StreamRestorer;
 use crate::gateway::convert::Conversion;
 use crate::gateway::estimate::{collect_stream_delta, count_tokens, Estimates};
 use crate::gateway::headers::build_upstream_headers;
@@ -342,6 +343,10 @@ pub fn stream_response(
         let mut failure: Option<LogError> = None;
         // 已成功推送给客户端的字节数：客户端中途断开时记进错误文案，便于判断断点。
         let mut sent_bytes: u64 = 0;
+        // 回程把上游真实模型名换回客户端别名；按行攒齐再改写，块边界切开也还原得回来。
+        let mut restorer = StreamRestorer::new(meta.alias.clone());
+        // 已经给客户端发过错误项：此后再追加字节只会让响应体自相矛盾。
+        let mut errored = false;
         loop {
             let item = match timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
                 Ok(item) => item,
@@ -356,6 +361,7 @@ pub fn stream_response(
                             "上游流式响应超时",
                         )))
                         .await;
+                    errored = true;
                     break;
                 }
             };
@@ -381,6 +387,11 @@ pub fn stream_response(
                         },
                         None => bytes,
                     };
+                    let restored = restorer.push(&payload);
+                    if restored.is_empty() {
+                        continue;
+                    }
+                    let payload = Bytes::from(restored);
                     let payload_len = payload.len() as u64;
                     if tx.send(Ok(payload)).await.is_err() {
                         // 下游（客户端）提前断开：既不能记为成功，也没必要继续读上游。
@@ -397,6 +408,7 @@ pub fn stream_response(
                     let (kind, hint) = classify_reqwest(&error);
                     failure = Some(LogError::new(kind, format!("{hint}：{error}")));
                     let _ = tx.send(Err(std::io::Error::other(error.to_string()))).await;
+                    errored = true;
                     break;
                 }
             }
@@ -408,7 +420,10 @@ pub fn stream_response(
                 match conversion.finish() {
                     Ok((tail, ended)) => {
                         if !tail.is_empty() {
-                            let _ = tx.send(Ok(Bytes::from(tail))).await;
+                            let restored = restorer.push(&tail);
+                            if !restored.is_empty() {
+                                let _ = tx.send(Ok(Bytes::from(restored))).await;
+                            }
                         }
                         if !matches!(ended, Termination::Explicit | Termination::CleanClose) {
                             failure = Some(LogError::new(
@@ -439,6 +454,13 @@ pub fn stream_response(
                 ErrorKind::UpstreamTruncated,
                 "上游流未正常收尾（未见终止事件）",
             ));
+        }
+        // 不以换行结尾的尾部残留（上游截断或转换器未补行尾）也要还原后交出去。
+        if !errored {
+            let tail = restorer.finish();
+            if !tail.is_empty() {
+                let _ = tx.send(Ok(Bytes::from(tail))).await;
+            }
         }
         drop(tx);
 

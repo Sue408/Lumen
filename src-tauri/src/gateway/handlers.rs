@@ -14,6 +14,7 @@ use crate::db::models::{PROTOCOL_ANTHROPIC, PROTOCOL_GEMINI, PROTOCOL_OPENAI, PR
 use crate::db::routes::list_enabled_aliases;
 use crate::db::with_db;
 use crate::error::{classify_upstream_status, error_payload, AppError, ErrorKind, LogError};
+use crate::gateway::alias;
 use crate::gateway::auth::authenticate;
 use crate::gateway::body::JsonBody;
 use crate::gateway::convert;
@@ -868,7 +869,8 @@ async fn forward(
                         }
                     });
                     let text = match converted {
-                        Ok(text) => text,
+                        // 回程还原别名：上游按真实模型名答话，客户端只该看到自己点的别名。
+                        Ok(text) => alias::restore_model_string(text, &alias),
                         Err(error) => {
                             record_log(
                                 &state,
@@ -1691,6 +1693,8 @@ mod tests {
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["usage"]["total_tokens"], 150);
+        // 上游答的是自己的真实模型名，客户端只该看到请求时选的别名。
+        assert_eq!(value["model"], "lumen/mock");
 
         let logs = {
             let conn = db.lock().unwrap();
@@ -2332,6 +2336,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        // 跨协议转换同样只回别名：上游答的是 `claude-up`。
+        assert_eq!(value["model"], "lumen/claude");
 
         let logs = logs_by_attempt(&db);
         assert_eq!(logs.len(), 1);
@@ -2393,6 +2401,8 @@ mod tests {
         let body = String::from_utf8_lossy(&bytes);
         assert!(body.contains("\"content\":\"hi\""), "body was {body}");
         assert!(body.contains("[DONE]"), "body was {body}");
+        // 跨协议转换也不能把上游的真实模型名带回来。
+        assert!(!body.contains("claude-up"), "body was {body}");
 
         // 用量仍按上游 Anthropic 字节扫描：input 25 + output 5。
         // 日志在收流任务里异步落库，稍等片刻再读。
@@ -2401,6 +2411,43 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].status, "success");
         assert_eq!(logs[0].total_tokens, 30);
+    }
+
+    /// 同协议流式透传也要还原别名：上游每个块都回显真实模型名。
+    #[tokio::test]
+    async fn stream_passthrough_restores_client_alias() {
+        let app = axum::Router::new().route(
+            "/chat/completions",
+            axum::routing::post(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/event-stream")],
+                    "data: {\"model\":\"mock-model\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n",
+                )
+            }),
+        );
+        let base_url = serve(app).await;
+        let db = open_in_memory().unwrap();
+        seed_upstream(&db, &base_url, "openai", "lumen/mock");
+        seed_virtual_key(&db, TEST_KEY, true, None, "monthly");
+        let sink = Arc::new(MockSink::default());
+        let state = Arc::new(AppState::new(db.clone(), reqwest::Client::new(), sink, 0));
+        let router = crate::gateway::build_router(state);
+
+        let response = router
+            .oneshot(post(
+                "/v1/chat/completions",
+                json!({ "model": "lumen/mock", "stream": true, "messages": [] }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8_lossy(&bytes);
+        assert!(
+            body.contains("\"model\":\"lumen/mock\""),
+            "body was {body}"
+        );
+        assert!(!body.contains("mock-model"), "body was {body}");
     }
 
     #[tokio::test]
